@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -28,7 +28,12 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             // alt+space is the window menu on Windows and PowerToys' default.
-            hotkey: if cfg!(target_os = "macos") { "alt+space" } else { "ctrl+alt+space" }.into(),
+            hotkey: if cfg!(target_os = "macos") {
+                "alt+space"
+            } else {
+                "ctrl+alt+space"
+            }
+            .into(),
             editor: None,
             editor_args: Vec::new(),
             scan_dirs: Vec::new(),
@@ -43,14 +48,24 @@ impl Default for Config {
 pub struct Db {
     pub manual: Vec<PathBuf>,
     pub hidden: BTreeSet<PathBuf>,
+    /// Always listed first.
+    pub pinned: BTreeSet<PathBuf>,
+    /// Project path -> editors offered for it; the first is its default.
+    /// Missing = the global editor.
+    pub editors: BTreeMap<String, Vec<String>>,
     /// Project path -> unix seconds of last open.
     pub opened: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Project {
+    /// Folder name, plus the parent folder when several projects share it.
     pub name: String,
     pub path: PathBuf,
+    pub branch: Option<String>,
+    pub pinned: bool,
+    /// Per-project editors (first = default); empty = the global editor.
+    pub editors: Vec<String>,
     pub manual: bool,
     pub last_opened: u64,
 }
@@ -77,7 +92,10 @@ pub fn load_config() -> Config {
         }),
         Err(_) => {
             let config = Config::default();
-            let text = CONFIG_TEMPLATE.replace("{hotkey}", &toml::Value::String(config.hotkey.clone()).to_string());
+            let text = CONFIG_TEMPLATE.replace(
+                "{hotkey}",
+                &toml::Value::String(config.hotkey.clone()).to_string(),
+            );
             if let Err(err) = write_atomic(&path, &text) {
                 eprintln!("proj: could not write {}: {err}", path.display());
             }
@@ -192,6 +210,13 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
             .unwrap_or(0);
         projects.push(Project {
             name,
+            branch: git_branch(&path),
+            pinned: db.pinned.contains(&path),
+            editors: db
+                .editors
+                .get(path.to_string_lossy().as_ref())
+                .cloned()
+                .unwrap_or_default(),
             path,
             manual,
             last_opened,
@@ -211,12 +236,86 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         push(path, false);
     }
 
+    disambiguate(&mut projects);
     projects.sort_by(|a, b| {
-        b.last_opened
-            .cmp(&a.last_opened)
+        b.pinned
+            .cmp(&a.pinned)
+            .then_with(|| b.last_opened.cmp(&a.last_opened))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     projects
+}
+
+/// Appends the parent folder to names shared by several projects: "app (client)".
+fn disambiguate(projects: &mut [Project]) {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for project in projects.iter() {
+        *counts.entry(project.name.to_lowercase()).or_default() += 1;
+    }
+    for project in projects.iter_mut() {
+        if counts[&project.name.to_lowercase()] > 1
+            && let Some(parent) = project.path.parent().and_then(Path::file_name)
+        {
+            project.name = format!("{} ({})", project.name, parent.to_string_lossy());
+        }
+    }
+}
+
+/// Current branch (or short commit when detached), read straight from `.git/HEAD`.
+fn git_branch(path: &Path) -> Option<String> {
+    let dot_git = path.join(".git");
+    let git_dir = if dot_git.is_file() {
+        // Worktrees and submodules: ".git" is a file containing "gitdir: <path>".
+        let text = fs::read_to_string(&dot_git).ok()?;
+        path.join(text.strip_prefix("gitdir:")?.trim())
+    } else {
+        dot_git
+    };
+    let head = fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    Some(match head.strip_prefix("ref: ") {
+        Some(reference) => reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(reference)
+            .to_string(),
+        None => head.get(..7)?.to_string(),
+    })
+}
+
+/// Adds `editor` to a project's editor list. Starting a list keeps the global
+/// editor as the first choice, so the project offers both instead of silently
+/// switching away from it.
+pub fn offer_editor(list: &mut Vec<String>, editor: &str, global: Option<&str>) {
+    if list.iter().any(|c| c == editor) {
+        return;
+    }
+    if list.is_empty()
+        && let Some(global) = global.filter(|g| !g.trim().is_empty() && *g != editor)
+    {
+        list.push(global.to_string());
+    }
+    list.push(editor.to_string());
+}
+
+/// Moves (or inserts) `editor` to the front: the project's default.
+pub fn make_default_editor(list: &mut Vec<String>, editor: &str) {
+    list.retain(|c| c != editor);
+    list.insert(0, editor.to_string());
+}
+
+/// "just now", "5m ago", "3h ago", "2d ago", "3w ago", "4mo ago", "1y ago".
+pub fn ago(then: u64, now: u64) -> String {
+    let secs = now.saturating_sub(then);
+    let (value, unit) = match secs {
+        0..60 => return "just now".into(),
+        60..3_600 => (secs / 60, "m"),
+        3_600..86_400 => (secs / 3_600, "h"),
+        86_400..604_800 => (secs / 86_400, "d"),
+        604_800..2_592_000 => (secs / 604_800, "w"),
+        2_592_000..31_536_000 => (secs / 2_592_000, "mo"),
+        _ => (secs / 31_536_000, "y"),
+    };
+    format!("{value}{unit} ago")
 }
 
 fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
@@ -259,10 +358,106 @@ mod tests {
     fn editor_is_added_below_its_docs_and_replaced_in_place() {
         let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
         let added = with_editor(&template, "zed").unwrap();
-        assert!(added.ends_with("# editor_args = [\"--new-window\"]\neditor = \"zed\"\n"), "{added}");
-        assert_eq!(toml::from_str::<Config>(&added).unwrap().editor.as_deref(), Some("zed"));
+        assert!(
+            added.ends_with("# editor_args = [\"--new-window\"]\neditor = \"zed\"\n"),
+            "{added}"
+        );
+        assert_eq!(
+            toml::from_str::<Config>(&added).unwrap().editor.as_deref(),
+            Some("zed")
+        );
 
         let replaced = with_editor(&added, "code").unwrap();
         assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
+    }
+
+    #[test]
+    fn relative_time() {
+        assert_eq!(ago(100, 130), "just now");
+        assert_eq!(ago(0, 5 * 60), "5m ago");
+        assert_eq!(ago(0, 3 * 3_600), "3h ago");
+        assert_eq!(ago(0, 2 * 86_400), "2d ago");
+        assert_eq!(ago(0, 400 * 86_400), "1y ago");
+        assert_eq!(ago(200, 100), "just now");
+    }
+
+    fn project(path: &str) -> Project {
+        let path = PathBuf::from(path);
+        Project {
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+            path,
+            branch: None,
+            pinned: false,
+            editors: Vec::new(),
+            manual: true,
+            last_opened: 0,
+        }
+    }
+
+    #[test]
+    fn duplicate_names_get_parent_folder() {
+        let mut projects = [
+            project("/a/client/app"),
+            project("/a/server/App"),
+            project("/a/web"),
+        ];
+        disambiguate(&mut projects);
+        let names: Vec<_> = projects.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["app (client)", "App (server)", "web"]);
+    }
+
+    #[test]
+    fn reads_git_branch() {
+        let dir = std::env::temp_dir().join(format!("proj-test-{}", std::process::id()));
+        let repo = dir.join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::write(repo.join(".git/HEAD"), "ref: refs/heads/feature/x\n").unwrap();
+        assert_eq!(git_branch(&repo).as_deref(), Some("feature/x"));
+
+        fs::write(repo.join(".git/HEAD"), "0123456789abcdef\n").unwrap();
+        assert_eq!(git_branch(&repo).as_deref(), Some("0123456"));
+
+        // Worktree: .git is a file pointing elsewhere.
+        let worktree = dir.join("wt");
+        fs::create_dir_all(dir.join("gitdir")).unwrap();
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(dir.join("gitdir/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", dir.join("gitdir").display()),
+        )
+        .unwrap();
+        assert_eq!(git_branch(&worktree).as_deref(), Some("main"));
+
+        assert_eq!(git_branch(&dir), None);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn project_editor_lists() {
+        let mut list = Vec::new();
+        offer_editor(&mut list, "devenv", Some("zed"));
+        assert_eq!(
+            list,
+            ["zed", "devenv"],
+            "first added editor keeps the global one as default"
+        );
+        offer_editor(&mut list, "devenv", Some("zed"));
+        assert_eq!(list, ["zed", "devenv"], "no duplicates");
+
+        let mut list = Vec::new();
+        offer_editor(&mut list, "zed", Some("zed"));
+        assert_eq!(list, ["zed"]);
+
+        let mut list = Vec::new();
+        make_default_editor(&mut list, "code");
+        assert_eq!(
+            list,
+            ["code"],
+            "make default on an empty list is a plain override"
+        );
+        let mut list = vec!["zed".to_string(), "code".to_string()];
+        make_default_editor(&mut list, "code");
+        assert_eq!(list, ["code", "zed"]);
     }
 }

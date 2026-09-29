@@ -11,7 +11,19 @@ use gpui::{
 
 actions!(
     text_input,
-    [Backspace, DeleteWordLeft, Delete, Left, Right, Home, End, SelectAll, Paste, Copy, Cut]
+    [
+        Backspace,
+        DeleteWordLeft,
+        Delete,
+        Left,
+        Right,
+        Home,
+        End,
+        SelectAll,
+        Paste,
+        Copy,
+        Cut
+    ]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -70,7 +82,11 @@ impl TextInput {
         &self.content
     }
 
-    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub fn set_placeholder(
+        &mut self,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
         self.placeholder = placeholder.into();
         cx.notify();
     }
@@ -121,13 +137,20 @@ impl TextInput {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    fn delete_word_left(&mut self, _: &DeleteWordLeft, window: &mut Window, cx: &mut Context<Self>) {
+    fn delete_word_left(
+        &mut self,
+        _: &DeleteWordLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.selected_range.is_empty() {
             let before = &self.content[..self.selected_range.start];
             let trimmed = before.trim_end_matches(|c: char| !c.is_alphanumeric());
             let start = trimmed
                 .rfind(|c: char| !c.is_alphanumeric())
-                .map_or(0, |i| i + trimmed[i..].chars().next().map_or(1, char::len_utf8));
+                .map_or(0, |i| {
+                    i + trimmed[i..].chars().next().map_or(1, char::len_utf8)
+                });
             self.selected_range.start = start;
         }
         self.replace_text_in_range(None, "", window, cx);
@@ -299,8 +322,14 @@ impl EntityInputHandler for TextInput {
         let layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
-            point(bounds.left() + layout.x_for_index(range.start), bounds.top()),
-            point(bounds.left() + layout.x_for_index(range.end), bounds.bottom()),
+            point(
+                bounds.left() + layout.x_for_index(range.start),
+                bounds.top(),
+            ),
+            point(
+                bounds.left() + layout.x_for_index(range.end),
+                bounds.bottom(),
+            ),
         ))
     }
 
@@ -409,7 +438,9 @@ impl Element for TextElement {
             _ => vec![run],
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window.text_system().shape_line(text, font_size, &runs, None);
+        let line = window
+            .text_system()
+            .shape_line(text, font_size, &runs, None);
 
         let selected = input.selected_range.clone();
         let (selection, cursor) = if selected.is_empty() {
@@ -429,8 +460,14 @@ impl Element for TextElement {
         } else {
             let selection = fill(
                 Bounds::from_corners(
-                    point(bounds.left() + line.x_for_index(selected.start), bounds.top()),
-                    point(bounds.left() + line.x_for_index(selected.end), bounds.bottom()),
+                    point(
+                        bounds.left() + line.x_for_index(selected.start),
+                        bounds.top(),
+                    ),
+                    point(
+                        bounds.left() + line.x_for_index(selected.end),
+                        bounds.bottom(),
+                    ),
                 ),
                 rgba(0x74ade840),
             );

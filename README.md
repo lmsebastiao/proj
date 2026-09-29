@@ -21,12 +21,43 @@ then opens a folder picker where you can select one or more projects at once.
 | type                    | fuzzy filter by name, then by path         |
 | ↑ / ↓, ctrl-p / ctrl-n  | move selection                             |
 | enter                   | open in editor                             |
+| shift-enter             | open a terminal there (Windows Terminal if installed) |
+| alt-enter               | open with… (choose an editor for this project) |
 | ctrl-enter              | open folder in file manager                |
+| ctrl-s                  | pin / unpin (pinned projects stay on top)  |
+| ctrl-shift-c            | copy the project path                      |
 | ctrl-o                  | add projects (multi-select folder picker)  |
 | ctrl-e                  | change editor                              |
 | ctrl-d, shift-delete    | remove project                             |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
+
+Type `>` to list commands: start on login, add projects, change editor, open the config
+file, quit.
+
+### Per-project editors
+
+The global editor (ctrl-e) opens everything by default. For a single project, press
+**alt-enter** to open it with any editor. In that list:
+
+- **ctrl-s** adds or removes an editor for the project. The first time you add one, the
+  global editor is kept alongside it.
+- **ctrl-enter** makes the selected editor the project's default.
+
+What enter does on a project then depends on its editor list:
+
+| Project editors | Enter                                              |
+| --------------- | -------------------------------------------------- |
+| none            | opens with the global editor                       |
+| one             | opens with that editor                             |
+| two or more     | asks which, with the first one selected (enter twice = default) |
+
+Example: a WPF app that offers Zed and Visual Studio, and `tomi-go` that offers Zed and VS Code.
+Visual Studio is found automatically and gets the project's `.sln`/`.slnx` instead of the folder.
+The lists live in `projects.toml` under `[editors]`.
+
+Each row shows the current git branch (read from `.git/HEAD`) and when you last opened it.
+Projects that share a folder name get their parent folder added, e.g. `app (client)`.
 
 Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
 
@@ -37,6 +68,7 @@ proj add [PATH]     # add a project (default: current directory)
 proj remove PATH    # remove / hide a project
 proj list           # list projects
 proj paths          # where the config and database live
+proj autostart [on|off]  # start proj when you log in
 ```
 
 ## Configuration
@@ -66,9 +98,8 @@ around 35 MB before the first open and about 70 MB after it, mostly gpui's GPU a
 
 ## Start on login
 
-- **Windows:** put a shortcut to `proj.exe` in `shell:startup`.
-- **macOS:** System Settings → General → Login Items.
-- **Linux:** add a `.desktop` file to `~/.config/autostart`.
+Type `>` and pick **Start on login**, or run `proj autostart on`. This uses the registry Run
+key on Windows, a LaunchAgent on macOS, and `~/.config/autostart` on Linux.
 
 ## Platform notes
 

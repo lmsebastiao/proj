@@ -4,29 +4,106 @@ use std::{
     io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Mutex,
 };
 
 use crate::store::Config;
 
-/// Opens `path` with the configured editor, or the file manager if none is set.
+/// Opens `path` with the global editor, or the file manager if none is set.
 pub fn open_project(config: &Config, path: &Path) -> io::Result<()> {
-    let editor = config.editor.as_deref().unwrap_or("").trim();
+    open_with(config, config.editor.as_deref().unwrap_or(""), path)
+}
+
+/// Opens `path` with `editor` ("" = file manager). `editor_args` belong to the
+/// global editor, so they're only passed to that one.
+pub fn open_with(config: &Config, editor: &str, path: &Path) -> io::Result<()> {
+    let editor = editor.trim();
     if editor.is_empty() {
         return reveal(path);
     }
     let mut command = command_for(editor)?;
-    command.args(&config.editor_args).arg(path).current_dir(path);
+    if config.editor.as_deref().map(str::trim) == Some(editor) {
+        command.args(&config.editor_args);
+    }
+    // Visual Studio and Rider open solutions, not folders.
+    let target = if opens_solutions(editor) && path.is_dir() {
+        find_solution(path).unwrap_or_else(|| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+    command.arg(target);
+    if path.is_dir() {
+        command.current_dir(path);
+    }
     spawn(command)
 }
 
+fn opens_solutions(editor: &str) -> bool {
+    let stem = Path::new(editor)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    matches!(stem.as_str(), "devenv" | "rider" | "rider64")
+}
+
+/// A `.sln`/`.slnx` in the project root, or else one level down.
+fn find_solution(dir: &Path) -> Option<PathBuf> {
+    let solutions_in = |dir: &Path| -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().is_some_and(|e| {
+                    e.eq_ignore_ascii_case("sln") || e.eq_ignore_ascii_case("slnx")
+                })
+            })
+            .collect();
+        found.sort();
+        found
+    };
+    if let Some(solution) = solutions_in(dir).into_iter().next() {
+        return Some(solution);
+    }
+    let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        })
+        .collect();
+    subdirs.sort();
+    subdirs
+        .iter()
+        .find_map(|sub| solutions_in(sub).into_iter().next())
+}
+
+#[derive(Clone)]
 pub struct Editor {
-    pub name: &'static str,
+    pub name: String,
     /// Value stored in `config.editor`: the bare name if it's on PATH, else a full path.
     pub command: String,
 }
 
+static DETECTED: Mutex<Option<Vec<Editor>>> = Mutex::new(None);
+
+/// Cached [`detect_editors`]. `refresh` rescans, e.g. when showing the editor list.
+pub fn detected_editors(refresh: bool) -> Vec<Editor> {
+    let mut cache = DETECTED.lock().unwrap_or_else(|e| e.into_inner());
+    if refresh || cache.is_none() {
+        *cache = Some(detect_editors());
+    }
+    cache.clone().unwrap_or_default()
+}
+
 /// GUI editors found on this machine, via PATH or their usual install location.
-pub fn detect_editors() -> Vec<Editor> {
+fn detect_editors() -> Vec<Editor> {
     // (display name, CLI name, fallback locations relative to the given base dir)
     #[rustfmt::skip]
     const KNOWN: &[(&str, &str, &[&str])] = &[
@@ -77,13 +154,75 @@ pub fn detect_editors() -> Vec<Editor> {
         if let Some(command) = command
             && !found.iter().any(|e| same_program(&e.command, &command))
         {
-            found.push(Editor { name, command });
+            found.push(Editor {
+                name: name.into(),
+                command,
+            });
+        }
+    }
+    found.extend(visual_studio());
+    found
+}
+
+/// Visual Studio installs: `<Program Files>\Microsoft Visual Studio\<version>\<edition>\Common7\IDE\devenv.exe`.
+fn visual_studio() -> Vec<Editor> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for root in [
+        r"C:\Program Files\Microsoft Visual Studio",
+        r"C:\Program Files (x86)\Microsoft Visual Studio",
+    ] {
+        let mut versions: Vec<PathBuf> = std::fs::read_dir(root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        // Newest first.
+        versions.sort_by(|a, b| b.cmp(a));
+        for version in versions {
+            for edition in std::fs::read_dir(&version).into_iter().flatten().flatten() {
+                let devenv = edition.path().join(r"Common7\IDE\devenv.exe");
+                if !devenv.is_file() {
+                    continue;
+                }
+                let version = version
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                // VS 2026 installs into "18"; older releases use the year.
+                let year = if version == "18" {
+                    "2026".to_string()
+                } else {
+                    version
+                };
+                found.push(Editor {
+                    name: format!("Visual Studio {year}"),
+                    command: devenv.to_string_lossy().into_owned(),
+                });
+            }
         }
     }
     found
 }
 
-fn same_program(a: &str, b: &str) -> bool {
+/// Display name for an editor command: its detected name, else the program name.
+pub fn editor_name(command: &str, detected: &[Editor]) -> String {
+    if command.trim().is_empty() {
+        return "the file manager".into();
+    }
+    detected
+        .iter()
+        .find(|e| e.command == command)
+        .or_else(|| detected.iter().find(|e| same_program(&e.command, command)))
+        .map(|e| e.name.clone())
+        .unwrap_or_else(|| editor_label(command))
+}
+
+pub fn same_program(a: &str, b: &str) -> bool {
     let resolve = |s: &str| which(s).unwrap_or_else(|| PathBuf::from(s));
     resolve(a) == resolve(b)
 }
@@ -97,6 +236,50 @@ pub fn editor_label(command: &str) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| command.to_string())
+}
+
+/// Opens a terminal in `path`.
+pub fn open_terminal(path: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        if which("wt").is_some() {
+            let mut command = Command::new("wt");
+            command.arg("-d").arg(path);
+            return spawn(command);
+        }
+        // No Windows Terminal: a plain console, which needs its own window.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        Command::new("cmd")
+            .arg("/K")
+            .current_dir(path)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(drop)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("open");
+        command.args(["-a", "Terminal"]).arg(path);
+        spawn(command)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let terminal = [
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "alacritty",
+            "kitty",
+            "xterm",
+        ]
+        .into_iter()
+        .find(|t| which(t).is_some())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no terminal found"))?;
+        let mut command = Command::new(terminal);
+        command.current_dir(path);
+        spawn(command)
+    }
 }
 
 /// Opens `path` in the system file manager.
@@ -162,7 +345,38 @@ pub fn which(program: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?).find_map(|dir| {
         exts.iter().find_map(|ext| {
             let path = dir.join(format!("{program}{ext}"));
-            path.is_file().then_some(path)
+            // symlink_metadata: Windows app aliases (wt.exe in WindowsApps) are
+            // reparse points that `is_file()` can't follow.
+            path.symlink_metadata()
+                .is_ok_and(|m| !m.is_dir())
+                .then_some(path)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn solution_detection() {
+        assert!(opens_solutions(
+            r"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.exe"
+        ));
+        assert!(!opens_solutions("zed"));
+
+        let dir = std::env::temp_dir().join(format!("proj-sln-{}", std::process::id()));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        assert_eq!(find_solution(&dir), None);
+        fs::write(dir.join("src/App.slnx"), "").unwrap();
+        assert_eq!(find_solution(&dir), Some(dir.join("src/App.slnx")));
+        fs::write(dir.join("Root.sln"), "").unwrap();
+        assert_eq!(
+            find_solution(&dir),
+            Some(dir.join("Root.sln")),
+            "root wins over subfolders"
+        );
+        fs::remove_dir_all(dir).ok();
+    }
 }

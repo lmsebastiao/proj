@@ -4,6 +4,23 @@ version = "0.1.0"
 edition = "2024"
 description = "Always-running project launcher with a Raycast-style search dialog"
 
+[workspace.lints.clippy]
+all = "deny"
+
+pedantic = { level = "deny", priority = -1 }
+
+borrow_as_ptr = "deny"
+elidable_lifetime_names = "deny"
+explicit_iter_loop = "deny"
+manual_assert = "deny"
+manual_let_else = "deny"
+redundant_clone = "deny"
+ref_option = "deny"
+semicolon_if_nothing_returned = "deny"
+uninlined_format_args = "deny"
+unnecessary_wraps = "deny"
+unnested_or_patterns = "deny"
+
 [dependencies]
 async-channel = "2"
 dirs = "7.0.0"
@@ -21,6 +38,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Console",
     "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
     "Win32_System_Threading",
 ] }
 

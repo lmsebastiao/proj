@@ -68,7 +68,8 @@ fn score_positions(positions: &[usize], chars: &[(usize, char)], len: usize) -> 
 }
 
 fn is_boundary(prev: char, cur: char) -> bool {
-    matches!(prev, '-' | '_' | ' ' | '.' | '/' | '\\') || (prev.is_lowercase() && cur.is_uppercase())
+    matches!(prev, '-' | '_' | ' ' | '.' | '/' | '\\')
+        || (prev.is_lowercase() && cur.is_uppercase())
 }
 
 #[cfg(test)]

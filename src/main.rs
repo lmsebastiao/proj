@@ -1,6 +1,7 @@
 // No console window for the background launcher on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod autostart;
 mod fuzzy;
 mod input;
 mod open;
@@ -33,11 +34,12 @@ const USAGE: &str = "\
 proj - project launcher
 
 usage:
-  proj                 run the launcher in the background
-  proj add [PATH]      add a project (defaults to the current directory)
-  proj remove PATH     remove / hide a project
-  proj list            list known projects
-  proj paths           show config and database locations";
+  proj                     run the launcher in the background
+  proj add [PATH]          add a project (defaults to the current directory)
+  proj remove PATH         remove / hide a project
+  proj list                list known projects
+  proj paths               show config and database locations
+  proj autostart [on|off]  start proj when you log in";
 
 fn run_cli(args: &[String]) -> i32 {
     let config = store::load_config();
@@ -70,6 +72,8 @@ fn run_cli(args: &[String]) -> i32 {
             } else {
                 db.hidden.insert(path.clone());
             }
+            db.pinned.remove(&path);
+            db.editors.remove(path.to_string_lossy().as_ref());
             db.opened.remove(path.to_string_lossy().as_ref());
             println!("removed {}", path.display());
         }
@@ -77,6 +81,24 @@ fn run_cli(args: &[String]) -> i32 {
             for project in store::collect(&config, &db) {
                 println!("{:<32} {}", project.name, project.path.display());
             }
+            return 0;
+        }
+        "autostart" => {
+            let result = match args.get(1).map(String::as_str) {
+                Some("on") => autostart::set(true),
+                Some("off") => autostart::set(false),
+                None => Ok(()),
+                Some(_) => {
+                    eprintln!("usage: proj autostart [on|off]");
+                    return 2;
+                }
+            };
+            if let Err(err) = result {
+                eprintln!("proj: {err}");
+                return 1;
+            }
+            let state = if autostart::is_enabled() { "on" } else { "off" };
+            println!("start on login: {state}");
             return 0;
         }
         "paths" => {
@@ -140,6 +162,8 @@ fn run_launcher() {
         }
 
         palette::bind_keys(cx);
+        // Finds installed editors off the main thread so the first open is instant.
+        std::thread::spawn(|| open::detected_editors(false));
         cx.set_global(PaletteWindow::default());
 
         let anchor = cx.open_window(
@@ -165,7 +189,9 @@ fn run_launcher() {
 
         cx.on_window_closed(|cx| {
             cx.spawn(async |cx| {
-                cx.background_executor().timer(Duration::from_millis(500)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
                 trim_memory();
             })
             .detach();
@@ -199,7 +225,9 @@ fn run_launcher() {
 
 fn toggle_palette(cx: &mut App) {
     if let Some(handle) = open_palette(cx) {
-        handle.update(cx, |_, window, _| window.remove_window()).ok();
+        handle
+            .update(cx, |_, window, _| window.remove_window())
+            .ok();
         cx.global_mut::<PaletteWindow>().0 = None;
         return;
     }
@@ -283,7 +311,9 @@ fn attach_console() {
 fn trim_memory() {
     #[cfg(windows)]
     unsafe {
-        use windows_sys::Win32::System::{ProcessStatus::K32EmptyWorkingSet, Threading::GetCurrentProcess};
+        use windows_sys::Win32::System::{
+            ProcessStatus::K32EmptyWorkingSet, Threading::GetCurrentProcess,
+        };
         K32EmptyWorkingSet(GetCurrentProcess());
     }
 }

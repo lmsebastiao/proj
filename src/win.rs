@@ -5,7 +5,9 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::rc::Rc;
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, POINT, RECT},
-    Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromPoint},
+    Graphics::Gdi::{
+        EnumDisplayMonitors, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
+    },
     UI::WindowsAndMessaging::{
         GetCursorPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos,
     },
@@ -22,7 +24,12 @@ pub fn display_under_cursor(cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
         MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST)
     };
     let mut monitors: Vec<HMONITOR> = Vec::new();
-    unsafe extern "system" fn collect(monitor: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> i32 {
+    unsafe extern "system" fn collect(
+        monitor: HMONITOR,
+        _: HDC,
+        _: *mut RECT,
+        data: LPARAM,
+    ) -> i32 {
         unsafe { (*(data as *mut Vec<HMONITOR>)).push(monitor) };
         1
     }
