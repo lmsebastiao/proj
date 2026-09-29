@@ -11,29 +11,37 @@ use crate::store::Config;
 
 /// Opens `path` with the global editor, or the file manager if none is set.
 pub fn open_project(config: &Config, path: &Path) -> io::Result<()> {
-    open_with(config, config.editor.as_deref().unwrap_or(""), path)
+    open_with(config, config.editor.as_deref().unwrap_or(""), &[path.to_path_buf()])
 }
 
-/// Opens `path` with `editor` ("" = file manager). `editor_args` belong to the
+/// Opens `paths` with `editor` ("" = file manager). Several paths open as one
+/// window in editors that support it (Zed, VS Code). `editor_args` belong to the
 /// global editor, so they're only passed to that one.
-pub fn open_with(config: &Config, editor: &str, path: &Path) -> io::Result<()> {
+pub fn open_with(config: &Config, editor: &str, paths: &[PathBuf]) -> io::Result<()> {
+    let Some(first) = paths.first() else {
+        return Ok(());
+    };
     let editor = editor.trim();
     if editor.is_empty() {
-        return reveal(path);
+        return reveal(first);
     }
     let mut command = command_for(editor)?;
     if config.editor.as_deref().map(str::trim) == Some(editor) {
         command.args(&config.editor_args);
     }
-    // Visual Studio and Rider open solutions, not folders.
-    let target = if opens_solutions(editor) && path.is_dir() {
-        find_solution(path).unwrap_or_else(|| path.to_path_buf())
+    if opens_solutions(editor) {
+        // Visual Studio and Rider open one solution, not folders.
+        let solution = first
+            .is_dir()
+            .then(|| find_solution(first))
+            .flatten()
+            .unwrap_or_else(|| first.clone());
+        command.arg(solution);
     } else {
-        path.to_path_buf()
-    };
-    command.arg(target);
-    if path.is_dir() {
-        command.current_dir(path);
+        command.args(paths);
+    }
+    if first.is_dir() {
+        command.current_dir(first);
     }
     spawn(command)
 }

@@ -23,6 +23,7 @@ then opens a folder picker where you can select one or more projects at once.
 | enter                   | open in editor                             |
 | shift-enter             | open a terminal there (Windows Terminal if installed) |
 | alt-enter               | open with… (choose an editor for this project) |
+| tab                     | mark projects to open together in one window |
 | ctrl-enter              | open folder in file manager                |
 | ctrl-s                  | pin / unpin (pinned projects stay on top)  |
 | ctrl-shift-c            | copy the project path                      |
@@ -34,6 +35,17 @@ then opens a folder picker where you can select one or more projects at once.
 
 Type `>` to list commands: start on login, add projects, change editor, open the config
 file, quit.
+
+### Opening projects together
+
+Press **tab** on a project to mark it; marks stay while you change the search. Then press
+**enter** to open all the marked projects in one editor window. For example: type `inter`,
+tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Code works the same way.
+Esc clears the marks.
+
+The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
+history, pin and editor list, so next time you just search for it. Removing it with ctrl-d
+forgets the combination, not the projects. Folders are passed in the order you marked them.
 
 ### Per-project editors
 

@@ -24,6 +24,7 @@ actions!(
         Reveal,
         OpenTerminal,
         OpenWithMenu,
+        ToggleMark,
         TogglePin,
         CopyPath,
         Remove,
@@ -40,7 +41,6 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("down", SelectNext, ctx),
         KeyBinding::new("ctrl-n", SelectNext, ctx),
-        KeyBinding::new("tab", SelectNext, ctx),
         KeyBinding::new("up", SelectPrev, ctx),
         KeyBinding::new("ctrl-p", SelectPrev, ctx),
         KeyBinding::new("shift-tab", SelectPrev, ctx),
@@ -48,6 +48,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-enter", Reveal, ctx),
         KeyBinding::new("shift-enter", OpenTerminal, ctx),
         KeyBinding::new("alt-enter", OpenWithMenu, ctx),
+        KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("secondary-s", TogglePin, ctx),
         KeyBinding::new("secondary-shift-c", CopyPath, ctx),
         KeyBinding::new("secondary-d", Remove, ctx),
@@ -138,8 +139,10 @@ pub struct Palette {
     editors: Vec<EditorOption>,
     /// Editor command -> display name.
     names: HashMap<String, String>,
-    /// The project being opened in `Mode::OpenWith`.
-    open_with: Option<PathBuf>,
+    /// Key of the entry being opened in `Mode::OpenWith`.
+    open_with: Option<String>,
+    /// Projects marked with tab, to open together as one workspace.
+    marked: Vec<PathBuf>,
     autostart: bool,
     matches: Vec<Match>,
     selected: usize,
@@ -181,6 +184,7 @@ impl Palette {
             editors: Vec::new(),
             names: HashMap::new(),
             open_with: None,
+            marked: Vec::new(),
             autostart: autostart::is_enabled(),
             matches: Vec::new(),
             selected: 0,
@@ -295,8 +299,8 @@ impl Palette {
     }
 
     fn open_with_project(&self) -> Option<&Project> {
-        let path = self.open_with.as_ref()?;
-        self.projects.iter().find(|p| &p.path == path)
+        let key = self.open_with.as_ref()?;
+        self.projects.iter().find(|p| &p.key() == key)
     }
 
     /// Title and subtitle of an item in the current list.
@@ -304,7 +308,9 @@ impl Palette {
         match self.list() {
             List::Projects => {
                 let project = &self.projects[ix];
-                (project.name.clone(), store::display_path(&project.path))
+                let paths: Vec<String> =
+                    project.paths().iter().map(|p| store::display_path(p)).collect();
+                (project.name.clone(), paths.join(" + "))
             }
             List::Editors | List::OpenWith => match &self.editors[ix] {
                 EditorOption::Detected(editor) => {
@@ -486,7 +492,13 @@ impl Palette {
         self.add_candidate = (list == List::Projects && looks_like_path(&query))
             .then(|| store::normalize(&query))
             .flatten()
-            .filter(|path| path.is_dir() && !self.projects.iter().any(|p| &p.path == path));
+            .filter(|path| {
+                path.is_dir()
+                    && !self
+                        .projects
+                        .iter()
+                        .any(|p| !p.is_workspace() && &p.path == path)
+            });
 
         self.selected = 0;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
@@ -544,28 +556,62 @@ impl Palette {
             List::Commands => self.run_command(COMMANDS[ix], window, cx),
             List::Projects => match self.add_candidate.take() {
                 Some(path) => self.add_paths(vec![path], cx),
-                None => self.open_default(window, cx),
+                None => {
+                    let entry = if self.marked.len() > 1 {
+                        self.marked_workspace(cx)
+                    } else {
+                        self.selected_project().cloned()
+                    };
+                    if let Some(entry) = entry {
+                        self.open_entry(entry, window, cx);
+                    }
+                }
             },
         }
     }
 
-    /// Enter on a project: its only editor, the global one, or ask when it has several.
-    fn open_default(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Tab: mark/unmark the selected project for opening together, then move down.
+    fn toggle_mark(&mut self, cx: &mut Context<Self>) {
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
+        if project.is_workspace() {
+            self.status = Some("Workspaces can't be combined further".into());
+            cx.notify();
+            return;
+        }
+        match self.marked.iter().position(|p| p == &project.path) {
+            Some(pos) => {
+                self.marked.remove(pos);
+            }
+            None => self.marked.push(project.path.clone()),
+        }
+        self.select(1, cx);
+    }
+
+    /// Saves the marked projects as a workspace (reusing it if it exists) and returns it.
+    fn marked_workspace(&mut self, cx: &mut Context<Self>) -> Option<Project> {
+        let paths = std::mem::take(&mut self.marked);
+        let key = store::remember_workspace(&mut self.db, paths);
+        self.save(cx);
+        self.reload_projects();
+        self.projects.iter().find(|p| p.key() == key).cloned()
+    }
+
+    /// Enter on an entry: its only editor, the global one, or ask when it has several.
+    fn open_entry(&mut self, project: Project, window: &mut Window, cx: &mut Context<Self>) {
         match project.editors.as_slice() {
             [] => {
                 let editor = self.config.editor.clone().unwrap_or_default();
                 self.launch(&project, Target::Editor(editor), window, cx);
             }
             [only] => self.launch(&project, Target::Editor(only.clone()), window, cx),
-            _ => self.show_open_with(project.path, cx),
+            _ => self.show_open_with(project.key(), cx),
         }
     }
 
-    fn show_open_with(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.open_with = Some(path);
+    fn show_open_with(&mut self, key: String, cx: &mut Context<Self>) {
+        self.open_with = Some(key);
         self.set_mode(Mode::OpenWith, cx);
     }
 
@@ -583,15 +629,13 @@ impl Palette {
         cx: &mut Context<Self>,
     ) {
         let result = match &target {
-            Target::Editor(editor) => open::open_with(&self.config, editor, &project.path),
+            Target::Editor(editor) => open::open_with(&self.config, editor, &project.paths()),
             Target::FileManager => open::reveal(&project.path),
             Target::Terminal => open::open_terminal(&project.path),
         };
         match result {
             Ok(()) => {
-                self.db
-                    .opened
-                    .insert(project.path.to_string_lossy().into_owned(), store::now());
+                self.db.opened.insert(project.key(), store::now());
                 self.save(cx);
                 window.remove_window();
             }
@@ -627,7 +671,9 @@ impl Palette {
                 self.pick(options, window, cx, move |this, paths, window, cx| {
                     if let Some(path) = paths.into_iter().next() {
                         let command = path.to_string_lossy().into_owned();
-                        this.edit_project_editors(&project.path, |list| list.push(command.clone()));
+                        this.edit_project_editors(&project.key(), |list| {
+                            list.push(command.clone())
+                        });
                         this.launch(&project, Target::Editor(command), window, cx);
                     }
                 });
@@ -636,7 +682,7 @@ impl Palette {
         }
     }
 
-    /// Ctrl-S in Open-with: add/remove the selected editor for this project.
+    /// Ctrl-S in Open-with: add/remove the selected editor for this entry.
     fn toggle_project_editor(&mut self, cx: &mut Context<Self>) {
         let (Some(project), Some(editor)) = (
             self.open_with_project().cloned(),
@@ -646,7 +692,7 @@ impl Palette {
         };
         let global = self.config.editor.clone();
         let removing = project.editors.contains(&editor.command);
-        self.edit_project_editors(&project.path, |list| {
+        self.edit_project_editors(&project.key(), |list| {
             if removing {
                 list.retain(|c| c != &editor.command);
             } else {
@@ -656,16 +702,12 @@ impl Palette {
         let status = if removing {
             format!("Removed {} from {}", editor.name, project.name)
         } else {
-            format!(
-                "{} now offers {}",
-                project.name,
-                self.editor_list(&project.path)
-            )
+            format!("{} now offers {}", project.name, self.editor_list(&project.key()))
         };
         self.refresh_open_with(&editor.command, status, cx);
     }
 
-    /// Ctrl-Enter in Open-with: make the selected editor this project's default.
+    /// Ctrl-Enter in Open-with: make the selected editor this entry's default.
     fn make_project_default(&mut self, cx: &mut Context<Self>) {
         let (Some(project), Some(editor)) = (
             self.open_with_project().cloned(),
@@ -673,23 +715,18 @@ impl Palette {
         ) else {
             return;
         };
-        self.edit_project_editors(&project.path, |list| {
+        self.edit_project_editors(&project.key(), |list| {
             store::make_default_editor(list, &editor.command)
         });
         let status = format!("{} opens {} by default", editor.name, project.name);
         self.refresh_open_with(&editor.command, status, cx);
     }
 
-    fn edit_project_editors(
-        &mut self,
-        path: &std::path::Path,
-        edit: impl FnOnce(&mut Vec<String>),
-    ) {
-        let key = path.to_string_lossy().into_owned();
-        let list = self.db.editors.entry(key.clone()).or_default();
+    fn edit_project_editors(&mut self, key: &str, edit: impl FnOnce(&mut Vec<String>)) {
+        let list = self.db.editors.entry(key.to_string()).or_default();
         edit(list);
         if list.is_empty() {
-            self.db.editors.remove(&key);
+            self.db.editors.remove(key);
         }
         if let Err(err) = store::save_db(&self.db) {
             self.status = Some(format!("Could not save: {err}").into());
@@ -697,10 +734,10 @@ impl Palette {
         self.reload_projects();
     }
 
-    fn editor_list(&self, path: &std::path::Path) -> String {
+    fn editor_list(&self, key: &str) -> String {
         self.projects
             .iter()
-            .find(|p| p.path == path)
+            .find(|p| p.key() == key)
             .map(|p| {
                 p.editors
                     .iter()
@@ -725,26 +762,30 @@ impl Palette {
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
+        let key = project.key();
         let pinned = !project.pinned;
         if pinned {
-            self.db.pinned.insert(project.path.clone());
+            self.db.pinned.insert(key.clone());
         } else {
-            self.db.pinned.remove(&project.path);
+            self.db.pinned.remove(&key);
         }
         self.save(cx);
         self.reload_projects();
         self.refilter(cx);
-        // Keep the selection on the same project after re-sorting.
-        self.select_where(|this, ix| this.projects[ix].path == project.path);
+        // Keep the selection on the same entry after re-sorting.
+        self.select_where(|this, ix| this.projects[ix].key() == key);
         let verb = if pinned { "Pinned" } else { "Unpinned" };
         self.status = Some(format!("{verb} {}", project.name).into());
     }
 
     fn copy_path(&mut self, _: &CopyPath, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(project) = self.selected_project() {
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                project.path.to_string_lossy().into_owned(),
-            ));
+            let paths: Vec<String> = project
+                .paths()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            cx.write_to_clipboard(ClipboardItem::new_string(paths.join("\n")));
             window.remove_window();
         }
     }
@@ -753,17 +794,10 @@ impl Palette {
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
-        if project.manual {
-            self.db.manual.retain(|p| p != &project.path);
-        } else {
-            self.db.hidden.insert(project.path.clone());
-        }
-        let key = project.path.to_string_lossy().into_owned();
-        self.db.pinned.remove(&project.path);
-        self.db.editors.remove(&key);
-        self.db.opened.remove(&key);
+        store::forget_entry(&mut self.db, &project);
         self.save(cx);
-        self.projects.retain(|p| p.path != project.path);
+        let key = project.key();
+        self.projects.retain(|p| p.key() != key);
         let selected = self.selected;
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));
@@ -927,9 +961,13 @@ impl Palette {
         match self.list() {
             List::Commands => self.set_query("", cx),
             List::OpenWith => {
-                let path = self.open_with.clone();
+                let key = self.open_with.clone();
                 self.set_mode(Mode::Projects, cx);
-                self.select_where(|this, ix| Some(&this.projects[ix].path) == path.as_ref());
+                self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
+            }
+            List::Projects if !self.marked.is_empty() => {
+                self.marked.clear();
+                cx.notify();
             }
             List::Editors if self.config.editor.is_some() => self.set_mode(Mode::Projects, cx),
             _ => window.remove_window(),
@@ -959,6 +997,34 @@ impl Palette {
             .map(|r| (r, highlight))
             .collect();
         let pinned = self.list() == List::Projects && self.projects[m.ix].pinned;
+        // While marking, single projects get a numbered check box (the order is the
+        // folder order in the workspace).
+        let mark = (self.list() == List::Projects
+            && !self.marked.is_empty()
+            && !self.projects[m.ix].is_workspace())
+        .then(|| {
+            let position = self
+                .marked
+                .iter()
+                .position(|p| p == &self.projects[m.ix].path);
+            div()
+                .flex_none()
+                .size(px(16.))
+                .rounded_sm()
+                .border_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .map(|d| match position {
+                    Some(i) => d
+                        .bg(rgb(ACCENT))
+                        .border_color(rgb(ACCENT))
+                        .text_color(rgb(BG))
+                        .child((i + 1).to_string()),
+                    None => d.border_color(rgb(MUTED)),
+                })
+        });
 
         // uniform_list lays each row out on its own, so both levels need an explicit width.
         div().w_full().px_2().child(
@@ -978,6 +1044,7 @@ impl Palette {
                     this.selected = row;
                     this.confirm(&Confirm, window, cx);
                 }))
+                .children(mark)
                 .child(
                     div()
                         .flex_1()
@@ -1198,10 +1265,16 @@ impl Render for Palette {
         };
         let m = secondary();
         let hints: Vec<_> = match self.list() {
+            List::Projects if !self.marked.is_empty() => vec![
+                hint("↵".into(), if self.marked.len() > 1 { "open together" } else { "open" }),
+                hint("alt-↵".into(), "open with"),
+                hint("tab".into(), "mark"),
+                hint("esc".into(), "clear"),
+            ],
             List::Projects => vec![
                 hint("↵".into(), "open"),
                 hint("alt-↵".into(), "open with"),
-                hint("shift-↵".into(), "terminal"),
+                hint("tab".into(), "combine"),
                 hint(format!("{m}-s"), "pin"),
                 hint(">".into(), "commands"),
             ],
@@ -1239,6 +1312,21 @@ impl Render for Palette {
                     .text_ellipsis()
                     .text_color(rgb(ACCENT))
                     .child(status.clone()),
+                (None, List::Projects) if !self.marked.is_empty() => {
+                    let names: Vec<String> = self
+                        .marked
+                        .iter()
+                        .filter_map(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .collect();
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_color(rgb(ACCENT))
+                        .child(names.join(" + "))
+                }
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
                 (None, _) => div(),
             })
@@ -1260,11 +1348,16 @@ impl Render for Palette {
                 this.open_selected(Target::Terminal, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
-                if let Some(project) = this.selected_project() {
-                    let path = project.path.clone();
-                    this.show_open_with(path, cx);
+                let entry = if this.marked.len() > 1 {
+                    this.marked_workspace(cx)
+                } else {
+                    this.selected_project().cloned()
+                };
+                if let Some(entry) = entry {
+                    this.show_open_with(entry.key(), cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(cx)))
             .on_action(cx.listener(|this, _: &TogglePin, _, cx| match this.list() {
                 List::OpenWith => this.toggle_project_editor(cx),
                 _ => this.toggle_pin(cx),

@@ -43,31 +43,63 @@ impl Default for Config {
 }
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
+///
+/// `pinned`, `editors` and `opened` are keyed by [`Project::key`]: the folder path for a
+/// project, or all folder paths joined with `|` for a workspace.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Db {
     pub manual: Vec<PathBuf>,
     pub hidden: BTreeSet<PathBuf>,
+    /// Multi-folder workspaces, remembered when projects are opened together.
+    pub workspaces: Vec<Vec<PathBuf>>,
     /// Always listed first.
-    pub pinned: BTreeSet<PathBuf>,
-    /// Project path -> editors offered for it; the first is its default.
+    pub pinned: BTreeSet<String>,
+    /// Entry -> editors offered for it; the first is its default.
     /// Missing = the global editor.
     pub editors: BTreeMap<String, Vec<String>>,
-    /// Project path -> unix seconds of last open.
+    /// Entry -> unix seconds of last open.
     pub opened: BTreeMap<String, u64>,
 }
 
+/// A list entry: a project folder, or a workspace of several folders opened together.
 #[derive(Debug, Clone)]
 pub struct Project {
-    /// Folder name, plus the parent folder when several projects share it.
+    /// Folder name (plus its parent when several projects share it), or
+    /// "a + b" for a workspace.
     pub name: String,
+    /// The folder, or a workspace's first folder.
     pub path: PathBuf,
+    /// A workspace's other folders.
+    pub extra: Vec<PathBuf>,
     pub branch: Option<String>,
     pub pinned: bool,
-    /// Per-project editors (first = default); empty = the global editor.
+    /// Editors offered for this entry (first = default); empty = the global editor.
     pub editors: Vec<String>,
     pub manual: bool,
     pub last_opened: u64,
+}
+
+impl Project {
+    pub fn is_workspace(&self) -> bool {
+        !self.extra.is_empty()
+    }
+
+    pub fn paths(&self) -> Vec<PathBuf> {
+        std::iter::once(self.path.clone()).chain(self.extra.iter().cloned()).collect()
+    }
+
+    pub fn key(&self) -> String {
+        entry_key(&self.paths())
+    }
+}
+
+pub fn entry_key(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn app_dir(base: Option<PathBuf>) -> PathBuf {
@@ -195,45 +227,51 @@ pub fn normalize(input: &str) -> Option<PathBuf> {
 pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     let mut seen = HashSet::new();
     let mut projects = Vec::new();
-    let mut push = |path: PathBuf, manual: bool| {
-        if db.hidden.contains(&path) || !seen.insert(path.clone()) {
+    let mut push = |paths: Vec<PathBuf>, name: String, manual: bool| {
+        let key = entry_key(&paths);
+        if !seen.insert(key.clone()) {
             return;
         }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string_lossy().into_owned());
-        let last_opened = db
-            .opened
-            .get(path.to_string_lossy().as_ref())
-            .copied()
-            .unwrap_or(0);
+        let mut paths = paths.into_iter();
+        let path = paths.next().expect("at least one folder");
         projects.push(Project {
             name,
             branch: git_branch(&path),
-            pinned: db.pinned.contains(&path),
-            editors: db
-                .editors
-                .get(path.to_string_lossy().as_ref())
-                .cloned()
-                .unwrap_or_default(),
+            pinned: db.pinned.contains(&key),
+            editors: db.editors.get(&key).cloned().unwrap_or_default(),
+            last_opened: db.opened.get(&key).copied().unwrap_or(0),
             path,
+            extra: paths.collect(),
             manual,
-            last_opened,
         });
     };
+    let folder_name = |path: &Path| {
+        path.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned())
+    };
 
-    for path in &db.manual {
-        if path.is_dir() {
-            push(path.clone(), true);
-        }
-    }
+    let mut folders: Vec<(PathBuf, bool)> = db
+        .manual
+        .iter()
+        .filter(|p| p.is_dir())
+        .map(|p| (p.clone(), true))
+        .collect();
     let mut scanned = Vec::new();
     for dir in &config.scan_dirs {
         scan(dir, config.scan_depth.max(1), &mut scanned);
     }
-    for path in scanned {
-        push(path, false);
+    folders.extend(scanned.into_iter().map(|p| (p, false)));
+    for (path, manual) in folders {
+        if !db.hidden.contains(&path) {
+            push(vec![path.clone()], folder_name(&path), manual);
+        }
+    }
+    for workspace in &db.workspaces {
+        if workspace.len() > 1 && workspace.iter().all(|p| p.is_dir()) {
+            let name = workspace.iter().map(|p| folder_name(p)).collect::<Vec<_>>().join(" + ");
+            push(workspace.clone(), name, true);
+        }
     }
 
     disambiguate(&mut projects);
@@ -249,16 +287,40 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
 /// Appends the parent folder to names shared by several projects: "app (client)".
 fn disambiguate(projects: &mut [Project]) {
     let mut counts: HashMap<String, usize> = HashMap::new();
-    for project in projects.iter() {
+    for project in projects.iter().filter(|p| !p.is_workspace()) {
         *counts.entry(project.name.to_lowercase()).or_default() += 1;
     }
-    for project in projects.iter_mut() {
+    for project in projects.iter_mut().filter(|p| !p.is_workspace()) {
         if counts[&project.name.to_lowercase()] > 1
             && let Some(parent) = project.path.parent().and_then(Path::file_name)
         {
             project.name = format!("{} ({})", project.name, parent.to_string_lossy());
         }
     }
+}
+
+/// Saves a set of folders opened together as a workspace, returning its key.
+pub fn remember_workspace(db: &mut Db, paths: Vec<PathBuf>) -> String {
+    let key = entry_key(&paths);
+    if !db.workspaces.contains(&paths) {
+        db.workspaces.push(paths);
+    }
+    key
+}
+
+/// Forgets a workspace and everything keyed by it.
+pub fn forget_entry(db: &mut Db, project: &Project) {
+    let key = project.key();
+    if project.is_workspace() {
+        db.workspaces.retain(|w| entry_key(w) != key);
+    } else if project.manual {
+        db.manual.retain(|p| p != &project.path);
+    } else {
+        db.hidden.insert(project.path.clone());
+    }
+    db.pinned.remove(&key);
+    db.editors.remove(&key);
+    db.opened.remove(&key);
 }
 
 /// Current branch (or short commit when detached), read straight from `.git/HEAD`.
@@ -386,6 +448,7 @@ mod tests {
         Project {
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             path,
+            extra: Vec::new(),
             branch: None,
             pinned: false,
             editors: Vec::new(),
@@ -459,5 +522,37 @@ mod tests {
         let mut list = vec!["zed".to_string(), "code".to_string()];
         make_default_editor(&mut list, "code");
         assert_eq!(list, ["code", "zed"]);
+    }
+
+    #[test]
+    fn workspaces_are_listed_remembered_and_forgotten() {
+        let dir = std::env::temp_dir().join(format!("proj-ws-{}", std::process::id()));
+        let (app, sdk) = (dir.join("interactive-v2"), dir.join("shared-sdk"));
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&sdk).unwrap();
+        let config = Config::default();
+        let mut db = Db {
+            manual: vec![app.clone(), sdk.clone()],
+            ..Db::default()
+        };
+
+        let key = remember_workspace(&mut db, vec![app.clone(), sdk.clone()]);
+        assert_eq!(remember_workspace(&mut db, vec![app.clone(), sdk.clone()]), key);
+        assert_eq!(db.workspaces.len(), 1, "opening the same pair again reuses it");
+        db.opened.insert(key.clone(), 10);
+
+        let projects = collect(&config, &db);
+        assert_eq!(projects.len(), 3);
+        let workspace = &projects[0];
+        assert_eq!(workspace.name, "interactive-v2 + shared-sdk");
+        assert_eq!(workspace.paths(), [app.clone(), sdk.clone()]);
+        assert_eq!(workspace.key(), key);
+        assert!(workspace.is_workspace());
+
+        // Removing the workspace leaves both projects alone.
+        forget_entry(&mut db, workspace);
+        assert!(db.workspaces.is_empty() && !db.opened.contains_key(&key));
+        assert_eq!(collect(&config, &db).len(), 2);
+        fs::remove_dir_all(dir).ok();
     }
 }

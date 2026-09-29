@@ -72,9 +72,10 @@ fn run_cli(args: &[String]) -> i32 {
             } else {
                 db.hidden.insert(path.clone());
             }
-            db.pinned.remove(&path);
-            db.editors.remove(path.to_string_lossy().as_ref());
-            db.opened.remove(path.to_string_lossy().as_ref());
+            let key = path.to_string_lossy();
+            db.pinned.remove(key.as_ref());
+            db.editors.remove(key.as_ref());
+            db.opened.remove(key.as_ref());
             println!("removed {}", path.display());
         }
         "list" | "ls" => {
