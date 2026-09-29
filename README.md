@@ -1,0 +1,70 @@
+# proj
+
+A project launcher that runs in the background: press a global shortcut, fuzzy-search your
+projects, hit enter to open one in your editor. Built with [gpui](https://crates.io/crates/gpui).
+
+## Usage
+
+```sh
+cargo build --release
+proj            # start the launcher in the background
+```
+
+Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog.
+
+| Key                     | Action                                   |
+| ----------------------- | ---------------------------------------- |
+| type                    | fuzzy filter by name, then by path       |
+| ↑ / ↓, ctrl-p / ctrl-n  | move selection                           |
+| enter                   | open in editor                           |
+| ctrl-enter              | open folder in file manager              |
+| ctrl-d, shift-delete    | remove (manual) / hide (scanned) project |
+| esc, clicking elsewhere | close                                    |
+| ctrl-q                  | quit the launcher                        |
+
+Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
+
+CLI:
+
+```sh
+proj add [PATH]     # add a project (default: current directory)
+proj remove PATH    # remove / hide a project
+proj list           # list projects
+proj paths          # where the config and database live
+```
+
+## Configuration
+
+`config.toml` (see `proj paths`) is created on first run. It picks existing folders from
+`~/repos`, `~/Projects`, `~/dev`, `~/code`, `~/src` and `~/git`, and uses `zed`, `code` or `subl`
+as the editor if one is found on PATH.
+
+```toml
+hotkey = "ctrl+alt+space"
+editor = "zed"          # empty = system file manager
+editor_args = []        # e.g. ["-n"] for a new window
+scan_dirs = ['C:\Users\me\repos']
+scan_depth = 1          # >1 descends into non-git folders
+```
+
+Config and folder scans are re-read every time the dialog opens, so changes apply immediately.
+Changing the hotkey is the exception: that needs a restart.
+Manually added projects, hidden projects and open history live in `projects.toml`.
+
+## Memory
+
+The dialog window is destroyed when it closes. On Windows the process then trims its working
+set, so it sits at about 1–3 MB of working set while idle. Committed memory stays higher,
+around 35 MB before the first open and about 70 MB after it, mostly gpui's GPU and font state.
+
+## Start on login
+
+- **Windows:** put a shortcut to `proj.exe` in `shell:startup`.
+- **macOS:** System Settings → General → Login Items.
+- **Linux:** add a `.desktop` file to `~/.config/autostart`.
+
+## Platform notes
+
+Only tested on Windows so far. Global hotkeys don't work on Linux Wayland (a limitation of
+`global-hotkey`); X11 is fine. On macOS the app shows a Dock icon, because gpui 0.2 doesn't
+expose the accessory activation policy.
