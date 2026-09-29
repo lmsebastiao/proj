@@ -186,7 +186,7 @@ impl Palette {
                 if self.config.editor.is_none() {
                     lines.push(format!(
                         "proj keeps running in the background. Press {} to bring it up.",
-                        self.config.hotkey
+                        self.config.hotkey_label()
                     ));
                 }
                 ("Which editor should open your projects?".into(), lines)

@@ -11,8 +11,8 @@ mod theme;
 use std::{collections::HashMap, path::PathBuf};
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, ScrollStrategy, SharedString, Subscription,
-    UniformListScrollHandle, Window, prelude::*,
+    App, Context, Entity, FocusHandle, Focusable, Global, ScrollStrategy, SharedString,
+    Subscription, UniformListScrollHandle, Window, prelude::*,
 };
 
 use crate::{
@@ -29,6 +29,12 @@ use items::{COMMANDS, EditorOption, List, Match, Mode};
 use keymap::{Confirm, Dismiss};
 
 pub use keymap::bind_keys;
+
+/// A problem found at startup (e.g. a shortcut that couldn't be registered),
+/// shown in the footer each time the palette opens until proj is restarted.
+pub struct StartupNotice(pub SharedString);
+
+impl Global for StartupNotice {}
 
 pub struct Palette {
     input: Entity<TextInput>,
@@ -105,6 +111,9 @@ impl Palette {
             Mode::Projects
         };
         this.set_mode(mode, cx);
+        this.status = cx
+            .try_global::<StartupNotice>()
+            .map(|notice| notice.0.clone());
         this
     }
 

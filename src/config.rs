@@ -1,6 +1,6 @@
 //! User-edited settings (`config.toml`).
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::{fs, io, path::PathBuf};
 
 use crate::paths::{app_dir, write_atomic};
@@ -8,8 +8,10 @@ use crate::paths::{app_dir, write_atomic};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Global shortcut that toggles the launcher, e.g. "alt+space".
-    pub hotkey: String,
+    /// Global shortcuts that toggle the launcher, e.g. "alt+space". The file
+    /// accepts a single string or a list.
+    #[serde(deserialize_with = "one_or_many")]
+    pub hotkey: Vec<String>,
     /// Program used to open a project. `None` = not chosen yet, "" = file manager.
     pub editor: Option<String>,
     /// Extra arguments passed before the project path.
@@ -24,19 +26,50 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // alt+space is the window menu on Windows and PowerToys' default.
-            hotkey: if cfg!(target_os = "macos") {
-                "alt+space"
-            } else {
-                "ctrl+alt+space"
-            }
-            .into(),
+            hotkey: vec![default_hotkey().into()],
             editor: None,
             editor_args: Vec::new(),
             scan_dirs: Vec::new(),
             scan_depth: 1,
         }
     }
+}
+
+impl Config {
+    /// The shortcuts for display, e.g. "ctrl+alt+space or alt+p".
+    pub fn hotkey_label(&self) -> String {
+        self.hotkey.join(" or ")
+    }
+}
+
+// alt+space is the window menu on Windows and PowerToys' default.
+fn default_hotkey() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "alt+space"
+    } else {
+        "ctrl+alt+space"
+    }
+}
+
+/// `"a"` or `["a", "b"]`. An empty list falls back to the default so the
+/// launcher always has a way to be opened.
+fn one_or_many<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    let mut list = match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(one) => vec![one],
+        OneOrMany::Many(many) => many,
+    };
+    list.retain(|h| !h.trim().is_empty());
+    list.dedup();
+    if list.is_empty() {
+        list.push(default_hotkey().into());
+    }
+    Ok(list)
 }
 
 pub fn config_path() -> PathBuf {
@@ -55,7 +88,7 @@ pub fn load_config() -> Config {
             let config = Config::default();
             let text = CONFIG_TEMPLATE.replace(
                 "{hotkey}",
-                &toml::Value::String(config.hotkey.clone()).to_string(),
+                &toml::Value::String(default_hotkey().into()).to_string(),
             );
             if let Err(err) = write_atomic(&path, &text) {
                 eprintln!("proj: could not write {}: {err}", path.display());
@@ -69,7 +102,8 @@ pub fn load_config() -> Config {
 // at the end, right below its comment.
 const CONFIG_TEMPLATE: &str = r#"# proj configuration
 
-# Global shortcut that toggles the launcher, e.g. "alt+space", "ctrl+alt+p".
+# Global shortcut that toggles the launcher, e.g. "alt+space", or a list of
+# them: ["ctrl+alt+space", "alt+p"].
 # Changing it requires restarting proj.
 hotkey = {hotkey}
 
@@ -128,5 +162,23 @@ mod tests {
 
         let replaced = with_editor(&added, "code").unwrap();
         assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
+    }
+
+    #[test]
+    fn hotkey_accepts_one_or_many() {
+        let parse = |text: &str| toml::from_str::<Config>(text).unwrap().hotkey;
+        assert_eq!(parse(r#"hotkey = "alt+p""#), ["alt+p"]);
+        assert_eq!(
+            parse(r#"hotkey = ["ctrl+alt+space", "alt+p", "alt+p"]"#),
+            ["ctrl+alt+space", "alt+p"]
+        );
+        // Missing or empty: the default, so the launcher can always be opened.
+        assert_eq!(parse(""), [default_hotkey()]);
+        assert_eq!(parse("hotkey = []"), [default_hotkey()]);
+        let config = Config {
+            hotkey: vec!["a+b".into(), "c+d".into()],
+            ..Config::default()
+        };
+        assert_eq!(config.hotkey_label(), "a+b or c+d");
     }
 }

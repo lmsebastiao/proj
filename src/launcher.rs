@@ -1,6 +1,9 @@
-//! The background app: global hotkey, and showing/hiding the palette window.
+//! The background app: global hotkey, tray icon, and showing/hiding the palette window.
 
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use gpui::{
@@ -9,16 +12,26 @@ use gpui::{
 };
 
 use crate::{
-    config, editors,
+    autostart, config, editors, open,
     palette::{self, Palette},
     platform,
+    tray::{Tray, TrayCommand},
 };
 
-/// Handle to the open palette, if any.
+/// The open palette, if any, and when it last closed.
 #[derive(Default)]
-struct PaletteWindow(Option<WindowHandle<Palette>>);
+struct PaletteWindow {
+    handle: Option<WindowHandle<Palette>>,
+    closed_at: Option<Instant>,
+}
 
 impl Global for PaletteWindow {}
+
+/// Events from the hotkey and tray callbacks, handled on the main thread.
+enum Command {
+    Hotkey,
+    Tray(TrayCommand),
+}
 
 /// Invisible window that keeps the app alive: gpui quits when the last window
 /// closes, and the palette window is destroyed each time it is dismissed so
@@ -34,23 +47,25 @@ impl Render for Anchor {
 pub fn run() {
     Application::new().run(|cx: &mut App| {
         let config = config::load_config();
-        let hotkey = match HotKey::from_str(&config.hotkey) {
-            Ok(hotkey) => hotkey,
-            Err(err) => return fatal(cx, &format!("invalid hotkey '{}': {err}", config.hotkey)),
-        };
         let manager = match GlobalHotKeyManager::new() {
             Ok(manager) => manager,
             Err(err) => return fatal(cx, &format!("could not start hotkey listener: {err}")),
         };
-        if let Err(err) = manager.register(hotkey) {
-            // Also acts as a single-instance guard.
+        let problems = register_hotkeys(&manager, &config.hotkey);
+        if problems.len() == config.hotkey.len() {
+            // Nothing registered. Also acts as a single-instance guard.
             return fatal(
                 cx,
                 &format!(
-                    "could not register '{}' ({err}). Is proj already running?",
-                    config.hotkey
+                    "no shortcut could be registered ({}). Is proj already running?",
+                    problems.join("; ")
                 ),
             );
+        }
+        if !problems.is_empty() {
+            // Some shortcuts work; say which don't where the user will see it.
+            let notice = problems.join("; ");
+            cx.set_global(palette::StartupNotice(notice.into()));
         }
 
         palette::bind_keys(cx);
@@ -80,6 +95,7 @@ pub fn run() {
         }
 
         cx.on_window_closed(|cx| {
+            cx.global_mut::<PaletteWindow>().closed_at = Some(Instant::now());
             cx.spawn(async |cx| {
                 cx.background_executor()
                     .timer(Duration::from_millis(500))
@@ -90,18 +106,27 @@ pub fn run() {
         })
         .detach();
 
-        // The hotkey callback runs on the platform event loop; forward presses
+        // Hotkey and tray callbacks run on the platform event loop; forward them
         // to a foreground task instead of polling.
-        let (tx, rx) = async_channel::bounded::<()>(1);
+        let (tx, rx) = async_channel::unbounded::<Command>();
+        let hotkey_tx = tx.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
             if event.state == HotKeyState::Pressed {
-                tx.try_send(()).ok();
+                hotkey_tx.try_send(Command::Hotkey).ok();
             }
         }));
+        let tooltip = format!("proj ({})", config.hotkey_label());
+        let tray = Tray::new(&tooltip, autostart::is_enabled(), move |command| {
+            tx.try_send(Command::Tray(command)).ok();
+        })
+        .map_err(|err| eprintln!("proj: no tray icon: {err}"))
+        .ok();
         cx.spawn(async move |cx| {
-            let _manager = manager; // unregisters the hotkey when dropped
-            while rx.recv().await.is_ok() {
-                cx.update(toggle_palette).ok();
+            // Both unregister when dropped, so they live as long as this task.
+            let _manager = manager;
+            let tray = tray;
+            while let Ok(command) = rx.recv().await {
+                cx.update(|cx| handle(command, tray.as_ref(), cx)).ok();
             }
         })
         .detach();
@@ -115,12 +140,65 @@ pub fn run() {
     });
 }
 
+fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
+    let sync_tray = |tray: Option<&Tray>| {
+        if let Some(tray) = tray {
+            tray.set_autostart(autostart::is_enabled());
+        }
+    };
+    match command {
+        Command::Hotkey => toggle_palette(cx),
+        Command::Tray(TrayCommand::Toggle) => {
+            // Clicking the tray icon takes focus from the palette, which closes it
+            // just before the click arrives; treat that click as "close".
+            let closed_at = cx.global::<PaletteWindow>().closed_at;
+            if !closed_at.is_some_and(|at| at.elapsed() < Duration::from_millis(400)) {
+                toggle_palette(cx);
+            }
+        }
+        Command::Tray(TrayCommand::ToggleAutostart) => {
+            if let Err(err) = autostart::set(!autostart::is_enabled()) {
+                eprintln!("proj: could not change start on login: {err}");
+            }
+            sync_tray(tray);
+        }
+        Command::Tray(TrayCommand::Refresh) => sync_tray(tray),
+        Command::Tray(TrayCommand::OpenConfig) => {
+            let config = config::load_config();
+            if let Err(err) = open::open_project(&config, &config::config_path()) {
+                eprintln!("proj: could not open config: {err}");
+            }
+        }
+        Command::Tray(TrayCommand::Quit) => cx.quit(),
+    }
+}
+
+/// Registers every shortcut, returning a message for each one that failed.
+fn register_hotkeys(manager: &GlobalHotKeyManager, hotkeys: &[String]) -> Vec<String> {
+    hotkeys
+        .iter()
+        .filter_map(|text| {
+            let hotkey = match HotKey::from_str(text) {
+                Ok(hotkey) => hotkey,
+                Err(err) => return Some(format!("Shortcut '{text}' is not valid ({err})")),
+            };
+            match manager.register(hotkey) {
+                Ok(()) => None,
+                Err(global_hotkey::Error::AlreadyRegistered(_)) => {
+                    Some(format!("Shortcut '{text}' is taken by another app"))
+                }
+                Err(err) => Some(format!("Shortcut '{text}': {err}")),
+            }
+        })
+        .collect()
+}
+
 fn toggle_palette(cx: &mut App) {
     if let Some(handle) = open_palette(cx) {
         handle
             .update(cx, |_, window, _| window.remove_window())
             .ok();
-        cx.global_mut::<PaletteWindow>().0 = None;
+        cx.global_mut::<PaletteWindow>().handle = None;
         return;
     }
 
@@ -163,7 +241,7 @@ fn toggle_palette(cx: &mut App) {
                     cx.activate(true);
                 })
                 .ok();
-            cx.global_mut::<PaletteWindow>().0 = Some(handle);
+            cx.global_mut::<PaletteWindow>().handle = Some(handle);
         }
         Err(err) => eprintln!("proj: could not open window: {err}"),
     }
@@ -171,7 +249,7 @@ fn toggle_palette(cx: &mut App) {
 
 /// The palette closes itself (blur, escape, open), so the stored handle may be stale.
 fn open_palette(cx: &App) -> Option<WindowHandle<Palette>> {
-    let handle = cx.global::<PaletteWindow>().0?;
+    let handle = cx.global::<PaletteWindow>().handle?;
     cx.windows()
         .iter()
         .any(|w| w.window_id() == handle.window_id())
