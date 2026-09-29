@@ -12,15 +12,21 @@ proj            # start the launcher in the background
 
 Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog.
 
-| Key                     | Action                                   |
-| ----------------------- | ---------------------------------------- |
-| type                    | fuzzy filter by name, then by path       |
-| ↑ / ↓, ctrl-p / ctrl-n  | move selection                           |
-| enter                   | open in editor                           |
-| ctrl-enter              | open folder in file manager              |
-| ctrl-d, shift-delete    | remove (manual) / hide (scanned) project |
-| esc, clicking elsewhere | close                                    |
-| ctrl-q                  | quit the launcher                        |
+On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
+finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
+then opens a folder picker where you can select one or more projects at once.
+
+| Key                     | Action                                     |
+| ----------------------- | ------------------------------------------ |
+| type                    | fuzzy filter by name, then by path         |
+| ↑ / ↓, ctrl-p / ctrl-n  | move selection                             |
+| enter                   | open in editor                             |
+| ctrl-enter              | open folder in file manager                |
+| ctrl-o                  | add projects (multi-select folder picker)  |
+| ctrl-e                  | change editor                              |
+| ctrl-d, shift-delete    | remove project                             |
+| esc, clicking elsewhere | close                                      |
+| ctrl-q                  | quit the launcher                          |
 
 Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
 
@@ -35,17 +41,18 @@ proj paths          # where the config and database live
 
 ## Configuration
 
-`config.toml` (see `proj paths`) is created on first run. It picks existing folders from
-`~/repos`, `~/Projects`, `~/dev`, `~/code`, `~/src` and `~/git`, and uses `zed`, `code` or `subl`
-as the editor if one is found on PATH.
+`config.toml` (see `proj paths`) is created on first run with comments explaining each option:
 
 ```toml
 hotkey = "ctrl+alt+space"
-editor = "zed"          # empty = system file manager
-editor_args = []        # e.g. ["-n"] for a new window
-scan_dirs = ['C:\Users\me\repos']
+scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
+editor = "zed"          # set from the launcher; "" = file manager
+editor_args = []        # e.g. ["--new-window"]
 ```
+
+Picking an editor in the launcher updates only the `editor` line; the rest of the file,
+comments included, is left alone.
 
 Config and folder scans are re-read every time the dialog opens, so changes apply immediately.
 Changing the hotkey is the exception: that needs a restart.

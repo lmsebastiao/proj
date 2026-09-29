@@ -13,8 +13,8 @@ use std::{
 pub struct Config {
     /// Global shortcut that toggles the launcher, e.g. "alt+space".
     pub hotkey: String,
-    /// Program used to open a project. Empty = system file manager.
-    pub editor: String,
+    /// Program used to open a project. `None` = not chosen yet, "" = file manager.
+    pub editor: Option<String>,
     /// Extra arguments passed before the project path.
     pub editor_args: Vec<String>,
     /// Folders whose sub-folders are listed as projects.
@@ -29,7 +29,7 @@ impl Default for Config {
         Self {
             // alt+space is the window menu on Windows and PowerToys' default.
             hotkey: if cfg!(target_os = "macos") { "alt+space" } else { "ctrl+alt+space" }.into(),
-            editor: String::new(),
+            editor: None,
             editor_args: Vec::new(),
             scan_dirs: Vec::new(),
             scan_depth: 1,
@@ -67,7 +67,7 @@ pub fn db_path() -> PathBuf {
     app_dir(dirs::data_local_dir()).join("projects.toml")
 }
 
-/// Loads the config, writing a commented default on first run.
+/// Loads the config, writing a commented template on first run.
 pub fn load_config() -> Config {
     let path = config_path();
     match fs::read_to_string(&path) {
@@ -76,8 +76,9 @@ pub fn load_config() -> Config {
             Config::default()
         }),
         Err(_) => {
-            let config = first_run_config();
-            if let Err(err) = write_config(&path, &config) {
+            let config = Config::default();
+            let text = CONFIG_TEMPLATE.replace("{hotkey}", &toml::Value::String(config.hotkey.clone()).to_string());
+            if let Err(err) = write_atomic(&path, &text) {
                 eprintln!("proj: could not write {}: {err}", path.display());
             }
             config
@@ -85,66 +86,48 @@ pub fn load_config() -> Config {
     }
 }
 
-fn first_run_config() -> Config {
-    let home = dirs::home_dir().unwrap_or_default();
-    let candidates = ["repos", "Projects", "projects", "dev", "code", "src", "git"];
-    let mut scan_dirs: Vec<PathBuf> = candidates
-        .iter()
-        .map(|name| home.join(name))
-        .filter(|dir| dir.is_dir())
-        .collect();
-    if scan_dirs.is_empty() {
-        scan_dirs.push(home.join("repos"));
-    }
-    let editor = ["zed", "code", "subl"]
-        .into_iter()
-        .find(|name| crate::open::which(name).is_some())
-        .unwrap_or("")
-        .to_string();
-    Config {
-        editor,
-        scan_dirs,
-        ..Config::default()
-    }
-}
-
-fn write_config(path: &Path, config: &Config) -> io::Result<()> {
-    let string = |s: &str| toml::Value::String(s.into()).to_string();
-    let array = |items: Vec<String>| {
-        toml::Value::Array(items.into_iter().map(toml::Value::String).collect()).to_string()
-    };
-    let text = format!(
-        r#"# proj configuration
+// `editor` is left unset so the launcher asks for it; `set_editor` appends it
+// at the end, right below its comment.
+const CONFIG_TEMPLATE: &str = r#"# proj configuration
 
 # Global shortcut that toggles the launcher, e.g. "alt+space", "ctrl+alt+p".
 # Changing it requires restarting proj.
 hotkey = {hotkey}
 
-# Program used to open a project; the project path is appended after editor_args.
-# Leave empty to open projects in the system file manager.
-editor = {editor}
-editor_args = {editor_args}
+# Optional: folders whose sub-folders are all listed as projects,
+# e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.
+scan_dirs = []
 
-# Folders whose sub-folders are listed as projects.
-scan_dirs = {scan_dirs}
+# 1 = every direct sub-folder of a scan_dir is a project. Higher values descend
+# into folders that are not git repositories, up to this depth.
+scan_depth = 1
 
-# 1 = every direct sub-folder is a project. Higher values descend into
-# folders that are not git repositories, up to this depth.
-scan_depth = {scan_depth}
-"#,
-        hotkey = string(&config.hotkey),
-        editor = string(&config.editor),
-        editor_args = array(config.editor_args.clone()),
-        scan_dirs = array(
-            config
-                .scan_dirs
-                .iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect()
-        ),
-        scan_depth = config.scan_depth,
-    );
-    write_atomic(path, &text)
+# Program used to open projects; the project path is appended after editor_args.
+# Chosen from the launcher (ctrl-e). "" opens projects in the file manager.
+# editor_args = ["--new-window"]
+"#;
+
+/// Sets `editor` in config.toml, preserving the rest of the file.
+pub fn set_editor(command: &str) -> io::Result<()> {
+    let path = config_path();
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    write_atomic(&path, &with_editor(&text, command)?)
+}
+
+fn with_editor(text: &str, command: &str) -> io::Result<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    let is_new = !doc.contains_key("editor");
+    doc["editor"] = toml_edit::value(command);
+    if is_new {
+        // The template ends with the editor docs, which toml_edit keeps as trailing
+        // text after the new key; move them above it instead.
+        let trailing = doc.trailing().as_str().unwrap_or_default().to_string();
+        doc.set_trailing("");
+        if let Some(mut key) = doc.as_table_mut().key_mut("editor") {
+            key.leaf_decor_mut().set_prefix(trailing);
+        }
+    }
+    Ok(doc.to_string())
 }
 
 pub fn load_db() -> Db {
@@ -266,4 +249,20 @@ pub fn display_path(path: &Path) -> String {
         return Path::new("~").join(rest).to_string_lossy().into_owned();
     }
     path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_is_added_below_its_docs_and_replaced_in_place() {
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
+        let added = with_editor(&template, "zed").unwrap();
+        assert!(added.ends_with("# editor_args = [\"--new-window\"]\neditor = \"zed\"\n"), "{added}");
+        assert_eq!(toml::from_str::<Config>(&added).unwrap().editor.as_deref(), Some("zed"));
+
+        let replaced = with_editor(&added, "code").unwrap();
+        assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
+    }
 }

@@ -188,7 +188,12 @@ fn run_launcher() {
         })
         .detach();
 
-        trim_memory();
+        // First run (or editor never chosen): show the setup right away.
+        if config.editor.is_none() {
+            toggle_palette(cx);
+        } else {
+            trim_memory();
+        }
     });
 }
 
