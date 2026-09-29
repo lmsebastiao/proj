@@ -1,6 +1,6 @@
 //! Acting on projects: opening, marking, pinning, removing and adding them, plus `>` commands.
 
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
 use gpui::{ClipboardItem, Context, Focusable, PathPromptOptions, Window};
 
@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     Palette,
-    items::{Mode, PaletteCommand, Target},
+    items::{List, Mode, PaletteCommand, Target},
     keymap::{AddProjects, CopyPath, OpenRemote, Remove},
 };
 
@@ -72,7 +72,9 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(project) = self.selected_project().cloned() {
+        if self.list() == List::Browse {
+            self.launch_entry(target, window, cx);
+        } else if let Some(project) = self.selected_project().cloned() {
             self.launch(&project, target, window, cx);
         }
     }
@@ -89,6 +91,18 @@ impl Palette {
             Target::FileManager => open::reveal(&project.path),
             Target::Terminal => open::open_terminal(&project.path),
         };
+        self.finish_launch(project, &target, result, window, cx);
+    }
+
+    /// Records the open and closes the palette, or shows why launching failed.
+    pub(super) fn finish_launch(
+        &mut self,
+        project: &Project,
+        target: &Target,
+        result: io::Result<()>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match result {
             Ok(()) => {
                 self.db.opened.insert(project.key(), store::now());
@@ -96,7 +110,7 @@ impl Palette {
                 window.remove_window();
             }
             Err(err) => {
-                let program = match &target {
+                let program = match target {
                     Target::Editor(editor) => self.name_of(editor),
                     Target::FileManager => "the file manager".into(),
                     Target::Terminal => "a terminal".into(),
@@ -153,15 +167,17 @@ impl Palette {
     }
 
     pub(super) fn copy_path(&mut self, _: &CopyPath, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(project) = self.selected_project() {
-            let paths: Vec<String> = project
-                .paths()
-                .iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect();
-            cx.write_to_clipboard(ClipboardItem::new_string(paths.join("\n")));
-            window.remove_window();
-        }
+        let paths: Vec<PathBuf> = match (self.selected_entry(), self.selected_project()) {
+            (Some(entry), _) => vec![entry.path.clone()],
+            (None, Some(project)) => project.paths(),
+            (None, None) => return,
+        };
+        let text: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        cx.write_to_clipboard(ClipboardItem::new_string(text.join("\n")));
+        window.remove_window();
     }
 
     pub(super) fn remove(&mut self, _: &Remove, _: &mut Window, cx: &mut Context<Self>) {

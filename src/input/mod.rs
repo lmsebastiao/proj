@@ -85,6 +85,16 @@ impl TextInput {
         &self.content
     }
 
+    /// No selection and the cursor before the first character.
+    pub fn cursor_at_start(&self) -> bool {
+        self.selected_range == (0..0)
+    }
+
+    /// No selection and the cursor after the last character.
+    pub fn cursor_at_end(&self) -> bool {
+        self.selected_range.is_empty() && self.selected_range.end == self.content.len()
+    }
+
     pub fn set_placeholder(
         &mut self,
         placeholder: impl Into<SharedString>,

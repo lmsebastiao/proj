@@ -7,7 +7,7 @@ use gpui::{
     uniform_list,
 };
 
-use crate::{paths, store};
+use crate::{input, paths, store};
 
 use super::{Palette, items::*, keymap::*, secondary, theme::*};
 
@@ -178,6 +178,7 @@ impl Palette {
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let (title, lines): (String, Vec<String>) = match self.mode {
             Mode::Projects => return None,
+            Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors => {
                 let mut lines = vec![format!(
                     "The default for all projects. Change it any time with {}-e.",
@@ -295,10 +296,18 @@ impl Render for Palette {
             ],
             List::Projects => vec![
                 hint("↵".into(), "open"),
-                hint("alt-↵".into(), "open with"),
+                hint("→".into(), "files"),
+                hint("alt-↵".into(), "with"),
                 hint("tab".into(), "combine"),
-                hint(format!("{m}-s"), "pin"),
-                hint(">".into(), "commands"),
+                hint(format!("{m}-d"), "remove"),
+                hint(">".into(), "more"),
+            ],
+            List::Browse => vec![
+                hint("↵".into(), "open"),
+                hint("→".into(), "enter"),
+                hint("←".into(), "back"),
+                hint(format!("{m}-↵"), "folder"),
+                hint("shift-↵".into(), "terminal"),
             ],
             List::OpenWith => vec![
                 hint("↵".into(), "open"),
@@ -350,6 +359,7 @@ impl Render for Palette {
                         .child(names.join(" + "))
                 }
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
+                (None, List::Browse) => div().child(format!("{} items", self.item_count())),
                 (None, _) => div(),
             })
             .child(div().flex_1())
@@ -357,6 +367,18 @@ impl Render for Palette {
 
         div()
             .key_context("Palette")
+            // →/← browse into projects and folders, but only at the ends of the
+            // search text, so they still move the cursor while editing it.
+            .capture_action(cx.listener(|this, _: &input::Right, _, cx| {
+                if this.input.read(cx).cursor_at_end() && this.enter(cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &input::Left, _, cx| {
+                if this.input.read(cx).cursor_at_start() && this.leave(cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(Self::confirm))

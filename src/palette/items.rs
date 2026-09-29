@@ -11,6 +11,8 @@ pub(super) enum Mode {
     Editors,
     /// Choosing an editor for one project (`Palette::open_with`).
     OpenWith,
+    /// Inside a project's folders (`Palette::browse`).
+    Browse,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -19,6 +21,7 @@ pub(super) enum List {
     Projects,
     Editors,
     OpenWith,
+    Browse,
     Commands,
 }
 
@@ -76,6 +79,17 @@ impl Palette {
                     .collect();
                 (project.name.clone(), paths.join(" + "))
             }
+            List::Browse => match &self.browse {
+                Some(browse) => {
+                    let entry = &browse.entries[ix];
+                    let slash = if entry.is_dir { "/" } else { "" };
+                    (
+                        format!("{}{slash}", entry.name),
+                        browse.relative(&entry.path),
+                    )
+                }
+                None => Default::default(),
+            },
             List::Editors | List::OpenWith => match &self.editors[ix] {
                 EditorOption::Detected(editor) => {
                     let current = self.mode == Mode::Editors
@@ -187,6 +201,15 @@ impl Palette {
                     bottom: None,
                 }
             }
+            // Folders get a hint that → goes inside.
+            List::Browse => Meta {
+                top: self
+                    .browse
+                    .as_ref()
+                    .filter(|b| b.entries[ix].is_dir)
+                    .map(|_| ("→".to_string(), MUTED)),
+                bottom: None,
+            },
             List::Editors | List::Commands => Meta {
                 top: None,
                 bottom: None,
@@ -197,6 +220,7 @@ impl Palette {
     pub(super) fn item_count(&self) -> usize {
         match self.list() {
             List::Projects => self.projects.len(),
+            List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => COMMANDS.len(),
         }

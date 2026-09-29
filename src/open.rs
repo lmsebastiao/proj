@@ -49,6 +49,33 @@ pub fn open_with(config: &Config, editor: &str, paths: &[PathBuf]) -> io::Result
     spawn(command)
 }
 
+/// Opens `file` with `editor`, together with its project `folders` so it lands
+/// in the project's window (Zed, VS Code). Solution-based IDEs get just the file;
+/// no editor ("") uses the file's default app.
+pub fn open_file(
+    config: &Config,
+    editor: &str,
+    folders: &[PathBuf],
+    file: &Path,
+) -> io::Result<()> {
+    let editor = editor.trim();
+    if editor.is_empty() {
+        return system_open(file.as_os_str());
+    }
+    let mut command = command_for(editor)?;
+    if config.editor.as_deref().map(str::trim) == Some(editor) {
+        command.args(&config.editor_args);
+    }
+    if !opens_solutions(editor) {
+        command.args(folders);
+    }
+    command.arg(file);
+    if let Some(dir) = folders.first().filter(|d| d.is_dir()) {
+        command.current_dir(dir);
+    }
+    spawn(command)
+}
+
 fn opens_solutions(editor: &str) -> bool {
     let stem = Path::new(editor)
         .file_stem()

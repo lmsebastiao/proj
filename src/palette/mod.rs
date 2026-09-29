@@ -1,6 +1,7 @@
 //! The search dialog: state, modes, filtering and selection. Actions live in
-//! `projects`/`editors`, drawing in `render`.
+//! `projects`, `editor_choice` and `browse`, drawing in `render`.
 
+mod browse;
 mod editor_choice;
 mod items;
 mod keymap;
@@ -25,7 +26,7 @@ use crate::{
     store::{self, Db, Project},
 };
 
-use items::{COMMANDS, EditorOption, List, Match, Mode};
+use items::{COMMANDS, EditorOption, List, Match, Mode, Target};
 use keymap::{Confirm, Dismiss};
 
 pub use keymap::bind_keys;
@@ -48,6 +49,8 @@ pub struct Palette {
     names: HashMap<String, String>,
     /// Key of the entry being opened in `Mode::OpenWith`.
     open_with: Option<String>,
+    /// The project being browsed in `Mode::Browse`.
+    browse: Option<browse::Browse>,
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
     autostart: bool,
@@ -91,6 +94,7 @@ impl Palette {
             editors: Vec::new(),
             names: HashMap::new(),
             open_with: None,
+            browse: None,
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
             matches: Vec::new(),
@@ -140,7 +144,11 @@ impl Palette {
     fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
         self.mode = mode;
         match mode {
-            Mode::Projects => self.open_with = None,
+            Mode::Projects => {
+                self.open_with = None;
+                self.browse = None;
+            }
+            Mode::Browse => {}
             Mode::Editors => {
                 self.editors = editors::detected_editors(true)
                     .into_iter()
@@ -183,9 +191,13 @@ impl Palette {
             }
         }
         let placeholder = match mode {
-            Mode::Projects => "Search projects, > for commands, or paste a folder path…",
-            Mode::Editors => "Choose the editor to open projects with…",
-            Mode::OpenWith => "Open with…",
+            Mode::Projects => "Search projects, > for commands, or paste a folder path…".into(),
+            Mode::Editors => "Choose the editor to open projects with…".into(),
+            Mode::OpenWith => "Open with…".into(),
+            Mode::Browse => match &self.browse {
+                Some(browse) => format!("Search in {}…", browse.breadcrumb()),
+                None => String::new(),
+            },
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
@@ -203,6 +215,7 @@ impl Palette {
         match self.mode {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
+            Mode::Browse => List::Browse,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             Mode::Projects => List::Projects,
         }
@@ -329,6 +342,12 @@ impl Palette {
             List::Editors => self.choose_editor(ix, window, cx),
             List::OpenWith => self.choose_open_with(ix, window, cx),
             List::Commands => self.run_command(COMMANDS[ix], window, cx),
+            List::Browse => {
+                if let Some(browse) = &self.browse {
+                    let editor = self.default_editor(&browse.project);
+                    self.launch_entry(Target::Editor(editor), window, cx);
+                }
+            }
             List::Projects => match self.add_candidate.take() {
                 Some(path) => self.add_paths(vec![path], cx),
                 None => {
@@ -348,6 +367,7 @@ impl Palette {
     fn dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
         match self.list() {
             List::Commands => self.set_query("", cx),
+            List::Browse => self.exit_browse(cx),
             List::OpenWith => {
                 let key = self.open_with.clone();
                 self.set_mode(Mode::Projects, cx);

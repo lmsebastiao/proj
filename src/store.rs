@@ -367,4 +367,23 @@ mod tests {
         assert_eq!(collect(&config, &db).len(), 2);
         fs::remove_dir_all(dir).ok();
     }
+
+    #[test]
+    fn forgetting_a_project() {
+        let mut db = Db {
+            manual: vec![PathBuf::from("/a/app"), PathBuf::from("/a/web")],
+            ..Db::default()
+        };
+        let mut app = project("/a/app");
+        db.pinned.insert(app.key());
+        db.opened.insert(app.key(), 5);
+        forget_entry(&mut db, &app);
+        assert_eq!(db.manual, [PathBuf::from("/a/web")]);
+        assert!(db.pinned.is_empty() && db.opened.is_empty());
+
+        // Scanned projects are hidden instead, so a rescan doesn't bring them back.
+        app.manual = false;
+        forget_entry(&mut db, &app);
+        assert!(db.hidden.contains(&PathBuf::from("/a/app")));
+    }
 }

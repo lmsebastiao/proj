@@ -10,7 +10,9 @@ cargo build --release
 proj            # start the launcher in the background
 ```
 
-Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog.
+Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog, or click the tray icon.
+Right-click the tray icon for: open, start on login, open config file, quit (Windows and
+macOS; Linux has no tray icon). `hotkey` can also be a list: `["ctrl+alt+space", "f8"]`.
 
 On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
 finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
@@ -22,6 +24,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ↑ / ↓, ctrl-p / ctrl-n  | move selection                             |
 | enter                   | open in editor                             |
 | shift-enter             | open a terminal there (Windows Terminal if installed) |
+| → / ←                   | browse into a project / back up (see below) |
 | alt-enter               | open with… (choose an editor for this project) |
 | tab                     | mark projects to open together in one window |
 | ctrl-enter              | open folder in file manager                |
@@ -36,6 +39,18 @@ then opens a folder picker where you can select one or more projects at once.
 
 Type `>` to list commands: start on login, add projects, change editor, open the config
 file, quit.
+
+### Browsing inside a project
+
+Press **→** on a project to list its files and folders; **→** on a folder goes deeper,
+**←** goes back up (and back to the project list from the top), **esc** returns to the list.
+Typing filters the current folder. **Enter** opens a file in the project's editor, inside the
+project's window (`zed <project> <file>`), or opens a subfolder as its own workspace.
+**ctrl-enter** shows it in the file manager, **shift-enter** opens a terminal there, and
+**ctrl-shift-c** copies its path. Nothing you browse is added to the project list.
+
+→/← only browse when the text cursor is at the end/start of the search box, so they still
+move the cursor while you edit a search.
 
 ### Opening projects together
 
