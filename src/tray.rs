@@ -25,7 +25,7 @@ mod imp {
     use super::TrayCommand;
 
     pub struct Tray {
-        _icon: TrayIcon,
+        icon: TrayIcon,
         autostart: CheckMenuItem,
     }
 
@@ -77,14 +77,15 @@ mod imp {
                 _ => {}
             }));
 
-            Ok(Self {
-                _icon: icon,
-                autostart,
-            })
+            Ok(Self { icon, autostart })
         }
 
         pub fn set_autostart(&self, on: bool) {
             self.autostart.set_checked(on);
+        }
+
+        pub fn set_tooltip(&self, tooltip: &str) {
+            self.icon.set_tooltip(Some(tooltip)).ok();
         }
     }
 
@@ -155,5 +156,7 @@ mod imp {
         }
 
         pub fn set_autostart(&self, _on: bool) {}
+
+        pub fn set_tooltip(&self, _tooltip: &str) {}
     }
 }

@@ -1,5 +1,7 @@
 //! What the list shows: item types, and each row's title, subtitle and details.
 
+use std::path::PathBuf;
+
 use crate::{config, editors::Editor, paths, store};
 
 use super::{Palette, secondary, theme::*};
@@ -13,6 +15,8 @@ pub(super) enum Mode {
     OpenWith,
     /// Inside a project's folders (`Palette::browse`).
     Browse,
+    /// Typing a new name for an entry (`Palette::renaming`).
+    Rename,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -23,6 +27,18 @@ pub(super) enum List {
     OpenWith,
     Browse,
     Commands,
+    /// Nothing: the search box holds the new name.
+    Rename,
+}
+
+/// A git URL pasted into the search.
+#[derive(Clone)]
+pub(super) struct CloneTarget {
+    pub(super) url: String,
+    /// The folder `git clone` creates.
+    pub(super) name: String,
+    /// Where to clone it: the first `scan_dirs` folder, or `None` to ask.
+    pub(super) into: Option<PathBuf>,
 }
 
 pub(super) enum EditorOption {
@@ -72,12 +88,7 @@ impl Palette {
         match self.list() {
             List::Projects => {
                 let project = &self.projects[ix];
-                let paths: Vec<String> = project
-                    .paths()
-                    .iter()
-                    .map(|p| paths::display_path(p))
-                    .collect();
-                (project.name.clone(), paths.join(" + "))
+                (project.name.clone(), project.location())
             }
             List::Browse => match &self.browse {
                 Some(browse) => {
@@ -148,6 +159,7 @@ impl Palette {
                     ),
                 }
             }
+            List::Rename => Default::default(),
         }
     }
 
@@ -210,7 +222,7 @@ impl Palette {
                     .map(|_| ("→".to_string(), MUTED)),
                 bottom: None,
             },
-            List::Editors | List::Commands => Meta {
+            List::Editors | List::Commands | List::Rename => Meta {
                 top: None,
                 bottom: None,
             },
@@ -223,6 +235,7 @@ impl Palette {
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => COMMANDS.len(),
+            List::Rename => 0,
         }
     }
 }

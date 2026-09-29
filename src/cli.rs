@@ -2,13 +2,17 @@
 
 use std::path::PathBuf;
 
-use crate::{autostart, config, paths, platform, store};
+use crate::{
+    autostart, config, fuzzy, open, paths, platform,
+    store::{self, Project},
+};
 
 const USAGE: &str = "\
 proj - project launcher
 
 usage:
   proj                     run the launcher in the background
+  proj open QUERY          open the project that best matches QUERY
   proj add [PATH]          add a project (defaults to the current directory)
   proj remove PATH         remove / hide a project
   proj list                list known projects
@@ -26,16 +30,32 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     match args[0].as_str() {
+        "open" => {
+            let query = args[1..].join(" ");
+            if query.trim().is_empty() {
+                eprintln!("usage: proj open QUERY");
+                return 2;
+            }
+            let projects = store::collect(&config, &db);
+            let Some(project) = best_match(&query, &projects) else {
+                eprintln!("proj: no project matches '{query}'");
+                return 1;
+            };
+            let editor = project.default_editor(&config);
+            if let Err(err) = open::open_with(&config, &editor, &project.paths()) {
+                eprintln!("proj: could not open {}: {err}", project.name);
+                return 1;
+            }
+            db.opened.insert(project.key(), store::now());
+            println!("opened {}", project.name);
+        }
         "add" => {
             let Some(path) = path_arg(args.get(1)).filter(|p| p.is_dir()) else {
                 eprintln!("proj: not a directory");
                 return 1;
             };
-            db.hidden.remove(&path);
-            if !db.manual.contains(&path) {
-                db.manual.push(path.clone());
-            }
             println!("added {}", path.display());
+            store::add_manual(&mut db, path);
         }
         "remove" | "rm" => {
             let Some(path) = args.get(1).and_then(|a| paths::normalize(a)) else {
@@ -48,6 +68,7 @@ pub fn run(args: &[String]) -> i32 {
                 db.hidden.insert(path.clone());
             }
             let key = path.to_string_lossy();
+            db.names.remove(key.as_ref());
             db.pinned.remove(key.as_ref());
             db.editors.remove(key.as_ref());
             db.opened.remove(key.as_ref());
@@ -115,4 +136,63 @@ pub fn run(args: &[String]) -> i32 {
         return 1;
     }
     0
+}
+
+/// The entry the dialog would put first for `query`.
+fn best_match<'a>(query: &str, projects: &'a [Project]) -> Option<&'a Project> {
+    let mut best: Option<(i32, &Project)> = None;
+    for project in projects {
+        let m = fuzzy::score_item(
+            query,
+            &project.name,
+            &project.location(),
+            project.search_boost(),
+        );
+        // Strictly greater, so ties go to the earlier (pinned, recent) entry.
+        if let Some(m) = m.filter(|m| best.is_none_or(|(score, _)| m.score > score)) {
+            best = Some((m.score, project));
+        }
+    }
+    best.map(|(_, project)| project)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(name: &str, path: &str) -> Project {
+        Project {
+            name: name.into(),
+            path: path.into(),
+            extra: Vec::new(),
+            branch: None,
+            pinned: false,
+            editors: Vec::new(),
+            manual: true,
+            last_opened: 0,
+        }
+    }
+
+    #[test]
+    fn open_picks_the_best_match() {
+        let mut projects = vec![
+            project("advertising", "/r/advertising"),
+            project("api", "/r/api"),
+            project("Client", "/r/interactive-v2"),
+        ];
+        assert_eq!(best_match("api", &projects).unwrap().name, "api");
+        assert_eq!(
+            best_match("inter", &projects).unwrap().name,
+            "Client",
+            "a renamed entry is still found by its folder"
+        );
+        assert!(best_match("zzz", &projects).is_none());
+
+        // Equal scores: the earlier entry (the list is sorted pinned/recent first) wins.
+        projects.insert(0, project("api", "/other/api"));
+        assert_eq!(
+            best_match("api", &projects).unwrap().path,
+            PathBuf::from("/other/api")
+        );
+    }
 }

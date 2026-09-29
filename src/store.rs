@@ -11,12 +11,12 @@ use std::{
 use crate::{
     config::Config,
     git,
-    paths::{app_dir, write_atomic},
+    paths::{app_dir, display_path, write_atomic},
 };
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
 ///
-/// `pinned`, `editors` and `opened` are keyed by [`Project::key`]: the folder path for a
+/// `names`, `pinned`, `editors` and `opened` are keyed by [`Project::key`]: the folder path for a
 /// project, or all folder paths joined with `|` for a workspace.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -25,6 +25,8 @@ pub struct Db {
     pub hidden: BTreeSet<PathBuf>,
     /// Multi-folder workspaces, remembered when projects are opened together.
     pub workspaces: Vec<Vec<PathBuf>>,
+    /// Entry -> name given with F2, shown instead of the folder name(s).
+    pub names: BTreeMap<String, String>,
     /// Always listed first.
     pub pinned: BTreeSet<String>,
     /// Entry -> editors offered for it; the first is its default.
@@ -65,6 +67,29 @@ impl Project {
 
     pub fn key(&self) -> String {
         entry_key(&self.paths())
+    }
+
+    /// The folders for display: "~/repos/app", or "~/repos/a + ~/repos/b".
+    pub fn location(&self) -> String {
+        self.paths()
+            .iter()
+            .map(|p| display_path(p))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
+
+    /// Search bonus so pinned and recently used entries win ties.
+    pub fn search_boost(&self) -> i32 {
+        (i32::from(self.pinned) + i32::from(self.last_opened > 0)) * 8
+    }
+
+    /// The editor Enter uses: the entry's own default, else the global one.
+    pub fn default_editor(&self, config: &Config) -> String {
+        self.editors
+            .first()
+            .or(config.editor.as_ref())
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -155,6 +180,11 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     }
 
     disambiguate(&mut projects);
+    for project in &mut projects {
+        if let Some(name) = db.names.get(&project.key()) {
+            project.name.clone_from(name);
+        }
+    }
     projects.sort_by(|a, b| {
         b.pinned
             .cmp(&a.pinned)
@@ -201,6 +231,24 @@ fn disambiguate(projects: &mut [Project]) {
     }
 }
 
+/// Lists `path` as a manually added project, un-hiding it if it was hidden.
+pub fn add_manual(db: &mut Db, path: PathBuf) {
+    db.hidden.remove(&path);
+    if !db.manual.contains(&path) {
+        db.manual.push(path);
+    }
+}
+
+/// Names an entry; an empty name goes back to the folder name(s).
+pub fn rename(db: &mut Db, key: &str, name: &str) {
+    let name = name.trim();
+    if name.is_empty() {
+        db.names.remove(key);
+    } else {
+        db.names.insert(key.to_string(), name.to_string());
+    }
+}
+
 /// Saves a set of folders opened together as a workspace, returning its key.
 pub fn remember_workspace(db: &mut Db, paths: Vec<PathBuf>) -> String {
     let key = entry_key(&paths);
@@ -220,6 +268,7 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     } else {
         db.hidden.insert(project.path.clone());
     }
+    db.names.remove(&key);
     db.pinned.remove(&key);
     db.editors.remove(&key);
     db.opened.remove(&key);
@@ -365,6 +414,40 @@ mod tests {
         forget_entry(&mut db, workspace);
         assert!(db.workspaces.is_empty() && !db.opened.contains_key(&key));
         assert_eq!(collect(&config, &db).len(), 2);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn renamed_entries_keep_their_name() {
+        let dir = std::env::temp_dir().join(format!("proj-name-{}", std::process::id()));
+        let (client, server) = (dir.join("client/app"), dir.join("server/app"));
+        fs::create_dir_all(&client).unwrap();
+        fs::create_dir_all(&server).unwrap();
+        let mut db = Db {
+            manual: vec![client.clone(), server.clone()],
+            ..Db::default()
+        };
+        let names = |db: &Db| {
+            let mut names: Vec<_> = collect(&Config::default(), db)
+                .into_iter()
+                .map(|p| p.name)
+                .collect();
+            names.sort();
+            names
+        };
+        let key = entry_key(std::slice::from_ref(&client));
+        rename(&mut db, &key, "  Client  ");
+        assert_eq!(names(&db), ["Client", "app (server)"]);
+
+        rename(&mut db, &key, "");
+        assert!(db.names.is_empty(), "an empty name resets it");
+        assert_eq!(names(&db), ["app (client)", "app (server)"]);
+
+        rename(&mut db, &key, "Client");
+        let listed = collect(&Config::default(), &db);
+        let renamed = listed.iter().find(|p| p.key() == key).unwrap();
+        forget_entry(&mut db, renamed);
+        assert!(db.names.is_empty(), "removing forgets the name");
         fs::remove_dir_all(dir).ok();
     }
 

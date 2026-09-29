@@ -1,5 +1,30 @@
 //! Small subsequence fuzzy matcher with word-boundary and adjacency bonuses.
 
+/// A list item that matched: its score and the matched byte offsets in its
+/// title, or else in its subtitle.
+pub struct ItemMatch {
+    pub score: i32,
+    pub title_hl: Vec<usize>,
+    pub subtitle_hl: Vec<usize>,
+}
+
+/// Scores an item by its title, else its subtitle. Title matches always rank
+/// above subtitle-only ones; `boost` breaks ties between title matches.
+pub fn score_item(query: &str, title: &str, subtitle: &str, boost: i32) -> Option<ItemMatch> {
+    if let Some((score, hl)) = score(query, title) {
+        return Some(ItemMatch {
+            score: score + 1000 + boost,
+            title_hl: hl,
+            subtitle_hl: Vec::new(),
+        });
+    }
+    score(query, subtitle).map(|(score, hl)| ItemMatch {
+        score,
+        title_hl: Vec::new(),
+        subtitle_hl: hl,
+    })
+}
+
 /// Scores `query` against `text`. Returns the score and the byte offsets of the
 /// matched characters in `text`, or `None` if `query` is not a subsequence.
 pub fn score(query: &str, text: &str) -> Option<(i32, Vec<usize>)> {

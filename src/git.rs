@@ -1,8 +1,10 @@
 //! Branch and remote information, read straight from `.git` without running git.
+//! Cloning is the one place that runs it.
 
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
 };
 
 /// The repository's git directory: `.git`, or where a worktree/submodule's `.git` file points.
@@ -100,9 +102,123 @@ fn remote_web_url(url: &str) -> Option<String> {
     Some(format!("{scheme}://{host}/{path}"))
 }
 
+/// The folder `git clone` would create, if `text` is a remote URL:
+/// `https://host/owner/repo`, `ssh://…`, or scp-style `git@host:owner/repo.git`.
+pub fn clone_name(text: &str) -> Option<String> {
+    if text.contains(char::is_whitespace) || text.contains(['?', '#']) {
+        return None;
+    }
+    let path = if let Some((scheme, rest)) = text.split_once("://") {
+        if !matches!(scheme, "http" | "https" | "ssh" | "git" | "git+ssh") {
+            return None;
+        }
+        rest.split_once('/')?.1
+    } else {
+        // scp-style needs the user part, so a search like "app:v2" isn't a URL.
+        let (authority, path) = text.split_once(':')?;
+        if !authority.contains('@') {
+            return None;
+        }
+        path
+    };
+    let name = path.trim_end_matches('/').rsplit('/').next()?;
+    let name = name.strip_suffix(".git").unwrap_or(name);
+    (!name.is_empty() && name != "." && name != "..").then(|| name.to_string())
+}
+
+/// Runs `git clone url dest`. The error is git's own message, e.g.
+/// "repository 'https://…' not found".
+pub fn clone(url: &str, dest: &Path) -> io::Result<()> {
+    let mut command = Command::new("git");
+    command
+        .args(["clone", "--", url])
+        .arg(dest)
+        // Fail instead of waiting for a username on a terminal nobody sees.
+        // Credential helpers (Git Credential Manager) still show their own window.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.output().map_err(|err| match err.kind() {
+        io::ErrorKind::NotFound => io::Error::new(err.kind(), "git is not installed"),
+        _ => err,
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(io::Error::other(clone_error(&String::from_utf8_lossy(
+        &output.stderr,
+    ))))
+}
+
+/// The line that says what went wrong: git follows it with hints like
+/// "Please make sure you have the correct access rights".
+fn clone_error(stderr: &str) -> String {
+    let mut lines = stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+    match lines.clone().find_map(|l| l.strip_prefix("fatal: ")) {
+        Some(fatal) => fatal.to_string(),
+        None => lines.next_back().unwrap_or("git clone failed").to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clone_urls_and_folder_names() {
+        let cases = [
+            ("https://github.com/lmsebastiao/proj", "proj"),
+            ("https://github.com/lmsebastiao/proj.git", "proj"),
+            (
+                "https://git.tomiworld.com/web/interactive-v2/",
+                "interactive-v2",
+            ),
+            (
+                "ssh://git@git.tomiworld.com:222/web/interactive-v2.git",
+                "interactive-v2",
+            ),
+            ("git@github.com:owner/repo.git", "repo"),
+            ("git@ssh.dev.azure.com:v3/org/project/repo", "repo"),
+        ];
+        for (url, name) in cases {
+            assert_eq!(clone_name(url).as_deref(), Some(name), "{url}");
+        }
+        for text in [
+            "interactive",
+            "app:v2",
+            r"C:\repos\app",
+            "https://github.com",
+            "https://github.com/",
+            "https://github.com/o/r?tab=readme",
+            "ftp://host/repo",
+            "git@github.com:owner/repo extra",
+        ] {
+            assert_eq!(clone_name(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn clone_errors_are_git_first_complaint() {
+        let stderr = "Cloning into 'x'...\n\
+            fatal: 'C:/repos/missing' does not appear to be a git repository\n\
+            fatal: Could not read from remote repository.\n\n\
+            Please make sure you have the correct access rights\n\
+            and the repository exists.\n";
+        assert_eq!(
+            clone_error(stderr),
+            "'C:/repos/missing' does not appear to be a git repository"
+        );
+        assert_eq!(
+            clone_error("error: something odd\n"),
+            "error: something odd"
+        );
+        assert_eq!(clone_error(""), "git clone failed");
+    }
 
     #[test]
     fn reads_git_branch() {

@@ -104,7 +104,7 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 
 # Global shortcut that toggles the launcher, e.g. "alt+space", or a list of
 # them: ["ctrl+alt+space", "alt+p"].
-# Changing it requires restarting proj.
+# A change applies the next time the launcher opens (with the old shortcut or the tray icon).
 hotkey = {hotkey}
 
 # Optional: folders whose sub-folders are all listed as projects,

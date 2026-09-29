@@ -52,6 +52,29 @@ function Find-Makensis {
     return "$cache\nsis-$nsisVersion\makensis.exe"
 }
 
+# gpui compiles its shaders with fxc.exe in release builds, but only looks on PATH and
+# in one hardcoded SDK version (10.0.26100.0). Point it at the newest installed SDK.
+function Set-FxcPath {
+    if ($env:GPUI_FXC_PATH -and (Test-Path $env:GPUI_FXC_PATH)) { return }
+    if (Get-Command fxc.exe -ErrorAction SilentlyContinue) { return }
+
+    $kits = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' `
+            -ErrorAction SilentlyContinue).KitsRoot10
+    if (-not $kits) { $kits = "${env:ProgramFiles(x86)}\Windows Kits\10\" }
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+    $fxc = Get-ChildItem (Join-Path $kits 'bin') -Directory -Filter '10.*' -ErrorAction SilentlyContinue |
+        Sort-Object { [version]$_.Name } -Descending |
+        ForEach-Object { Join-Path $_.FullName "$arch\fxc.exe" } |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+    if (-not $fxc) {
+        throw 'fxc.exe not found. Install the Windows SDK (Visual Studio Installer > ' +
+            'Individual components > Windows 11 SDK) or set GPUI_FXC_PATH.'
+    }
+    Write-Host "Using $fxc"
+    $env:GPUI_FXC_PATH = $fxc
+}
+
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
     Select-Object -First 1).Matches.Groups[1].Value
 $targetDir = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).target_directory
@@ -62,6 +85,7 @@ if (-not $SkipBuild) {
     Get-Process proj -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -eq $exe } |
         Stop-Process -Force
+    Set-FxcPath
     cargo build --release
     if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 }

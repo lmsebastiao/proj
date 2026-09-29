@@ -134,7 +134,10 @@ impl Palette {
     }
 
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.add_candidate.is_some() {
+        if self.add_candidate.is_some()
+            || self.clone_candidate.is_some()
+            || self.list() == List::Rename
+        {
             return div().flex_1().into_any_element();
         }
         if self.list() == List::Projects && self.projects.is_empty() {
@@ -191,6 +194,22 @@ impl Palette {
                     ));
                 }
                 ("Which editor should open your projects?".into(), lines)
+            }
+            Mode::Rename => {
+                let project = self.renamed_project()?;
+                let folders: Vec<String> = project
+                    .paths()
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect();
+                (
+                    format!("Rename {}", project.location()),
+                    vec![format!(
+                        "↵ saves. Search still finds it by {}.",
+                        folders.join(" and ")
+                    )],
+                )
             }
             Mode::OpenWith => {
                 let name = self
@@ -255,7 +274,23 @@ impl Render for Palette {
             self.render_empty(cx)
         };
 
-        let add_row = self.add_candidate.as_ref().map(|path| {
+        // A pasted folder path or git URL gets a row of its own above the matches.
+        let action = self
+            .add_candidate
+            .as_ref()
+            .map(|path| ("Add project", paths::display_path(path)))
+            .or_else(|| {
+                self.clone_candidate.as_ref().map(|target| {
+                    let into = match &target.into {
+                        Some(folder) => {
+                            format!("{} into {}", target.name, paths::display_path(folder))
+                        }
+                        None => format!("{} into a folder you choose…", target.name),
+                    };
+                    ("Clone", into)
+                })
+            });
+        let add_row = action.map(|(label, detail)| {
             div()
                 .mx_2()
                 .mt_1()
@@ -267,8 +302,16 @@ impl Render for Palette {
                 .items_center()
                 .gap_2()
                 .text_sm()
-                .child(div().text_color(rgb(ACCENT)).child("Add project"))
-                .child(div().text_color(rgb(TEXT)).child(paths::display_path(path)))
+                .child(div().text_color(rgb(ACCENT)).child(label))
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_color(rgb(TEXT))
+                        .child(detail),
+                )
                 .child(div().ml_auto().text_xs().text_color(rgb(MUTED)).child("↵"))
         });
 
@@ -316,6 +359,7 @@ impl Render for Palette {
                 hint("esc".into(), "back"),
             ],
             List::Commands => vec![hint("↵".into(), "run"), hint("esc".into(), "back")],
+            List::Rename => vec![hint("↵".into(), "save"), hint("esc".into(), "cancel")],
             List::Editors => {
                 let esc = if self.config.editor.is_some() {
                     "back"
@@ -406,6 +450,7 @@ impl Render for Palette {
                 List::OpenWith => this.toggle_project_editor(cx),
                 _ => this.toggle_pin(cx),
             }))
+            .on_action(cx.listener(Self::rename))
             .on_action(cx.listener(Self::copy_path))
             .on_action(cx.listener(Self::open_remote))
             .on_action(cx.listener(Self::remove))

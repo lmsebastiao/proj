@@ -29,6 +29,7 @@ then opens a folder picker where you can select one or more projects at once.
 | tab                     | mark projects to open together in one window |
 | ctrl-enter              | open folder in file manager                |
 | ctrl-s                  | pin / unpin (pinned projects stay on top)  |
+| f2                      | rename (empty = back to the folder name)   |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-shift-c            | copy the project path                      |
 | ctrl-o                  | add projects (multi-select folder picker)  |
@@ -62,6 +63,7 @@ Esc clears the marks.
 The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
 history, pin and editor list, so next time you just search for it. Removing it with ctrl-d
 forgets the combination, not the projects. Folders are passed in the order you marked them.
+Press **f2** to give it a shorter name; search still finds it by its folder names too.
 
 ### Per-project editors
 
@@ -89,9 +91,16 @@ Projects that share a folder name get their parent folder added, e.g. `app (clie
 
 Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
 
+Pasting a git URL (`https://…`, `ssh://…`, `git@host:owner/repo.git`) shows a **Clone** row.
+Enter runs `git clone` into the first `scan_dirs` folder (or asks for a folder if there are none),
+then opens the new project. The dialog stays open while it clones; if you close it, the clone
+still finishes and is listed next time. Private repositories work the way they do for `git` on
+your machine (SSH keys, Git Credential Manager).
+
 CLI:
 
 ```sh
+proj open QUERY     # open the best match, as if you'd typed QUERY and pressed enter
 proj add [PATH]     # add a project (default: current directory)
 proj remove PATH    # remove / hide a project
 proj list           # list projects
@@ -116,8 +125,10 @@ Picking an editor in the launcher updates only the `editor` line; the rest of th
 comments included, is left alone.
 
 Config and folder scans are re-read every time the dialog opens, so changes apply immediately.
-Changing the hotkey is the exception: that needs a restart.
-Manually added projects, hidden projects and open history live in `projects.toml`.
+That includes `hotkey`: a new shortcut starts working once the dialog has opened, by the old
+shortcut or the tray icon. If none of the new shortcuts can be registered, the old ones keep
+working and the dialog says why.
+Manually added projects, hidden projects, names and open history live in `projects.toml`.
 
 ## Windows installer
 

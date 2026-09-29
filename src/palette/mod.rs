@@ -20,22 +20,22 @@ use crate::{
     autostart,
     config::{self, Config},
     editors::{self, Editor},
-    fuzzy,
+    fuzzy, git,
     input::{self, TextInput},
     paths,
     store::{self, Db, Project},
 };
 
-use items::{COMMANDS, EditorOption, List, Match, Mode, Target};
+use items::{COMMANDS, CloneTarget, EditorOption, List, Match, Mode, Target};
 use keymap::{Confirm, Dismiss};
 
 pub use keymap::bind_keys;
 
-/// A problem found at startup (e.g. a shortcut that couldn't be registered),
-/// shown in the footer each time the palette opens until proj is restarted.
-pub struct StartupNotice(pub SharedString);
+/// Shortcuts that couldn't be registered, shown in the footer each time the
+/// palette opens until `hotkey` in config.toml is fixed.
+pub struct ShortcutNotice(pub Option<SharedString>);
 
-impl Global for StartupNotice {}
+impl Global for ShortcutNotice {}
 
 pub struct Palette {
     input: Entity<TextInput>,
@@ -51,6 +51,8 @@ pub struct Palette {
     open_with: Option<String>,
     /// The project being browsed in `Mode::Browse`.
     browse: Option<browse::Browse>,
+    /// Key of the entry being renamed in `Mode::Rename`.
+    renaming: Option<String>,
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
     autostart: bool,
@@ -58,8 +60,12 @@ pub struct Palette {
     selected: usize,
     /// Set when the query is a path to an existing, not-yet-listed folder.
     add_candidate: Option<PathBuf>,
+    /// Set when the query is a git URL.
+    clone_candidate: Option<CloneTarget>,
     /// A native file dialog is open; don't treat the lost focus as a dismissal.
     picking: bool,
+    /// `git clone` is running. The palette stays open so it can open the result.
+    cloning: bool,
     status: Option<SharedString>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -79,7 +85,7 @@ impl Palette {
             }),
             // Behave like a launcher: clicking anywhere else dismisses it.
             cx.observe_window_activation(window, |this, window, _| {
-                if !this.picking && !window.is_window_active() {
+                if !this.picking && !this.cloning && !window.is_window_active() {
                     window.remove_window();
                 }
             }),
@@ -95,12 +101,15 @@ impl Palette {
             names: HashMap::new(),
             open_with: None,
             browse: None,
+            renaming: None,
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
             matches: Vec::new(),
             selected: 0,
             add_candidate: None,
+            clone_candidate: None,
             picking: false,
+            cloning: false,
             status: None,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -116,8 +125,8 @@ impl Palette {
         };
         this.set_mode(mode, cx);
         this.status = cx
-            .try_global::<StartupNotice>()
-            .map(|notice| notice.0.clone());
+            .try_global::<ShortcutNotice>()
+            .and_then(|notice| notice.0.clone());
         this
     }
 
@@ -147,8 +156,9 @@ impl Palette {
             Mode::Projects => {
                 self.open_with = None;
                 self.browse = None;
+                self.renaming = None;
             }
-            Mode::Browse => {}
+            Mode::Browse | Mode::Rename => {}
             Mode::Editors => {
                 self.editors = editors::detected_editors(true)
                     .into_iter()
@@ -191,17 +201,30 @@ impl Palette {
             }
         }
         let placeholder = match mode {
-            Mode::Projects => "Search projects, > for commands, or paste a folder path…".into(),
+            Mode::Projects => {
+                "Search projects, > for commands, or paste a folder path or git URL…".into()
+            }
             Mode::Editors => "Choose the editor to open projects with…".into(),
             Mode::OpenWith => "Open with…".into(),
             Mode::Browse => match &self.browse {
                 Some(browse) => format!("Search in {}…", browse.breadcrumb()),
                 None => String::new(),
             },
+            Mode::Rename => "Leave empty to use the folder name".into(),
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
-        self.set_query("", cx);
+        if mode == Mode::Rename {
+            // Start from the current name, selected so typing replaces it.
+            let name = self
+                .renamed_project()
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            self.set_query(&name, cx);
+            self.input.update(cx, |input, cx| input.select_all_text(cx));
+        } else {
+            self.set_query("", cx);
+        }
     }
 
     fn set_query(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -216,6 +239,7 @@ impl Palette {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
             Mode::Browse => List::Browse,
+            Mode::Rename => List::Rename,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             Mode::Projects => List::Projects,
         }
@@ -223,6 +247,11 @@ impl Palette {
 
     fn open_with_project(&self) -> Option<&Project> {
         let key = self.open_with.as_ref()?;
+        self.projects.iter().find(|p| &p.key() == key)
+    }
+
+    fn renamed_project(&self) -> Option<&Project> {
+        let key = self.renaming.as_ref()?;
         self.projects.iter().find(|p| &p.key() == key)
     }
 
@@ -243,34 +272,19 @@ impl Palette {
             let mut scored: Vec<(i32, Match)> = (0..self.item_count())
                 .filter_map(|ix| {
                     let (title, subtitle) = self.item_text(ix);
-                    if let Some((score, hl)) = fuzzy::score(&query, &title) {
-                        // Small boost so pinned and recently used projects win ties.
-                        let boost = match list {
-                            List::Projects => {
-                                let p = &self.projects[ix];
-                                (p.pinned as i32 + (p.last_opened > 0) as i32) * 8
-                            }
-                            _ => 0,
-                        };
-                        return Some((
-                            score + 1000 + boost,
-                            Match {
-                                ix,
-                                title_hl: hl,
-                                subtitle_hl: Vec::new(),
-                            },
-                        ));
-                    }
-                    fuzzy::score(&query, &subtitle).map(|(score, hl)| {
-                        (
-                            score,
-                            Match {
-                                ix,
-                                title_hl: Vec::new(),
-                                subtitle_hl: hl,
-                            },
-                        )
-                    })
+                    let boost = match list {
+                        List::Projects => self.projects[ix].search_boost(),
+                        _ => 0,
+                    };
+                    let m = fuzzy::score_item(&query, &title, &subtitle, boost)?;
+                    Some((
+                        m.score,
+                        Match {
+                            ix,
+                            title_hl: m.title_hl,
+                            subtitle_hl: m.subtitle_hl,
+                        },
+                    ))
                 })
                 .collect();
             scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
@@ -286,6 +300,14 @@ impl Palette {
                         .projects
                         .iter()
                         .any(|p| !p.is_workspace() && &p.path == path)
+            });
+        self.clone_candidate = (list == List::Projects)
+            .then(|| git::clone_name(&query))
+            .flatten()
+            .map(|name| CloneTarget {
+                url: query.clone(),
+                name,
+                into: self.config.scan_dirs.first().cloned(),
             });
 
         self.selected = 0;
@@ -332,10 +354,17 @@ impl Palette {
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        // A pasted folder or git URL takes enter over the matches below it.
+        if let Some(path) = self.add_candidate.take() {
+            return self.add_paths(vec![path], cx);
+        }
+        if let Some(target) = self.clone_candidate.clone() {
+            return self.clone_repo(target, window, cx);
+        }
+        if self.list() == List::Rename {
+            return self.finish_rename(cx);
+        }
         let Some(ix) = self.matches.get(self.selected).map(|m| m.ix) else {
-            if let Some(path) = self.add_candidate.take() {
-                self.add_paths(vec![path], cx);
-            }
             return;
         };
         match self.list() {
@@ -344,23 +373,21 @@ impl Palette {
             List::Commands => self.run_command(COMMANDS[ix], window, cx),
             List::Browse => {
                 if let Some(browse) = &self.browse {
-                    let editor = self.default_editor(&browse.project);
+                    let editor = browse.project.default_editor(&self.config);
                     self.launch_entry(Target::Editor(editor), window, cx);
                 }
             }
-            List::Projects => match self.add_candidate.take() {
-                Some(path) => self.add_paths(vec![path], cx),
-                None => {
-                    let entry = if self.marked.len() > 1 {
-                        self.marked_workspace(cx)
-                    } else {
-                        self.selected_project().cloned()
-                    };
-                    if let Some(entry) = entry {
-                        self.open_entry(entry, window, cx);
-                    }
+            List::Projects => {
+                let entry = if self.marked.len() > 1 {
+                    self.marked_workspace(cx)
+                } else {
+                    self.selected_project().cloned()
+                };
+                if let Some(entry) = entry {
+                    self.open_entry(entry, window, cx);
                 }
-            },
+            }
+            List::Rename => {}
         }
     }
 
@@ -368,8 +395,8 @@ impl Palette {
         match self.list() {
             List::Commands => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith => {
-                let key = self.open_with.clone();
+            List::OpenWith | List::Rename => {
+                let key = self.open_with.clone().or_else(|| self.renaming.clone());
                 self.set_mode(Mode::Projects, cx);
                 self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
             }

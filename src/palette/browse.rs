@@ -187,16 +187,6 @@ impl Palette {
             .map(|m| &browse.entries[m.ix])
     }
 
-    /// The editor Enter uses for `project`: its own default, else the global one.
-    pub(super) fn default_editor(&self, project: &Project) -> String {
-        project
-            .editors
-            .first()
-            .or(self.config.editor.as_ref())
-            .cloned()
-            .unwrap_or_default()
-    }
-
     /// Opens the selected entry: files in the project's window, folders as their
     /// own workspace; the file manager and terminal use the entry's folder.
     pub(super) fn launch_entry(

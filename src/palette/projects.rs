@@ -1,4 +1,5 @@
-//! Acting on projects: opening, marking, pinning, removing and adding them, plus `>` commands.
+//! Acting on projects: opening, marking, pinning, renaming, removing, adding and
+//! cloning them, plus `>` commands.
 
 use std::{io, path::PathBuf};
 
@@ -6,13 +7,13 @@ use gpui::{ClipboardItem, Context, Focusable, PathPromptOptions, Window};
 
 use crate::{
     autostart, config, git, open, paths, platform,
-    store::{self, Project},
+    store::{self, Db, Project},
 };
 
 use super::{
     Palette,
-    items::{List, Mode, PaletteCommand, Target},
-    keymap::{AddProjects, CopyPath, OpenRemote, Remove},
+    items::{CloneTarget, List, Mode, PaletteCommand, Target},
+    keymap::{AddProjects, CopyPath, OpenRemote, Remove, Rename},
 };
 
 impl Palette {
@@ -141,6 +142,143 @@ impl Palette {
         self.status = Some(format!("{verb} {}", project.name).into());
     }
 
+    /// F2: type a new name for the selected entry in the search box.
+    pub(super) fn rename(&mut self, _: &Rename, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self.selected_project().map(Project::key) else {
+            return;
+        };
+        self.renaming = Some(key);
+        self.set_mode(Mode::Rename, cx);
+    }
+
+    pub(super) fn finish_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.renaming.clone() else {
+            return;
+        };
+        // Unchanged: don't freeze a generated name like "app (client)".
+        if self.renamed_project().is_some_and(|p| p.name == self.query) {
+            self.set_mode(Mode::Projects, cx);
+            self.select_where(|this, ix| this.projects[ix].key() == key);
+            return;
+        }
+        store::rename(&mut self.db, &key, &self.query);
+        self.save(cx);
+        self.reload_projects();
+        self.set_mode(Mode::Projects, cx);
+        self.select_where(|this, ix| this.projects[ix].key() == key);
+        let verb = if self.db.names.contains_key(&key) {
+            "Renamed to"
+        } else {
+            "Back to"
+        };
+        let name = self
+            .projects
+            .iter()
+            .find(|p| p.key() == key)
+            .map(|p| &p.name);
+        self.status = name.map(|name| format!("{verb} {name}").into());
+    }
+
+    /// Enter on a pasted git URL: clone it into the first scan folder (or one
+    /// picked now), then list and open it.
+    pub(super) fn clone_repo(
+        &mut self,
+        target: CloneTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.cloning {
+            return;
+        }
+        match target.into {
+            // Folders cloned straight into a scan folder are listed by the scan.
+            Some(folder) => {
+                self.start_clone(target.url, folder.join(&target.name), true, window, cx)
+            }
+            None => {
+                let options = PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some(format!("Clone {} into", target.name).into()),
+                };
+                self.pick(options, window, cx, move |this, paths, window, cx| {
+                    if let Some(folder) = paths.into_iter().next() {
+                        let dest = folder.join(&target.name);
+                        this.start_clone(target.url, dest, false, window, cx);
+                    }
+                });
+            }
+        }
+    }
+
+    fn start_clone(
+        &mut self,
+        url: String,
+        dest: PathBuf,
+        scanned: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if dest.exists() {
+            self.status = Some(format!("{} already exists", paths::display_path(&dest)).into());
+            cx.notify();
+            return;
+        }
+        self.cloning = true;
+        self.status = Some(format!("Cloning into {}…", paths::display_path(&dest)).into());
+        cx.notify();
+        let clone = cx.background_executor().spawn({
+            let dest = dest.clone();
+            async move { git::clone(&url, &dest) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = clone.await;
+            let cloned = result.is_ok();
+            let finished = this.update_in(cx, |this, window, cx| {
+                this.finish_clone(dest.clone(), scanned, result, window, cx);
+            });
+            // Closed with esc while cloning: still list the new project.
+            if finished.is_err() && cloned {
+                let mut db = store::load_db();
+                list_clone(&mut db, dest, scanned);
+                store::save_db(&db).ok();
+            }
+        })
+        .detach();
+    }
+
+    fn finish_clone(
+        &mut self,
+        dest: PathBuf,
+        scanned: bool,
+        result: io::Result<()>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cloning = false;
+        if let Err(err) = result {
+            self.status = Some(format!("Clone failed: {err}").into());
+            cx.notify();
+            return;
+        }
+        list_clone(&mut self.db, dest.clone(), scanned);
+        self.save(cx);
+        self.reload_projects();
+        let project = self
+            .projects
+            .iter()
+            .find(|p| !p.is_workspace() && p.path == dest)
+            .cloned();
+        match project {
+            Some(project) => self.open_entry(project, window, cx),
+            None => {
+                self.set_query("", cx);
+                self.status = Some(format!("Cloned into {}", paths::display_path(&dest)).into());
+            }
+        }
+    }
+
     /// Ctrl-G: the repository's web page (GitHub, GitLab, Gitea…), from the origin remote.
     pub(super) fn open_remote(
         &mut self,
@@ -255,10 +393,7 @@ impl Palette {
             else {
                 continue;
             };
-            self.db.hidden.remove(&path);
-            if !self.db.manual.contains(&path) {
-                self.db.manual.push(path.clone());
-            }
+            store::add_manual(&mut self.db, path.clone());
             added.push(path);
         }
         if added.is_empty() {
@@ -307,5 +442,15 @@ impl Palette {
             .ok();
         })
         .detach();
+    }
+}
+
+/// Lists a freshly cloned folder: the scan already finds it inside a scan
+/// folder (unless an old folder there was hidden); elsewhere it's added by hand.
+fn list_clone(db: &mut Db, dest: PathBuf, scanned: bool) {
+    if scanned {
+        db.hidden.remove(&dest);
+    } else {
+        store::add_manual(db, dest);
     }
 }
