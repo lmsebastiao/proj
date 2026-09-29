@@ -1,4 +1,4 @@
-//! Windows-specific window behaviour gpui doesn't expose.
+//! Win32 window and process behaviour gpui doesn't expose.
 
 use gpui::{App, PlatformDisplay, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -60,4 +60,18 @@ pub fn raise(window: &Window) {
             SetForegroundWindow(hwnd);
         }
     }
+}
+
+/// Lets CLI output reach the terminal despite the GUI subsystem.
+pub fn attach_console() {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+}
+
+/// Moves idle pages out of the working set.
+pub fn trim_memory() {
+    use windows_sys::Win32::System::{
+        ProcessStatus::K32EmptyWorkingSet, Threading::GetCurrentProcess,
+    };
+    unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
 }

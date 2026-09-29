@@ -1,4 +1,4 @@
-//! Config (user-edited) and project database (app-managed) persistence, plus folder scanning.
+//! The project database (`projects.toml`) and the project list built from it.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -8,39 +8,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    /// Global shortcut that toggles the launcher, e.g. "alt+space".
-    pub hotkey: String,
-    /// Program used to open a project. `None` = not chosen yet, "" = file manager.
-    pub editor: Option<String>,
-    /// Extra arguments passed before the project path.
-    pub editor_args: Vec<String>,
-    /// Folders whose sub-folders are listed as projects.
-    pub scan_dirs: Vec<PathBuf>,
-    /// 1 = every direct sub-folder is a project. Higher values descend into
-    /// folders that are not git repositories, up to this depth.
-    pub scan_depth: u8,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            // alt+space is the window menu on Windows and PowerToys' default.
-            hotkey: if cfg!(target_os = "macos") {
-                "alt+space"
-            } else {
-                "ctrl+alt+space"
-            }
-            .into(),
-            editor: None,
-            editor_args: Vec::new(),
-            scan_dirs: Vec::new(),
-            scan_depth: 1,
-        }
-    }
-}
+use crate::{
+    config::Config,
+    git,
+    paths::{app_dir, write_atomic},
+};
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
 ///
@@ -86,7 +58,9 @@ impl Project {
     }
 
     pub fn paths(&self) -> Vec<PathBuf> {
-        std::iter::once(self.path.clone()).chain(self.extra.iter().cloned()).collect()
+        std::iter::once(self.path.clone())
+            .chain(self.extra.iter().cloned())
+            .collect()
     }
 
     pub fn key(&self) -> String {
@@ -102,82 +76,8 @@ pub fn entry_key(paths: &[PathBuf]) -> String {
         .join("|")
 }
 
-fn app_dir(base: Option<PathBuf>) -> PathBuf {
-    base.unwrap_or_else(|| PathBuf::from(".")).join("proj")
-}
-
-pub fn config_path() -> PathBuf {
-    app_dir(dirs::config_dir()).join("config.toml")
-}
-
 pub fn db_path() -> PathBuf {
     app_dir(dirs::data_local_dir()).join("projects.toml")
-}
-
-/// Loads the config, writing a commented template on first run.
-pub fn load_config() -> Config {
-    let path = config_path();
-    match fs::read_to_string(&path) {
-        Ok(text) => toml::from_str(&text).unwrap_or_else(|err| {
-            eprintln!("proj: invalid {}: {err}", path.display());
-            Config::default()
-        }),
-        Err(_) => {
-            let config = Config::default();
-            let text = CONFIG_TEMPLATE.replace(
-                "{hotkey}",
-                &toml::Value::String(config.hotkey.clone()).to_string(),
-            );
-            if let Err(err) = write_atomic(&path, &text) {
-                eprintln!("proj: could not write {}: {err}", path.display());
-            }
-            config
-        }
-    }
-}
-
-// `editor` is left unset so the launcher asks for it; `set_editor` appends it
-// at the end, right below its comment.
-const CONFIG_TEMPLATE: &str = r#"# proj configuration
-
-# Global shortcut that toggles the launcher, e.g. "alt+space", "ctrl+alt+p".
-# Changing it requires restarting proj.
-hotkey = {hotkey}
-
-# Optional: folders whose sub-folders are all listed as projects,
-# e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.
-scan_dirs = []
-
-# 1 = every direct sub-folder of a scan_dir is a project. Higher values descend
-# into folders that are not git repositories, up to this depth.
-scan_depth = 1
-
-# Program used to open projects; the project path is appended after editor_args.
-# Chosen from the launcher (ctrl-e). "" opens projects in the file manager.
-# editor_args = ["--new-window"]
-"#;
-
-/// Sets `editor` in config.toml, preserving the rest of the file.
-pub fn set_editor(command: &str) -> io::Result<()> {
-    let path = config_path();
-    let text = fs::read_to_string(&path).unwrap_or_default();
-    write_atomic(&path, &with_editor(&text, command)?)
-}
-
-fn with_editor(text: &str, command: &str) -> io::Result<String> {
-    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
-    let is_new = !doc.contains_key("editor");
-    doc["editor"] = toml_edit::value(command);
-    if is_new {
-        // The template ends with the editor docs, which toml_edit keeps as trailing
-        // text after the new key; move them above it instead.
-        let trailing = doc.trailing().as_str().unwrap_or_default().to_string();
-        doc.set_trailing("");
-        if let Some(mut key) = doc.as_table_mut().key_mut("editor") {
-            key.leaf_decor_mut().set_prefix(trailing);
-        }
-    }
-    Ok(doc.to_string())
 }
 
 pub fn load_db() -> Db {
@@ -192,35 +92,11 @@ pub fn save_db(db: &Db) -> io::Result<()> {
     write_atomic(&db_path(), &text)
 }
 
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(tmp, path)
-}
-
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// Expands `~` and makes the path absolute (without resolving symlinks or adding `\\?\`).
-pub fn normalize(input: &str) -> Option<PathBuf> {
-    let input = input.trim().trim_matches('"');
-    if input.is_empty() {
-        return None;
-    }
-    let path = match input.strip_prefix('~') {
-        Some(rest) => dirs::home_dir()?.join(rest.trim_start_matches(['/', '\\'])),
-        None => PathBuf::from(input),
-    };
-    let path = std::path::absolute(path).ok()?;
-    // Drop trailing separators so "C:\repos\x\" and "C:\repos\x" dedupe.
-    Some(path.components().collect())
 }
 
 /// Builds the project list: scanned + manual, minus hidden, most recently opened first.
@@ -236,7 +112,7 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         let path = paths.next().expect("at least one folder");
         projects.push(Project {
             name,
-            branch: git_branch(&path),
+            branch: git::git_branch(&path),
             pinned: db.pinned.contains(&key),
             editors: db.editors.get(&key).cloned().unwrap_or_default(),
             last_opened: db.opened.get(&key).copied().unwrap_or(0),
@@ -269,7 +145,11 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     }
     for workspace in &db.workspaces {
         if workspace.len() > 1 && workspace.iter().all(|p| p.is_dir()) {
-            let name = workspace.iter().map(|p| folder_name(p)).collect::<Vec<_>>().join(" + ");
+            let name = workspace
+                .iter()
+                .map(|p| folder_name(p))
+                .collect::<Vec<_>>()
+                .join(" + ");
             push(workspace.clone(), name, true);
         }
     }
@@ -282,6 +162,28 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     projects
+}
+
+fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_dir = match entry.file_type() {
+            Ok(ft) if ft.is_symlink() => path.is_dir(),
+            Ok(ft) => ft.is_dir(),
+            Err(_) => false,
+        };
+        if !is_dir || entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if depth <= 1 || path.join(".git").exists() {
+            out.push(path);
+        } else {
+            scan(&path, depth - 1, out);
+        }
+    }
 }
 
 /// Appends the parent folder to names shared by several projects: "app (client)".
@@ -323,100 +225,6 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     db.opened.remove(&key);
 }
 
-/// The repository's git directory: `.git`, or where a worktree/submodule's `.git` file points.
-fn git_dir(path: &Path) -> Option<PathBuf> {
-    let dot_git = path.join(".git");
-    if dot_git.is_file() {
-        let text = fs::read_to_string(&dot_git).ok()?;
-        Some(path.join(text.strip_prefix("gitdir:")?.trim()))
-    } else {
-        dot_git.is_dir().then_some(dot_git)
-    }
-}
-
-/// Current branch (or short commit when detached), read straight from `.git/HEAD`.
-fn git_branch(path: &Path) -> Option<String> {
-    let head = fs::read_to_string(git_dir(path)?.join("HEAD")).ok()?;
-    let head = head.trim();
-    Some(match head.strip_prefix("ref: ") {
-        Some(reference) => reference
-            .strip_prefix("refs/heads/")
-            .unwrap_or(reference)
-            .to_string(),
-        None => head.get(..7)?.to_string(),
-    })
-}
-
-/// Web page of the repository's `origin` remote (or its first remote), e.g.
-/// `https://git.tomiworld.com/web/interactive-v2`.
-pub fn git_web_url(path: &Path) -> Option<String> {
-    let mut git_dir = git_dir(path)?;
-    // Worktrees keep the shared config in the main repository.
-    if let Ok(common) = fs::read_to_string(git_dir.join("commondir")) {
-        git_dir = git_dir.join(common.trim());
-    }
-    let config = fs::read_to_string(git_dir.join("config")).ok()?;
-    remote_web_url(&remote_url(&config)?)
-}
-
-/// `url` of `[remote "origin"]`, else of the first remote, from a git config file.
-fn remote_url(config: &str) -> Option<String> {
-    let mut section = String::new();
-    let mut first = None;
-    for line in config.lines().map(str::trim) {
-        if line.starts_with('[') {
-            section = line.to_string();
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key.trim() != "url" || !section.starts_with("[remote ") {
-            continue;
-        }
-        let url = value.trim().trim_matches('"').to_string();
-        if section == "[remote \"origin\"]" {
-            return Some(url);
-        }
-        first.get_or_insert(url);
-    }
-    first
-}
-
-/// Turns a clone URL (ssh, scp-style or http) into the repository's web page.
-fn remote_web_url(url: &str) -> Option<String> {
-    let (scheme, host, path) = if let Some((scheme, rest)) = url.split_once("://") {
-        let (authority, path) = rest.split_once('/')?;
-        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        match scheme {
-            "http" | "https" => (scheme, host.to_string(), path),
-            // The ssh port isn't the web port.
-            "ssh" | "git" | "git+ssh" => ("https", host.split(':').next()?.to_string(), path),
-            _ => return None,
-        }
-    } else {
-        // scp-like: [user@]host:group/repo.git (not a Windows drive like C:\...)
-        let (authority, path) = url.split_once(':')?;
-        if authority.len() < 2 || path.starts_with('\\') {
-            return None;
-        }
-        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        ("https", host.to_string(), path)
-    };
-    let path = path.trim_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    if host.is_empty() || path.is_empty() {
-        return None;
-    }
-    // Azure DevOps ssh remotes: ssh.dev.azure.com:v3/org/project/repo
-    if host == "ssh.dev.azure.com"
-        && let Some(["v3", org, project, repo]) = Some(path.split('/').collect::<Vec<_>>().as_slice())
-    {
-        return Some(format!("https://dev.azure.com/{org}/{project}/_git/{repo}"));
-    }
-    Some(format!("{scheme}://{host}/{path}"))
-}
-
 /// Adds `editor` to a project's editor list. Starting a list keeps the global
 /// editor as the first choice, so the project offers both instead of silently
 /// switching away from it.
@@ -453,58 +261,9 @@ pub fn ago(then: u64, now: u64) -> String {
     format!("{value}{unit} ago")
 }
 
-fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let is_dir = match entry.file_type() {
-            Ok(ft) if ft.is_symlink() => path.is_dir(),
-            Ok(ft) => ft.is_dir(),
-            Err(_) => false,
-        };
-        if !is_dir || entry.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        if depth <= 1 || path.join(".git").exists() {
-            out.push(path);
-        } else {
-            scan(&path, depth - 1, out);
-        }
-    }
-}
-
-/// Replaces the home directory prefix with `~` for display.
-pub fn display_path(path: &Path) -> String {
-    if let Some(home) = dirs::home_dir()
-        && let Ok(rest) = path.strip_prefix(&home)
-    {
-        return Path::new("~").join(rest).to_string_lossy().into_owned();
-    }
-    path.to_string_lossy().into_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn editor_is_added_below_its_docs_and_replaced_in_place() {
-        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
-        let added = with_editor(&template, "zed").unwrap();
-        assert!(
-            added.ends_with("# editor_args = [\"--new-window\"]\neditor = \"zed\"\n"),
-            "{added}"
-        );
-        assert_eq!(
-            toml::from_str::<Config>(&added).unwrap().editor.as_deref(),
-            Some("zed")
-        );
-
-        let replaced = with_editor(&added, "code").unwrap();
-        assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
-    }
 
     #[test]
     fn relative_time() {
@@ -540,33 +299,6 @@ mod tests {
         disambiguate(&mut projects);
         let names: Vec<_> = projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["app (client)", "App (server)", "web"]);
-    }
-
-    #[test]
-    fn reads_git_branch() {
-        let dir = std::env::temp_dir().join(format!("proj-test-{}", std::process::id()));
-        let repo = dir.join("repo");
-        fs::create_dir_all(repo.join(".git")).unwrap();
-        fs::write(repo.join(".git/HEAD"), "ref: refs/heads/feature/x\n").unwrap();
-        assert_eq!(git_branch(&repo).as_deref(), Some("feature/x"));
-
-        fs::write(repo.join(".git/HEAD"), "0123456789abcdef\n").unwrap();
-        assert_eq!(git_branch(&repo).as_deref(), Some("0123456"));
-
-        // Worktree: .git is a file pointing elsewhere.
-        let worktree = dir.join("wt");
-        fs::create_dir_all(dir.join("gitdir")).unwrap();
-        fs::create_dir_all(&worktree).unwrap();
-        fs::write(dir.join("gitdir/HEAD"), "ref: refs/heads/main\n").unwrap();
-        fs::write(
-            worktree.join(".git"),
-            format!("gitdir: {}\n", dir.join("gitdir").display()),
-        )
-        .unwrap();
-        assert_eq!(git_branch(&worktree).as_deref(), Some("main"));
-
-        assert_eq!(git_branch(&dir), None);
-        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
@@ -610,8 +342,15 @@ mod tests {
         };
 
         let key = remember_workspace(&mut db, vec![app.clone(), sdk.clone()]);
-        assert_eq!(remember_workspace(&mut db, vec![app.clone(), sdk.clone()]), key);
-        assert_eq!(db.workspaces.len(), 1, "opening the same pair again reuses it");
+        assert_eq!(
+            remember_workspace(&mut db, vec![app.clone(), sdk.clone()]),
+            key
+        );
+        assert_eq!(
+            db.workspaces.len(),
+            1,
+            "opening the same pair again reuses it"
+        );
         db.opened.insert(key.clone(), 10);
 
         let projects = collect(&config, &db);
@@ -627,41 +366,5 @@ mod tests {
         assert!(db.workspaces.is_empty() && !db.opened.contains_key(&key));
         assert_eq!(collect(&config, &db).len(), 2);
         fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn git_remotes_become_web_urls() {
-        let cases = [
-            ("ssh://git@git.tomiworld.com:222/web/interactive-v2.git", "https://git.tomiworld.com/web/interactive-v2"),
-            ("https://github.com/lmsebastiao/proj.git", "https://github.com/lmsebastiao/proj"),
-            ("https://user:token@git.tomiworld.com/tomi/shared-sdk.git", "https://git.tomiworld.com/tomi/shared-sdk"),
-            ("git@github.com:owner/repo.git", "https://github.com/owner/repo"),
-            ("http://gitea.local:3000/team/app/", "http://gitea.local:3000/team/app"),
-            ("git@ssh.dev.azure.com:v3/org/project/repo", "https://dev.azure.com/org/project/_git/repo"),
-        ];
-        for (remote, web) in cases {
-            assert_eq!(remote_web_url(remote).as_deref(), Some(web), "{remote}");
-        }
-        assert_eq!(remote_web_url(r"C:\repos\local-mirror"), None);
-        assert_eq!(remote_web_url("/srv/git/repo.git"), None);
-    }
-
-    #[test]
-    fn prefers_origin_remote() {
-        let config = r#"
-[core]
-    bare = false
-[remote "upstream"]
-    url = https://github.com/upstream/repo.git
-    fetch = +refs/heads/*:refs/remotes/upstream/*
-[remote "origin"]
-    url = git@github.com:me/repo.git
-"#;
-        assert_eq!(remote_url(config).as_deref(), Some("git@github.com:me/repo.git"));
-        assert_eq!(
-            remote_url("[remote \"fork\"]\n\turl = https://x.com/a/b\n").as_deref(),
-            Some("https://x.com/a/b")
-        );
-        assert_eq!(remote_url("[core]\n\tbare = false\n"), None);
     }
 }
