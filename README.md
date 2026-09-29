@@ -97,6 +97,7 @@ proj remove PATH    # remove / hide a project
 proj list           # list projects
 proj paths          # where the config and database live
 proj autostart [on|off]  # start proj when you log in
+proj path [add|remove]   # put proj's folder on your user PATH (Windows)
 ```
 
 ## Configuration
@@ -117,6 +118,31 @@ comments included, is left alone.
 Config and folder scans are re-read every time the dialog opens, so changes apply immediately.
 Changing the hotkey is the exception: that needs a restart.
 Manually added projects, hidden projects and open history live in `projects.toml`.
+
+## Windows installer
+
+```powershell
+.\scripts\build-installer.ps1              # cargo build --release + package
+.\scripts\build-installer.ps1 -SkipBuild   # package the last release build
+```
+
+This produces `dist\proj-setup-<version>.exe` (version from `Cargo.toml`). The script uses
+`makensis` if NSIS is installed; otherwise it downloads the pinned portable NSIS release once into
+`%LOCALAPPDATA%\proj-build`, checking its SHA-256. Nothing is installed system-wide.
+
+The installer is per user, so it needs no admin rights:
+
+- installs to `%LOCALAPPDATA%\Programs\proj` and adds that folder to the user PATH, so `proj add .`
+  works in new terminals
+- adds a Start menu shortcut and an "Apps & features" entry
+- offers "Start proj when I log in" and "Start proj now" on the finish page
+- stops a running proj before upgrading
+- the uninstaller removes the PATH entry and start-on-login, but keeps your settings in
+  `%APPDATA%\proj`
+- supports silent install and uninstall: `proj-setup-x.y.z.exe /S`, `uninstall.exe /S`
+
+The PATH is edited by `proj path add/remove`, not by NSIS. NSIS strings are limited to 1024
+characters, which would truncate a long PATH.
 
 ## Memory
 

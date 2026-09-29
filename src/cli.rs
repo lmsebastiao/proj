@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::{autostart, config, paths, store};
+use crate::{autostart, config, paths, platform, store};
 
 const USAGE: &str = "\
 proj - project launcher
@@ -13,7 +13,8 @@ usage:
   proj remove PATH         remove / hide a project
   proj list                list known projects
   proj paths               show config and database locations
-  proj autostart [on|off]  start proj when you log in";
+  proj autostart [on|off]  start proj when you log in
+  proj path [add|remove]   put proj's folder on your PATH (Windows)";
 
 pub fn run(args: &[String]) -> i32 {
     let config = config::load_config();
@@ -74,6 +75,25 @@ pub fn run(args: &[String]) -> i32 {
             }
             let state = if autostart::is_enabled() { "on" } else { "off" };
             println!("start on login: {state}");
+            return 0;
+        }
+        "path" => {
+            let result = match args.get(1).map(String::as_str) {
+                Some("add") => platform::set_exe_dir_on_path(true).map(|_| ()),
+                Some("remove") => platform::set_exe_dir_on_path(false).map(|_| ()),
+                None => Ok(()),
+                Some(_) => {
+                    eprintln!("usage: proj path [add|remove]");
+                    return 2;
+                }
+            };
+            match result.and_then(|()| platform::exe_dir_on_path()) {
+                Ok(on) => println!("on PATH: {}", if on { "yes" } else { "no" }),
+                Err(err) => {
+                    eprintln!("proj: {err}");
+                    return 1;
+                }
+            }
             return 0;
         }
         "paths" => {
