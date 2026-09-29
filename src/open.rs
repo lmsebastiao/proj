@@ -292,6 +292,16 @@ pub fn open_terminal(path: &Path) -> io::Result<()> {
 
 /// Opens `path` in the system file manager.
 pub fn reveal(path: &Path) -> io::Result<()> {
+    system_open(path.as_os_str())
+}
+
+/// Opens `url` in the default browser.
+pub fn open_url(url: &str) -> io::Result<()> {
+    system_open(url.as_ref())
+}
+
+/// Hands `target` (a folder or URL) to the OS's default handler.
+fn system_open(target: &std::ffi::OsStr) -> io::Result<()> {
     let program = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -300,7 +310,7 @@ pub fn reveal(path: &Path) -> io::Result<()> {
         "xdg-open"
     };
     let mut command = Command::new(program);
-    command.arg(path);
+    command.arg(target);
     spawn(command)
 }
 

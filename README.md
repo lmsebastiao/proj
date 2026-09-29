@@ -26,6 +26,7 @@ then opens a folder picker where you can select one or more projects at once.
 | tab                     | mark projects to open together in one window |
 | ctrl-enter              | open folder in file manager                |
 | ctrl-s                  | pin / unpin (pinned projects stay on top)  |
+| ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-shift-c            | copy the project path                      |
 | ctrl-o                  | add projects (multi-select folder picker)  |
 | ctrl-e                  | change editor                              |

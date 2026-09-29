@@ -24,6 +24,7 @@ actions!(
         Reveal,
         OpenTerminal,
         OpenWithMenu,
+        OpenRemote,
         ToggleMark,
         TogglePin,
         CopyPath,
@@ -48,6 +49,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-enter", Reveal, ctx),
         KeyBinding::new("shift-enter", OpenTerminal, ctx),
         KeyBinding::new("alt-enter", OpenWithMenu, ctx),
+        KeyBinding::new("secondary-g", OpenRemote, ctx),
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("secondary-s", TogglePin, ctx),
         KeyBinding::new("secondary-shift-c", CopyPath, ctx),
@@ -778,6 +780,26 @@ impl Palette {
         self.status = Some(format!("{verb} {}", project.name).into());
     }
 
+    /// Ctrl-G: the repository's web page (GitHub, GitLab, Gitea…), from the origin remote.
+    fn open_remote(&mut self, _: &OpenRemote, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.selected_project().cloned() else {
+            return;
+        };
+        // For a workspace, the first folder's repository.
+        let Some(url) = store::git_web_url(&project.path) else {
+            self.status = Some(format!("{} has no git remote", project.name).into());
+            cx.notify();
+            return;
+        };
+        match open::open_url(&url) {
+            Ok(()) => window.remove_window(),
+            Err(err) => {
+                self.status = Some(format!("Could not open {url}: {err}").into());
+                cx.notify();
+            }
+        }
+    }
+
     fn copy_path(&mut self, _: &CopyPath, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(project) = self.selected_project() {
             let paths: Vec<String> = project
@@ -1363,6 +1385,7 @@ impl Render for Palette {
                 _ => this.toggle_pin(cx),
             }))
             .on_action(cx.listener(Self::copy_path))
+            .on_action(cx.listener(Self::open_remote))
             .on_action(cx.listener(Self::remove))
             .on_action(cx.listener(Self::add_projects))
             .on_action(
