@@ -11,6 +11,7 @@ actions!(
         SelectPrev,
         Confirm,
         Reveal,
+        ShowInFileManager,
         OpenTerminal,
         OpenWithMenu,
         OpenRemote,
@@ -21,6 +22,7 @@ actions!(
         Remove,
         AddProjects,
         ChooseEditor,
+        ToggleShortcuts,
         Dismiss,
         QuitApp
     ]
@@ -36,7 +38,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-p", SelectPrev, ctx),
         KeyBinding::new("shift-tab", SelectPrev, ctx),
         KeyBinding::new("enter", Confirm, ctx),
+        // In the Open-with list secondary-enter makes an editor the default instead.
         KeyBinding::new("secondary-enter", Reveal, ctx),
+        KeyBinding::new("secondary-e", ShowInFileManager, ctx),
         KeyBinding::new("shift-enter", OpenTerminal, ctx),
         KeyBinding::new("alt-enter", OpenWithMenu, ctx),
         KeyBinding::new("secondary-g", OpenRemote, ctx),
@@ -47,7 +51,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-d", Remove, ctx),
         KeyBinding::new("shift-delete", Remove, ctx),
         KeyBinding::new("secondary-o", AddProjects, ctx),
-        KeyBinding::new("secondary-e", ChooseEditor, ctx),
+        KeyBinding::new("secondary-shift-e", ChooseEditor, ctx),
+        KeyBinding::new("f1", ToggleShortcuts, ctx),
         KeyBinding::new("escape", Dismiss, ctx),
         KeyBinding::new("secondary-q", QuitApp, ctx),
     ]);

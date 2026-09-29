@@ -116,7 +116,7 @@ scan_dirs = []
 scan_depth = 1
 
 # Program used to open projects; the project path is appended after editor_args.
-# Chosen from the launcher (ctrl-e). "" opens projects in the file manager.
+# Chosen from the launcher (ctrl-shift-e). "" opens projects in the file manager.
 # editor_args = ["--new-window"]
 "#;
 

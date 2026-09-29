@@ -27,16 +27,20 @@ then opens a folder picker where you can select one or more projects at once.
 | → / ←                   | browse into a project / back up (see below) |
 | alt-enter               | open with… (choose an editor for this project) |
 | tab                     | mark projects to open together in one window |
-| ctrl-enter              | open folder in file manager                |
+| ctrl-e, ctrl-enter      | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-s                  | pin / unpin (pinned projects stay on top)  |
 | f2                      | rename (empty = back to the folder name)   |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-shift-c            | copy the project path                      |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| ctrl-e                  | change editor                              |
+| ctrl-shift-e            | change the default editor                  |
 | ctrl-d, shift-delete    | remove project                             |
+| f1                      | list every shortcut (click one to run it)  |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
+
+The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
+in the footer, opens a dropdown with all of them; clicking one runs it.
 
 Type `>` to list commands: start on login, add projects, change editor, open the config
 file, quit.
@@ -47,7 +51,7 @@ Press **→** on a project to list its files and folders; **→** on a folder go
 **←** goes back up (and back to the project list from the top), **esc** returns to the list.
 Typing filters the current folder. **Enter** opens a file in the project's editor, inside the
 project's window (`zed <project> <file>`), or opens a subfolder as its own workspace.
-**ctrl-enter** shows it in the file manager, **shift-enter** opens a terminal there, and
+**ctrl-e** shows it in the file manager, **shift-enter** opens a terminal there, and
 **ctrl-shift-c** copies its path. Nothing you browse is added to the project list.
 
 →/← only browse when the text cursor is at the end/start of the search box, so they still
@@ -67,7 +71,7 @@ Press **f2** to give it a shorter name; search still finds it by its folder name
 
 ### Per-project editors
 
-The global editor (ctrl-e) opens everything by default. For a single project, press
+The global editor (ctrl-shift-e) opens everything by default. For a single project, press
 **alt-enter** to open it with any editor. In that list:
 
 - **ctrl-s** adds or removes an editor for the project. The first time you add one, the

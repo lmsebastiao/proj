@@ -1,5 +1,6 @@
 //! The search dialog: state, modes, filtering and selection. Actions live in
-//! `projects`, `editor_choice` and `browse`, drawing in `render`.
+//! `projects`, `editor_choice` and `browse`, drawing in `render`, and the list
+//! of keys in `shortcuts`.
 
 mod browse;
 mod editor_choice;
@@ -7,6 +8,7 @@ mod items;
 mod keymap;
 mod projects;
 mod render;
+mod shortcuts;
 mod theme;
 
 use std::{collections::HashMap, path::PathBuf};
@@ -66,6 +68,8 @@ pub struct Palette {
     picking: bool,
     /// `git clone` is running. The palette stays open so it can open the result.
     cloning: bool,
+    /// The dropdown with every shortcut (F1) is open.
+    show_shortcuts: bool,
     status: Option<SharedString>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -80,6 +84,7 @@ impl Palette {
                 if query != this.query {
                     this.query = query;
                     this.status = None;
+                    this.show_shortcuts = false;
                     this.refilter(cx);
                 }
             }),
@@ -110,6 +115,7 @@ impl Palette {
             clone_candidate: None,
             picking: false,
             cloning: false,
+            show_shortcuts: false,
             status: None,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -152,6 +158,7 @@ impl Palette {
 
     fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
         self.mode = mode;
+        self.show_shortcuts = false;
         match mode {
             Mode::Projects => {
                 self.open_with = None;
@@ -392,6 +399,11 @@ impl Palette {
     }
 
     fn dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
+        if self.show_shortcuts {
+            self.show_shortcuts = false;
+            cx.notify();
+            return;
+        }
         match self.list() {
             List::Commands => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),

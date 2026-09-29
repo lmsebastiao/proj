@@ -145,7 +145,7 @@ impl Palette {
                     PaletteCommand::ChangeEditor => (
                         "Change default editor".into(),
                         format!(
-                            "Currently {} · {m}-e",
+                            "Currently {} · {m}-shift-e",
                             self.name_of(self.config.editor.as_deref().unwrap_or(""))
                         ),
                     ),

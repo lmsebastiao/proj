@@ -9,7 +9,7 @@ use gpui::{
 
 use crate::{input, paths, store};
 
-use super::{Palette, items::*, keymap::*, secondary, theme::*};
+use super::{Palette, items::*, keymap::*, secondary, shortcuts::Shortcut, theme::*};
 
 impl Palette {
     pub(super) fn render_row(
@@ -184,7 +184,7 @@ impl Palette {
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors => {
                 let mut lines = vec![format!(
-                    "The default for all projects. Change it any time with {}-e.",
+                    "The default for all projects. Change it any time with {}-shift-e.",
                     secondary()
                 )];
                 if self.config.editor.is_none() {
@@ -322,53 +322,25 @@ impl Render for Palette {
                 .child(div().text_color(rgb(TEXT)).child(key))
                 .child(label)
         };
-        let m = secondary();
-        let hints: Vec<_> = match self.list() {
-            List::Projects if !self.marked.is_empty() => vec![
-                hint(
-                    "↵".into(),
-                    if self.marked.len() > 1 {
-                        "open together"
-                    } else {
-                        "open"
-                    },
-                ),
-                hint("alt-↵".into(), "open with"),
-                hint("tab".into(), "mark"),
-                hint("esc".into(), "clear"),
-            ],
-            List::Projects => vec![
-                hint("↵".into(), "open"),
-                hint("→".into(), "files"),
-                hint("alt-↵".into(), "with"),
-                hint("tab".into(), "combine"),
-                hint(format!("{m}-d"), "remove"),
-                hint(">".into(), "more"),
-            ],
-            List::Browse => vec![
-                hint("↵".into(), "open"),
-                hint("→".into(), "enter"),
-                hint("←".into(), "back"),
-                hint(format!("{m}-↵"), "folder"),
-                hint("shift-↵".into(), "terminal"),
-            ],
-            List::OpenWith => vec![
-                hint("↵".into(), "open"),
-                hint(format!("{m}-s"), "add/remove"),
-                hint(format!("{m}-↵"), "make default"),
-                hint("esc".into(), "back"),
-            ],
-            List::Commands => vec![hint("↵".into(), "run"), hint("esc".into(), "back")],
-            List::Rename => vec![hint("↵".into(), "save"), hint("esc".into(), "cancel")],
-            List::Editors => {
-                let esc = if self.config.editor.is_some() {
-                    "back"
-                } else {
-                    "close"
-                };
-                vec![hint("↵".into(), "select"), hint("esc".into(), esc)]
-            }
-        };
+        let shortcuts = self.shortcuts();
+        let mut hints: Vec<AnyElement> = shortcuts
+            .iter()
+            .filter_map(|s| Some(hint(s.keys[0].clone(), s.footer?).into_any_element()))
+            .collect();
+        // The rest are in the dropdown, opened by F1 or by clicking this.
+        let more = shortcuts.iter().any(|s| s.footer.is_none()).then(|| {
+            hint("f1".into(), "all keys")
+                .id("all-keys")
+                .cursor_pointer()
+                .hover(|d| d.text_color(rgb(TEXT)))
+                .when(self.show_shortcuts, |d| d.text_color(rgb(ACCENT)))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_shortcuts(cx)))
+        });
+        let dropdown =
+            (self.show_shortcuts && more.is_some()).then(|| self.render_shortcuts(shortcuts, cx));
+        if let Some(more) = more {
+            hints.push(more.into_any_element());
+        }
         let footer = div()
             .h(px(30.))
             .px_4()
@@ -432,6 +404,9 @@ impl Render for Palette {
                     _ => this.open_selected(Target::FileManager, window, cx),
                 }),
             )
+            .on_action(cx.listener(|this, _: &ShowInFileManager, window, cx| {
+                this.open_selected(Target::FileManager, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &OpenTerminal, window, cx| {
                 this.open_selected(Target::Terminal, window, cx)
             }))
@@ -458,6 +433,7 @@ impl Render for Palette {
             .on_action(
                 cx.listener(|this, _: &ChooseEditor, _, cx| this.set_mode(Mode::Editors, cx)),
             )
+            .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
             .on_action(cx.listener(Self::dismiss))
             .size_full()
             .flex()
@@ -484,5 +460,74 @@ impl Render for Palette {
             .children(add_row)
             .child(list)
             .child(footer)
+            .children(dropdown)
+    }
+}
+
+impl Palette {
+    fn toggle_shortcuts(&mut self, cx: &mut Context<Self>) {
+        self.show_shortcuts = !self.show_shortcuts;
+        cx.notify();
+    }
+
+    /// Every shortcut of the current list, above the footer's "all keys".
+    /// Clicking one closes the dropdown and runs it.
+    fn render_shortcuts(
+        &self,
+        shortcuts: Vec<Shortcut>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let rows: Vec<_> = shortcuts
+            .into_iter()
+            .enumerate()
+            .map(|(ix, shortcut)| {
+                div()
+                    .id(("shortcut", ix))
+                    .mx_1()
+                    .px_2()
+                    .h(px(24.))
+                    .flex_none()
+                    .rounded_sm()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .w(px(130.))
+                            .flex_none()
+                            .text_color(rgb(TEXT))
+                            .child(shortcut.keys.join("  ")),
+                    )
+                    .child(div().text_color(rgb(MUTED)).child(shortcut.action))
+                    .when_some(shortcut.run, |row, run| {
+                        row.cursor_pointer()
+                            .hover(|d| d.bg(rgb(SELECTED)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.show_shortcuts = false;
+                                cx.notify();
+                                window.dispatch_action(run.boxed_clone(), cx);
+                            }))
+                    })
+            })
+            .collect();
+        div()
+            .id("shortcuts")
+            .absolute()
+            .right(px(8.))
+            .bottom(px(34.))
+            .w(px(380.))
+            .max_h(px(340.))
+            .overflow_y_scroll()
+            .occlude()
+            .py_1()
+            .flex()
+            .flex_col()
+            .bg(rgb(BG))
+            .border_1()
+            .border_color(rgb(BORDER))
+            .rounded_md()
+            .shadow_lg()
+            .text_xs()
+            .children(rows)
     }
 }
