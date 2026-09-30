@@ -206,14 +206,16 @@ them, so the tray has no update item and `proj update` only says whether a newer
 GitHub Actions runs `cargo fmt --check`, clippy and the tests on every push to `main` and every
 pull request (`.github/workflows/ci.yml`). To publish a version:
 
-1. Bump `version` in `Cargo.toml` (e.g. `0.2.0`), run `cargo check` so `Cargo.lock` follows,
-   and commit.
-2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+1. Bump `version` in `Cargo.toml` (e.g. `0.3.0`), run `cargo check` so `Cargo.lock` follows,
+   commit and push to `main`.
+2. Run the **Release** workflow: on GitHub, Actions → Release → Run workflow (branch `main`),
+   or `gh workflow run release.yml`.
 
-`.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, runs
-`scripts/build-installer.ps1` and creates a release with `proj-setup-0.2.0.exe` and
-`SHA256SUMS.txt`, with notes generated from the commits. Installed copies pick it up on their
-next check.
+`.github/workflows/release.yml` refuses to run from any branch other than `main`, or when the
+version in `Cargo.toml` is already tagged. It then runs `scripts/build-installer.ps1` and
+creates the `v0.3.0` tag and a release with `proj-setup-0.3.0.exe` and `SHA256SUMS.txt`, with
+notes generated from the commits. You don't create the tag yourself. Installed copies pick the
+release up on their next check.
 
 ## Memory
 
