@@ -17,8 +17,12 @@ use super::{
 };
 
 impl Palette {
-    /// Tab: mark/unmark the selected project for opening together, then move down.
-    pub(super) fn toggle_mark(&mut self, cx: &mut Context<Self>) {
+    /// Tab / shift-tab: mark/unmark the selected project for opening together,
+    /// then move down (`delta` 1) or up (-1). Other lists just move.
+    pub(super) fn toggle_mark(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.list() != List::Projects {
+            return self.select(delta, cx);
+        }
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
@@ -33,7 +37,7 @@ impl Palette {
             }
             None => self.marked.push(project.path.clone()),
         }
-        self.select(1, cx);
+        self.select(delta, cx);
     }
 
     /// Saves the marked projects as a workspace (reusing it if it exists) and returns it.

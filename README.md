@@ -22,19 +22,19 @@ then opens a folder picker where you can select one or more projects at once.
 | Key                     | Action                                     |
 | ----------------------- | ------------------------------------------ |
 | type                    | fuzzy filter by name, then by path         |
-| ↑ / ↓, ctrl-p / ctrl-n  | move selection                             |
+| ↑ / ↓                   | move selection                             |
 | enter                   | open in editor                             |
-| shift-enter             | open a terminal there (Windows Terminal if installed) |
+| ctrl-t                  | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
-| alt-enter               | open with… (another editor, once or always for this project) |
-| tab                     | mark projects to open together in one window |
-| ctrl-e, ctrl-enter      | show in Explorer (Finder on macOS, the file manager on Linux) |
-| ctrl-s                  | pin / unpin (pinned projects stay on top)  |
+| ctrl-w                  | open with… (another editor, once or always for this project) |
+| tab / shift-tab         | mark projects to open together, moving down / up |
+| ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
+| ctrl-p                  | pin / unpin (pinned projects stay on top)  |
 | f2                      | rename (empty = back to the folder name)   |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
-| ctrl-shift-c            | copy the project path                      |
+| ctrl-c                  | copy the project path (text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| ctrl-shift-e            | change the default editor for all projects |
+| alt-enter               | change the default editor for all projects |
 | ctrl-d, shift-delete    | remove project                             |
 | f1                      | list every shortcut (click one to run it)  |
 | esc, clicking elsewhere | close                                      |
@@ -52,8 +52,8 @@ Press **→** on a project to list its files and folders; **→** on a folder go
 **←** goes back up (and back to the project list from the top), **esc** returns to the list.
 Typing filters the current folder. **Enter** opens a file in the project's editor, inside the
 project's window (`zed <project> <file>`), or opens a subfolder as its own workspace.
-**ctrl-e** shows it in the file manager, **shift-enter** opens a terminal there, and
-**ctrl-shift-c** copies its path. Nothing you browse is added to the project list.
+**ctrl-e** shows it in the file manager, **ctrl-t** opens a terminal there, and **ctrl-c**
+copies its path. Nothing you browse is added to the project list.
 
 →/← only browse when the text cursor is at the end/start of the search box, so they still
 move the cursor while you edit a search.
@@ -90,16 +90,16 @@ Press **f2** to give it a shorter name; search still finds it by its folder name
 
 There are three scopes:
 
-- **Just this once:** press **alt-enter** on a project, pick an editor, press **enter**.
+- **Just this once:** press **ctrl-w** on a project, pick an editor, press **enter**.
   Nothing is saved, so next time enter uses the usual editor again.
-- **Always for this project:** in the same alt-enter list, press **ctrl-enter** on an editor.
+- **Always for this project:** in the same ctrl-w list, press **ctrl-enter** on an editor.
   Press ctrl-enter on it again to undo, and the project goes back to the default.
-- **Every project:** **ctrl-shift-e** sets the default editor. It applies to all projects that
-  don't have their own. From that screen, alt-enter switches to the project you had selected.
+- **Every project:** **alt-enter** sets the default editor. It applies to all projects that
+  don't have their own. From that screen, ctrl-w switches to the project you had selected.
 
-In the alt-enter list, **ctrl-s** adds an editor to a list to pick from each time, or removes
+In the ctrl-w list, **ctrl-p** adds an editor to a list to pick from each time, or removes
 it. The first time you add one, the default editor is kept in the list too. The list marks
-which editor is the default, and the footer says what ctrl-enter and ctrl-s will do for the
+which editor is the default, and the footer says what ctrl-enter and ctrl-p will do for the
 highlighted one.
 
 What enter does on a project then depends on its editor list:

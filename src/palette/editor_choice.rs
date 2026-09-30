@@ -47,7 +47,7 @@ impl Palette {
         }
     }
 
-    /// Ctrl-S in Open-with: add/remove the selected editor for this entry.
+    /// Ctrl-P in Open-with: add/remove the selected editor for this entry.
     pub(super) fn toggle_project_editor(&mut self, cx: &mut Context<Self>) {
         let (Some(project), Some(editor)) = (
             self.open_with_project().cloned(),
@@ -115,8 +115,8 @@ impl Palette {
         self.refresh_open_with(&editor.command, status, cx);
     }
 
-    /// Ctrl-Shift-E: the default editor for every project. Remembers the selected
-    /// project so esc returns to it and alt-enter can switch to just that one.
+    /// Alt-Enter: the default editor for every project. Remembers the selected
+    /// project so esc returns to it and ctrl-w can switch to just that one.
     pub(super) fn choose_default_editor(&mut self, cx: &mut Context<Self>) {
         let key = self.selected_project().map(store::Project::key);
         self.set_mode(Mode::Editors, cx);
@@ -130,7 +130,7 @@ impl Palette {
         });
     }
 
-    /// Alt-Enter in the default-editor list: open (or set up) the remembered
+    /// Ctrl-W in the default-editor list: open (or set up) the remembered
     /// project with the highlighted editor instead of changing every project.
     pub(super) fn open_with_from_editors(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.open_with.clone() else {

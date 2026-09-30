@@ -200,10 +200,7 @@ impl Palette {
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
                 vec![
-                    format!(
-                        "The default for all projects. Change it any time with {}-shift-e.",
-                        secondary()
-                    ),
+                    "The default for all projects. Change it any time with alt-↵.".into(),
                     format!(
                         "proj keeps running in the background. Press {} to bring it up.",
                         self.config.hotkey_label()
@@ -215,8 +212,9 @@ impl Palette {
                     vec!["↵ changes it for every project that doesn't have its own editor.".into()];
                 if let Some(project) = self.open_with_project() {
                     lines.push(format!(
-                        "Only for {}, once or always? Press alt-↵ instead.",
-                        project.name
+                        "Only for {}, once or always? Press {}-w instead.",
+                        project.name,
+                        secondary()
                     ));
                 }
                 ("Default editor for all projects".into(), lines)
@@ -258,7 +256,7 @@ impl Palette {
                         format!("{now} Here, ↵ opens it just this once and changes nothing."),
                         format!(
                             "{m}-↵ always open {name} with it (again to undo) · \
-                             {m}-s pick between several each time"
+                             {m}-p pick between several each time"
                         ),
                     ],
                 )
@@ -437,23 +435,21 @@ impl Render for Palette {
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(Self::confirm))
-            .on_action(
-                cx.listener(|this, _: &Reveal, window, cx| match this.list() {
-                    List::OpenWith => this.toggle_project_default(cx),
-                    _ => this.open_selected(Target::FileManager, window, cx),
-                }),
-            )
+            .on_action(cx.listener(|this, _: &AlwaysOpenWith, _, cx| {
+                if this.list() == List::OpenWith {
+                    this.toggle_project_default(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &ShowInFileManager, window, cx| {
                 this.open_selected(Target::FileManager, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenTerminal, window, cx| {
                 this.open_selected(Target::Terminal, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &OpenWithMenu, window, cx| {
+            .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
                 match this.list() {
                     List::Editors => return this.open_with_from_editors(cx),
-                    // Enter with alt still held.
-                    List::Switch => return this.confirm(&Confirm, window, cx),
+                    List::Switch => return,
                     _ => {}
                 }
                 let entry = if this.marked.len() > 1 {
@@ -465,7 +461,8 @@ impl Render for Palette {
                     this.show_open_with(entry.key(), cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(cx)))
+            .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(1, cx)))
+            .on_action(cx.listener(|this, _: &ToggleMarkUp, _, cx| this.toggle_mark(-1, cx)))
             .on_action(cx.listener(|this, _: &TogglePin, _, cx| match this.list() {
                 List::OpenWith => this.toggle_project_editor(cx),
                 _ => this.toggle_pin(cx),
@@ -475,7 +472,13 @@ impl Render for Palette {
             .on_action(cx.listener(Self::open_remote))
             .on_action(cx.listener(Self::remove))
             .on_action(cx.listener(Self::add_projects))
-            .on_action(cx.listener(|this, _: &ChooseEditor, _, cx| this.choose_default_editor(cx)))
+            .on_action(
+                cx.listener(|this, _: &ChooseEditor, window, cx| match this.list() {
+                    // alt is held in the switcher, so this is its enter.
+                    List::Switch => this.confirm(&Confirm, window, cx),
+                    _ => this.choose_default_editor(cx),
+                }),
+            )
             .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
             .on_action(cx.listener(Self::dismiss))
             .size_full()

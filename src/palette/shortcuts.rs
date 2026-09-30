@@ -73,29 +73,25 @@ impl Palette {
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(&["→"], "Browse its files and folders").footer_if(!marking, "files"),
-                    s(&["alt-↵"], "Open with another editor, once or always…")
+                    s(&["mod-w"], "Open with another editor, once or always…")
                         .footer("open with…")
                         .run(OpenWithMenu),
-                    s(&["tab"], "Mark to open several in one window")
+                    s(&["tab", "shift-tab"], "Mark to open several in one window")
                         .footer(if marking { "mark" } else { "combine" })
                         .run(ToggleMark),
-                    s(&["mod-e", "mod-↵"], reveal)
+                    s(&["mod-e"], reveal)
                         .footer_if(!marking, reveal_short)
                         .run(ShowInFileManager),
-                    s(&["shift-↵"], "Open a terminal there").run(OpenTerminal),
-                    s(&["mod-s"], "Pin or unpin (pinned stay on top)").run(TogglePin),
+                    s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
+                    s(&["mod-p"], "Pin or unpin (pinned stay on top)").run(TogglePin),
                     s(&["f2"], "Rename").run(Rename),
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
-                    s(&["mod-shift-c"], "Copy the path").run(CopyPath),
+                    s(&["mod-c"], "Copy the path").run(CopyPath),
                     s(&["mod-d", "shift-del"], "Remove from the list").run(Remove),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
-                    s(
-                        &["mod-shift-e"],
-                        "Change the default editor for all projects",
-                    )
-                    .run(ChooseEditor),
+                    s(&["alt-↵"], "Change the default editor for all projects").run(ChooseEditor),
                     s(&[">"], "Commands: start on login, config file…"),
-                    s(&["↑ ↓", "ctrl-p ctrl-n"], "Move the selection"),
+                    s(&["↑ ↓"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
                 ]
@@ -106,14 +102,14 @@ impl Palette {
                     .run(Confirm),
                 s(&["→"], "Go into the folder").footer("enter"),
                 s(&["←"], "Back up a folder").footer("back"),
-                s(&["mod-e", "mod-↵"], reveal)
+                s(&["mod-e"], reveal)
                     .footer(reveal_short)
                     .run(ShowInFileManager),
-                s(&["shift-↵"], "Open a terminal there")
+                s(&["mod-t"], "Open a terminal there")
                     .footer("terminal")
                     .run(OpenTerminal),
-                s(&["mod-shift-c"], "Copy the path").run(CopyPath),
-                s(&["↑ ↓", "ctrl-p ctrl-n"], "Move the selection"),
+                s(&["mod-c"], "Copy the path").run(CopyPath),
+                s(&["↑ ↓"], "Move the selection"),
                 s(&["esc"], "Back to the projects").run(Dismiss),
             ],
             List::OpenWith => {
@@ -139,8 +135,15 @@ impl Palette {
                     s(&["↵"], "Open with it just this once")
                         .footer("open once")
                         .run(Confirm),
-                    s(&["mod-↵"], always).footer(always_short).run(Reveal),
-                    s(&["mod-s"], list).footer(list_short).run(TogglePin),
+                    s(&["mod-↵"], always)
+                        .footer(always_short)
+                        .run(AlwaysOpenWith),
+                    s(&["mod-p"], list).footer(list_short).run(TogglePin),
+                    s(
+                        &["alt-↵"],
+                        "Change the default editor for all projects instead",
+                    )
+                    .run(ChooseEditor),
                     s(&["esc"], "Back").footer("back").run(Dismiss),
                 ]
             }
@@ -165,7 +168,7 @@ impl Palette {
                 ];
                 if self.open_with.is_some() {
                     keys.push(
-                        s(&["alt-↵"], "Only for the selected project…")
+                        s(&["mod-w"], "Only for the selected project…")
                             .footer("this project only")
                             .run(OpenWithMenu),
                     );

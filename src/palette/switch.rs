@@ -37,7 +37,10 @@ impl Palette {
                     .timer(Duration::from_millis(15))
                     .await;
                 let done = this.update_in(cx, |this, window, cx| {
-                    let Some(mods) = this.hold else {
+                    // Left the switcher some other way: letting go must not act
+                    // on whatever list is showing now.
+                    let (Some(mods), Mode::Switch) = (this.hold, this.mode) else {
+                        this.hold = None;
                         return true;
                     };
                     if platform::modifiers_held(mods) {

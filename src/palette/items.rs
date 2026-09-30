@@ -143,7 +143,7 @@ impl Palette {
                     PaletteCommand::ChangeEditor => (
                         "Change the default editor".into(),
                         format!(
-                            "All projects open in {} unless they have their own · {m}-shift-e",
+                            "All projects open in {} unless they have their own · alt-↵",
                             self.name_of(self.config.editor.as_deref().unwrap_or(""))
                         ),
                     ),
