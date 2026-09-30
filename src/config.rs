@@ -21,6 +21,8 @@ pub struct Config {
     /// 1 = every direct sub-folder is a project. Higher values descend into
     /// folders that are not git repositories, up to this depth.
     pub scan_depth: u8,
+    /// Look for a new release about once a day (installed copies only).
+    pub check_for_updates: bool,
 }
 
 impl Default for Config {
@@ -31,6 +33,7 @@ impl Default for Config {
             editor_args: Vec::new(),
             scan_dirs: Vec::new(),
             scan_depth: 1,
+            check_for_updates: true,
         }
     }
 }
@@ -114,6 +117,10 @@ scan_dirs = []
 # 1 = every direct sub-folder of a scan_dir is a project. Higher values descend
 # into folders that are not git repositories, up to this depth.
 scan_depth = 1
+
+# Look for a new version on GitHub about once a day. When there is one, the tray
+# menu offers "Install update"; nothing is installed without asking.
+check_for_updates = true
 
 # Program used to open projects; the project path is appended after editor_args.
 # Chosen from the launcher (ctrl-shift-e). "" opens projects in the file manager.

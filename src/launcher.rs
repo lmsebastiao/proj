@@ -2,7 +2,7 @@
 
 use std::{
     str::FromStr,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
@@ -16,6 +16,7 @@ use crate::{
     palette::{self, Palette},
     platform,
     tray::{Tray, TrayCommand},
+    update::{self, Update},
 };
 
 /// The open palette, if any, and when it last closed.
@@ -94,11 +95,51 @@ impl Hotkeys {
     }
 }
 
-/// Events from the hotkey and tray callbacks, handled on the main thread.
+/// Events from the hotkey and tray callbacks and the update threads, handled on
+/// the main thread.
 enum Command {
     Hotkey,
     Tray(TrayCommand),
+    /// A finished update check; `manual` when it was asked for from the tray.
+    UpdateChecked {
+        result: Result<Option<Update>, String>,
+        manual: bool,
+    },
+    /// The installer is running (and about to stop proj), or it couldn't start.
+    UpdateStarted(Result<(), String>),
 }
+
+/// Where the tray's update item is at.
+enum UpdateState {
+    Unchecked,
+    Checking,
+    UpToDate,
+    Available(Update),
+    Installing,
+    Failed,
+}
+
+impl UpdateState {
+    /// The tray item's label and whether it can be clicked.
+    fn label(&self) -> (String, bool) {
+        match self {
+            Self::Unchecked => ("Check for updates".into(), true),
+            Self::Checking => ("Checking for updates…".into(), false),
+            Self::UpToDate => (format!("proj {} is up to date", update::CURRENT), true),
+            Self::Available(update) => (format!("Install update {}", update.version), true),
+            Self::Installing => ("Downloading update…".into(), false),
+            Self::Failed => ("Update failed, click to retry".into(), true),
+        }
+    }
+}
+
+struct Updates {
+    state: UpdateState,
+    /// For the check and install threads to report back.
+    commands: async_channel::Sender<Command>,
+}
+
+impl Global for Updates {}
 
 /// Invisible window that keeps the app alive: gpui quits when the last window
 /// closes, and the palette window is destroyed each time it is dismissed so
@@ -186,7 +227,16 @@ pub fn run() {
                 hotkey_tx.try_send(Command::Hotkey).ok();
             }
         }));
-        let tray = Tray::new(&tooltip, autostart::is_enabled(), move |command| {
+        let updates = update::is_installed();
+        if updates {
+            let update_tx = tx.clone();
+            std::thread::spawn(move || check_for_updates_daily(&update_tx));
+        }
+        cx.set_global(Updates {
+            state: UpdateState::Unchecked,
+            commands: tx.clone(),
+        });
+        let tray = Tray::new(&tooltip, autostart::is_enabled(), updates, move |command| {
             tx.try_send(Command::Tray(command)).ok();
         })
         .map_err(|err| eprintln!("proj: no tray icon: {err}"))
@@ -239,6 +289,93 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
             }
         }
         Command::Tray(TrayCommand::Quit) => cx.quit(),
+        Command::Tray(TrayCommand::Update) => {
+            let updates = cx.global_mut::<Updates>();
+            let tx = updates.commands.clone();
+            match &updates.state {
+                UpdateState::Checking | UpdateState::Installing => return,
+                UpdateState::Available(found) => {
+                    let found = found.clone();
+                    std::thread::spawn(move || {
+                        tx.try_send(Command::UpdateStarted(update::install(&found)))
+                            .ok();
+                    });
+                    updates.state = UpdateState::Installing;
+                }
+                _ => {
+                    std::thread::spawn(move || {
+                        let result = update::check();
+                        tx.try_send(Command::UpdateChecked {
+                            result,
+                            manual: true,
+                        })
+                        .ok();
+                    });
+                    updates.state = UpdateState::Checking;
+                }
+            }
+            sync_update_item(tray, cx);
+        }
+        Command::UpdateChecked { result, manual } => {
+            let updates = cx.global_mut::<Updates>();
+            if matches!(updates.state, UpdateState::Installing) {
+                return;
+            }
+            updates.state = match result {
+                Ok(Some(found)) => UpdateState::Available(found),
+                Ok(None) => UpdateState::UpToDate,
+                Err(err) => {
+                    eprintln!("proj: {err}");
+                    // Being offline for a background check isn't worth a warning.
+                    if !manual {
+                        return;
+                    }
+                    UpdateState::Failed
+                }
+            };
+            sync_update_item(tray, cx);
+        }
+        Command::UpdateStarted(Ok(())) => cx.quit(),
+        Command::UpdateStarted(Err(err)) => {
+            eprintln!("proj: {err}");
+            cx.global_mut::<Updates>().state = UpdateState::Failed;
+            sync_update_item(tray, cx);
+        }
+    }
+}
+
+fn sync_update_item(tray: Option<&Tray>, cx: &App) {
+    if let Some(tray) = tray {
+        let (label, enabled) = cx.global::<Updates>().state.label();
+        tray.set_update(&label, enabled);
+    }
+}
+
+/// Checks a minute after startup (the network may not be up yet at login), then
+/// about once a day, unless `check_for_updates` is off in config.toml. Runs on
+/// its own thread; polls hourly rather than sleeping a day, which a laptop's
+/// sleep would stretch.
+fn check_for_updates_daily(tx: &async_channel::Sender<Command>) {
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+    std::thread::sleep(Duration::from_secs(60));
+    let mut last_check: Option<SystemTime> = None;
+    loop {
+        // A clock set back (elapsed() fails) counts as due.
+        let due = last_check.is_none_or(|at| !at.elapsed().is_ok_and(|elapsed| elapsed < DAY));
+        if due && config::load_config().check_for_updates {
+            last_check = Some(SystemTime::now());
+            let result = update::check();
+            if tx
+                .try_send(Command::UpdateChecked {
+                    result,
+                    manual: false,
+                })
+                .is_err()
+            {
+                return;
+            }
+        }
+        std::thread::sleep(Duration::from_secs(60 * 60));
     }
 }
 

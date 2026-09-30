@@ -11,8 +11,9 @@ proj            # start the launcher in the background
 ```
 
 Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog, or click the tray icon.
-Right-click the tray icon for: open, start on login, open config file, quit (Windows and
-macOS; Linux has no tray icon). `hotkey` can also be a list: `["ctrl+alt+space", "f8"]`.
+Right-click the tray icon for: open, start on login, open config file, check for updates, quit
+(Windows and macOS; Linux has no tray icon). `hotkey` can also be a list:
+`["ctrl+alt+space", "f8"]`.
 
 On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
 finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
@@ -111,6 +112,8 @@ proj list           # list projects
 proj paths          # where the config and database live
 proj autostart [on|off]  # start proj when you log in
 proj path [add|remove]   # put proj's folder on your user PATH (Windows)
+proj update         # install the latest release, if it is newer (see Updates)
+proj version        # show the installed version
 ```
 
 ## Configuration
@@ -121,6 +124,7 @@ proj path [add|remove]   # put proj's folder on your user PATH (Windows)
 hotkey = "ctrl+alt+space"
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
+check_for_updates = true  # look for a new release about once a day
 editor = "zed"          # set from the launcher; "" = file manager
 editor_args = []        # e.g. ["--new-window"]
 ```
@@ -158,6 +162,34 @@ The installer is per user, so it needs no admin rights:
 
 The PATH is edited by `proj path add/remove`, not by NSIS. NSIS strings are limited to 1024
 characters, which would truncate a long PATH.
+
+## Updates
+
+A copy installed with the installer looks for a newer
+[GitHub release](https://github.com/lmsebastiao/proj/releases) a minute after it starts and
+then about once a day. Set `check_for_updates = false` to turn that off. When a new version
+is out, the tray menu's **Check for updates** item becomes **Install update x.y.z**. Clicking
+it downloads the installer and runs it silently
+(`proj-setup-x.y.z.exe /S /RELAUNCH /D=<install folder>`). The installer replaces proj.exe
+and starts the new version. Nothing is installed without that click, or without running
+`proj update`.
+
+Copies built with `cargo build` don't update themselves: they have no `uninstall.exe` next to
+them, so the tray has no update item and `proj update` only says whether a newer version exists.
+
+## Releasing
+
+GitHub Actions runs `cargo fmt --check`, clippy and the tests on every push to `main` and every
+pull request (`.github/workflows/ci.yml`). To publish a version:
+
+1. Bump `version` in `Cargo.toml` (e.g. `0.2.0`), run `cargo check` so `Cargo.lock` follows,
+   and commit.
+2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+
+`.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, runs
+`scripts/build-installer.ps1` and creates a release with `proj-setup-0.2.0.exe` and
+`SHA256SUMS.txt`, with notes generated from the commits. Installed copies pick it up on their
+next check.
 
 ## Memory
 

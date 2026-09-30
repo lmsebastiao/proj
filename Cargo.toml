@@ -3,6 +3,8 @@ name = "proj"
 version = "0.1.0"
 edition = "2024"
 description = "Always-running project launcher with a Raycast-style search dialog"
+# The updater downloads releases from here.
+repository = "https://github.com/lmsebastiao/proj"
 
 [workspace.lints.clippy]
 all = "deny"
@@ -29,6 +31,7 @@ gpui = "0.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.6"
 toml_edit = "0.25"
+ureq = { version = "3.4.2", features = ["json"] }
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"

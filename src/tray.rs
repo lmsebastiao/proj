@@ -7,6 +7,8 @@ pub enum TrayCommand {
     Toggle,
     ToggleAutostart,
     OpenConfig,
+    /// Check for an update, or install the one found.
+    Update,
     Quit,
     /// The mouse is over the icon: refresh menu state (e.g. the start-on-login
     /// check, which the palette can also change) before the menu opens.
@@ -27,22 +29,33 @@ mod imp {
     pub struct Tray {
         icon: TrayIcon,
         autostart: CheckMenuItem,
+        update: Option<MenuItem>,
     }
 
     impl Tray {
         /// Creates the icon. `send` is called from the platform event loop.
+        /// `updates` adds the "Check for updates" item.
         pub fn new(
             tooltip: &str,
             autostart_on: bool,
+            updates: bool,
             send: impl Fn(TrayCommand) + Clone + Send + Sync + 'static,
         ) -> Result<Self, String> {
             let autostart =
                 CheckMenuItem::with_id("autostart", "Start on login", true, autostart_on, None);
+            let update =
+                updates.then(|| MenuItem::with_id("update", "Check for updates", true, None));
             let menu = Menu::new();
             menu.append_items(&[
                 &MenuItem::with_id("open", "Open proj", true, None),
                 &autostart,
                 &MenuItem::with_id("config", "Open config file", true, None),
+            ])
+            .map_err(|err| err.to_string())?;
+            if let Some(update) = &update {
+                menu.append(update).map_err(|err| err.to_string())?;
+            }
+            menu.append_items(&[
                 &PredefinedMenuItem::separator(),
                 &MenuItem::with_id("quit", "Quit", true, None),
             ])
@@ -62,6 +75,7 @@ mod imp {
                     "open" => TrayCommand::Toggle,
                     "autostart" => TrayCommand::ToggleAutostart,
                     "config" => TrayCommand::OpenConfig,
+                    "update" => TrayCommand::Update,
                     "quit" => TrayCommand::Quit,
                     _ => return,
                 };
@@ -77,11 +91,22 @@ mod imp {
                 _ => {}
             }));
 
-            Ok(Self { icon, autostart })
+            Ok(Self {
+                icon,
+                autostart,
+                update,
+            })
         }
 
         pub fn set_autostart(&self, on: bool) {
             self.autostart.set_checked(on);
+        }
+
+        pub fn set_update(&self, label: &str, enabled: bool) {
+            if let Some(update) = &self.update {
+                update.set_text(label);
+                update.set_enabled(enabled);
+            }
         }
 
         pub fn set_tooltip(&self, tooltip: &str) {
@@ -150,12 +175,15 @@ mod imp {
         pub fn new(
             _tooltip: &str,
             _autostart_on: bool,
+            _updates: bool,
             _send: impl Fn(TrayCommand) + Clone + Send + Sync + 'static,
         ) -> Result<Self, String> {
             Err("tray icons aren't supported on this platform".into())
         }
 
         pub fn set_autostart(&self, _on: bool) {}
+
+        pub fn set_update(&self, _label: &str, _enabled: bool) {}
 
         pub fn set_tooltip(&self, _tooltip: &str) {}
     }

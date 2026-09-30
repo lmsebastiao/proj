@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crate::{
     autostart, config, fuzzy, open, paths, platform,
     store::{self, Project},
+    update,
 };
 
 const USAGE: &str = "\
@@ -18,7 +19,9 @@ usage:
   proj list                list known projects
   proj paths               show config and database locations
   proj autostart [on|off]  start proj when you log in
-  proj path [add|remove]   put proj's folder on your PATH (Windows)";
+  proj path [add|remove]   put proj's folder on your PATH (Windows)
+  proj update              install the latest release, if it is newer
+  proj version             show the installed version";
 
 pub fn run(args: &[String]) -> i32 {
     let config = config::load_config();
@@ -115,6 +118,39 @@ pub fn run(args: &[String]) -> i32 {
                     return 1;
                 }
             }
+            return 0;
+        }
+        "update" => {
+            let found = match update::check() {
+                Ok(Some(found)) => found,
+                Ok(None) => {
+                    println!("proj {} is up to date", update::CURRENT);
+                    return 0;
+                }
+                Err(err) => {
+                    eprintln!("proj: {err}");
+                    return 1;
+                }
+            };
+            if !update::is_installed() {
+                println!(
+                    "proj {} is available (this is {}); download it from {}",
+                    found.version,
+                    update::CURRENT,
+                    update::releases_url()
+                );
+                return 0;
+            }
+            println!("updating proj {} to {}…", update::CURRENT, found.version);
+            if let Err(err) = update::install(&found) {
+                eprintln!("proj: {err}");
+                return 1;
+            }
+            println!("the installer is running; proj starts again when it's done");
+            return 0;
+        }
+        "version" | "-V" | "--version" => {
+            println!("proj {}", update::CURRENT);
             return 0;
         }
         "paths" => {

@@ -8,6 +8,7 @@
 Unicode true
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 !ifndef VERSION
   !error "Pass /DVERSION=x.y.z"
@@ -54,6 +55,17 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) Lucas Sebastião"
 Function EnableAutostart
   nsExec::Exec '"$INSTDIR\proj.exe" autostart on'
   Pop $0
+FunctionEnd
+
+; proj updates itself by running `proj-setup.exe /S /RELAUNCH /D=<its folder>`. The
+; finish page (and its "run now") is skipped when silent, so start the new version here.
+Function .onInstSuccess
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH" $1
+  ${IfNot} ${Errors}
+    Exec '"$INSTDIR\proj.exe"'
+  ${EndIf}
 FunctionEnd
 
 ; A running copy locks proj.exe; stop it before replacing or deleting it.
