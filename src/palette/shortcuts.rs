@@ -3,7 +3,12 @@
 
 use gpui::Action;
 
-use super::{Palette, items::List, keymap::*, secondary};
+use super::{
+    Palette,
+    items::{List, Mode},
+    keymap::*,
+    secondary,
+};
 
 pub(super) struct Shortcut {
     /// All keys that do it; the footer shows the first.
@@ -79,15 +84,19 @@ impl Palette {
                     s(&["tab", "shift-tab"], "Mark to open several in one window")
                         .footer(if marking { "mark" } else { "combine" })
                         .run(ToggleMark),
-                    s(&["mod-k"], "Actions: pin, rename, remove, copy path…")
-                        .footer_if(!marking, "actions")
-                        .run(ShowActions),
+                    s(
+                        &["mod-k", "shift-f10"],
+                        "Actions: pin, rename, remove, copy path…",
+                    )
+                    .footer_if(!marking, "actions")
+                    .run(ShowActions),
                     s(&["mod-e"], reveal).run(ShowInFileManager),
                     s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
                     s(&["mod-c"], "Copy the path").run(CopyPath),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
+                    s(&["@"], "Open editor windows, to search and switch to"),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
@@ -160,11 +169,19 @@ impl Palette {
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
                 s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
             ],
-            List::Switch => vec![
-                s(&["↵"], "Switch to it").footer("switch").run(Confirm),
-                s(&["↑ ↓"], "Move the selection"),
-                s(&["esc"], "Close").footer("close").run(Dismiss),
-            ],
+            List::Switch => {
+                // Typed `@` in the project search: esc goes back to it.
+                let (esc, esc_short) = if self.mode == Mode::Projects {
+                    ("Back to the projects", "back")
+                } else {
+                    ("Close", "close")
+                };
+                vec![
+                    s(&["↵"], "Switch to it").footer("switch").run(Confirm),
+                    s(&["↑ ↓"], "Move the selection"),
+                    s(&["esc"], esc).footer(esc_short).run(Dismiss),
+                ]
+            }
             List::Rename => vec![
                 s(&["↵"], "Save the name").footer("save").run(Confirm),
                 s(&["esc"], "Cancel").footer("cancel").run(Dismiss),

@@ -28,7 +28,7 @@ then opens a folder picker where you can select one or more projects at once.
 | → / ←                   | browse into a project / back up (see below) |
 | alt-enter               | open with… (another editor once, or set the project's default) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
-| ctrl-k                  | actions for the project: pin, rename, remove, and the ones below |
+| ctrl-k, shift-f10, menu key | actions for the project: pin, rename, remove, and the ones below |
 | ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
@@ -40,9 +40,10 @@ then opens a folder picker where you can select one or more projects at once.
 The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
 in the footer, opens a dropdown with all of them; clicking one runs it.
 
-**ctrl-k** lists everything you can do with the highlighted project: open with, show in
-Explorer, terminal, pin, rename, copy the path, open the repository page, remove. Type to
-filter it and press enter; the project's name and folder show above the list. The highlighted
+**ctrl-k** (or shift-f10, or the menu key) lists everything you can do with the highlighted
+project: open with, show in Explorer, terminal, pin, rename, copy the path, open the
+repository page, remove. Type to filter it and press enter; the project's name and folder
+show above the list. The highlighted
 row, and any row under the mouse, also has icons for rename, remove, **⋯** (the same list)
 and pin. The remove icon asks for a second click. Pinned projects stay on top and keep their
 pin icon showing. Renaming to an empty name goes back to the folder name.
@@ -50,6 +51,8 @@ Removing only takes a project off the list; the folder isn't touched.
 
 Type `>` to list commands: start on login, add projects, change the default editor, theme,
 open the config file, check for updates / install update (installed copies), quit.
+Type `@` to list your open editor windows instead, the same list as the switcher (below):
+keep typing to filter it, enter switches, esc goes back to the projects.
 
 The dialog follows Windows' light/dark app setting, switching live when Windows does. `>`
 **Theme** goes through system → light → dark and saves the choice as `theme` in config.toml.
@@ -80,7 +83,8 @@ the current one.
 
 Press **ctrl+alt** and the same key (ctrl+alt+\\ on Portuguese keyboards) to search instead:
 the same list, but it stays open, typing filters it, **enter** switches and **esc** closes.
-While holding the switcher open, adding ctrl turns it into a search.
+While holding the switcher open, adding ctrl turns it into a search. From the project search,
+typing `@` gets you the same list.
 
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's

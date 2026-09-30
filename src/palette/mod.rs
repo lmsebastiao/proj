@@ -256,7 +256,10 @@ impl Palette {
         }
         let placeholder = match mode {
             Mode::Projects => {
-                "Search projects, > for commands, or paste a folder path or git URL…".into()
+                format!(
+                    "Search projects, > for commands, {SWITCH_PREFIX} for open windows, \
+                     or paste a folder path or git URL…"
+                )
             }
             Mode::Editors if self.config.editor.is_none() => {
                 "Choose the editor to open projects with…".into()
@@ -305,6 +308,8 @@ impl Palette {
             Mode::Switch => List::Switch,
             Mode::Actions => List::Actions,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
+            // The switcher's list, searchable, without opening it by its shortcut.
+            Mode::Projects if self.query.starts_with(SWITCH_PREFIX) => List::Switch,
             Mode::Projects => List::Projects,
         }
     }
@@ -323,6 +328,9 @@ impl Palette {
         let list = self.list();
         let query = match list {
             List::Commands => self.query[1..].trim().to_string(),
+            List::Switch if self.mode == Mode::Projects => {
+                self.query[SWITCH_PREFIX.len_utf8()..].trim().to_string()
+            }
             _ => self.query.clone(),
         };
         self.matches.clear();
@@ -467,6 +475,7 @@ impl Palette {
         }
         match self.list() {
             List::Commands => self.set_query("", cx),
+            List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
             List::OpenWith | List::Rename | List::Actions => self.back_to_projects(cx),
             List::Projects if !self.marked.is_empty() => {
@@ -527,6 +536,10 @@ impl Palette {
         }
     }
 }
+
+/// Typed first in the project search, lists the open editor windows instead
+/// (`>` lists the commands).
+const SWITCH_PREFIX: char = '@';
 
 fn secondary() -> &'static str {
     if cfg!(target_os = "macos") {

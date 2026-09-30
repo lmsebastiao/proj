@@ -256,24 +256,24 @@ impl Palette {
                 .child("or paste a folder path above")
                 .into_any_element();
         }
+        let empty = if self.list() == List::Switch && self.windows.is_empty() {
+            "No editor windows are open"
+        } else {
+            "No matches"
+        };
         div()
             .flex_1()
             .p_4()
             .text_size(px(FONT_SIZE))
             .text_color(rgb(t.muted))
-            .child("No matches")
+            .child(empty)
             .into_any_element()
     }
 
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let t = self.theme;
         let (title, lines): (String, Vec<String>) = match self.mode {
-            Mode::Projects | Mode::Switch => return None,
-            // Which project the actions are for.
-            Mode::Actions => {
-                let project = self.actions_project()?;
-                (project.name.clone(), vec![project.location()])
-            }
+            Mode::Projects | Mode::Switch | Mode::Actions => return None,
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
@@ -349,6 +349,45 @@ impl Palette {
                         .child(title),
                 )
                 .children(lines),
+        )
+    }
+
+    /// Which project the actions menu is for: one line with a rule under it, so
+    /// it doesn't read as the first action.
+    pub(super) fn render_actions_header(&self) -> Option<impl IntoElement + use<>> {
+        let t = self.theme;
+        let project = self
+            .actions_project()
+            .filter(|_| self.mode == Mode::Actions)?;
+        Some(
+            div()
+                .mx_4()
+                .pt_3()
+                .pb_2()
+                .mb_1()
+                .border_b_1()
+                .border_color(rgb(t.border))
+                .flex()
+                .items_baseline()
+                .gap_2()
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .child(div().flex_none().child("Actions for"))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(FONT_SIZE))
+                        .text_color(rgb(t.text))
+                        .child(project.name.clone()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(project.location()),
+                ),
         )
     }
 }
@@ -569,6 +608,7 @@ impl Render for Palette {
                     .child(self.input.clone()),
             )
             .children(self.render_banner())
+            .children(self.render_actions_header())
             .children(add_row)
             .child(list)
             .child(footer)

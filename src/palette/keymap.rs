@@ -50,8 +50,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("shift-tab", ToggleMarkUp, ctx),
         // Everything else for the project (pin, rename, remove…), also on the
-        // row's icons.
+        // row's icons. Shift-F10 and the menu key open context menus elsewhere.
         KeyBinding::new("secondary-k", ShowActions, ctx),
+        KeyBinding::new("shift-f10", ShowActions, ctx),
+        KeyBinding::new("menu", ShowActions, ctx),
         // The search box copies its selected text instead, when there is some.
         KeyBinding::new("secondary-c", CopyPath, ctx),
         KeyBinding::new("secondary-o", AddProjects, ctx),
