@@ -150,10 +150,15 @@ impl Palette {
                     s(&["esc"], "Back").footer(esc).run(Dismiss),
                 ]
             }
-            // Shown while the modifier is held, so these keys come with alt.
-            List::Switch => vec![
+            // While the modifier is held these keys come with alt.
+            List::Switch if self.hold.is_some() => vec![
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
                 s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
+            ],
+            List::Switch => vec![
+                s(&["↵"], "Switch to it").footer("switch").run(Confirm),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc"], "Close").footer("close").run(Dismiss),
             ],
             List::Rename => vec![
                 s(&["↵"], "Save the name").footer("save").run(Confirm),

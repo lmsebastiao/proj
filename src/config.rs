@@ -23,9 +23,12 @@ pub struct Config {
     pub scan_depth: u8,
     /// Look for a new release about once a day (installed copies only).
     pub check_for_updates: bool,
-    /// Hold-and-tap shortcut for switching between open editor windows.
-    /// Unset = alt + the key left of 1; "" = off.
+    /// Hold-and-tap shortcut for switching between open editor windows (with
+    /// shift: backwards). Unset = alt + the key left of 1; "" = off.
     pub switch_hotkey: Option<String>,
+    /// Shortcut for the switcher to search in, which stays open when let go.
+    /// Unset = ctrl+alt + the key left of 1; "" = off.
+    pub switch_search_hotkey: Option<String>,
 }
 
 impl Default for Config {
@@ -38,6 +41,7 @@ impl Default for Config {
             scan_depth: 1,
             check_for_updates: true,
             switch_hotkey: None,
+            switch_search_hotkey: None,
         }
     }
 }
@@ -50,11 +54,25 @@ impl Config {
 
     /// The window switcher's shortcut, or `None` when it's turned off.
     pub fn switch_hotkey(&self) -> Option<String> {
-        match self.switch_hotkey.as_deref().map(str::trim) {
-            None => Some(format!("alt+{}", crate::platform::key_left_of_1())),
-            Some("") => None,
-            Some(text) => Some(text.to_string()),
-        }
+        shortcut_or(self.switch_hotkey.as_deref(), || {
+            format!("alt+{}", crate::platform::key_left_of_1())
+        })
+    }
+
+    /// The searching switcher's shortcut, or `None` when it's turned off.
+    pub fn switch_search_hotkey(&self) -> Option<String> {
+        shortcut_or(self.switch_search_hotkey.as_deref(), || {
+            format!("ctrl+alt+{}", crate::platform::key_left_of_1())
+        })
+    }
+}
+
+/// A shortcut from the config: unset = `default`, "" = off.
+fn shortcut_or(text: Option<&str>, default: impl FnOnce() -> String) -> Option<String> {
+    match text.map(str::trim) {
+        None => Some(default()),
+        Some("") => None,
+        Some(text) => Some(text.to_string()),
     }
 }
 
@@ -124,9 +142,14 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 hotkey = {hotkey}
 
 # Switch between your open editor windows like Alt+Tab: hold alt, tap the key
-# left of 1 to move through them, let go to switch. Set another shortcut here,
-# e.g. "alt+q", or "" to turn it off.
+# left of 1 to move through them (with shift: backwards), let go to switch.
+# Set another shortcut here, e.g. "alt+q", or "" to turn it off.
 # switch_hotkey = "alt+q"
+
+# The same list to search in, which stays open when you let go: type to filter,
+# enter switches, esc closes. Unset = ctrl+alt and the key left of 1 (while
+# holding the switcher, add ctrl). "" turns it off.
+# switch_search_hotkey = "ctrl+alt+q"
 
 # Optional: folders whose sub-folders are all listed as projects,
 # e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.

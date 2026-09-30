@@ -404,7 +404,8 @@ impl Render for Palette {
                 }
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
                 (None, List::Browse) => div().child(format!("{} items", self.item_count())),
-                (None, List::Switch) => div().child("let go to switch"),
+                (None, List::Switch) if self.hold.is_some() => div().child("let go to switch"),
+                (None, List::Switch) => div().child(format!("{} windows", self.windows.len())),
                 (None, _) => div(),
             })
             .child(div().flex_1())

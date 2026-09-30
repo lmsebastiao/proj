@@ -33,7 +33,7 @@ struct PaletteWindow {
 impl Global for PaletteWindow {}
 
 /// The registered global shortcuts. Opening the palette re-registers them when
-/// `hotkey` or `switch_hotkey` in config.toml has changed.
+/// `hotkey`, `switch_hotkey` or `switch_search_hotkey` in config.toml changed.
 struct Hotkeys {
     manager: GlobalHotKeyManager,
     /// The config's `hotkey` list at the last sync.
@@ -42,11 +42,66 @@ struct Hotkeys {
     active: Vec<(String, HotKey)>,
     /// Why some of `wanted` couldn't be registered.
     problems: Vec<String>,
-    /// The window switcher's shortcut: its text, and the key forwards and
-    /// with shift (backwards).
-    switch: Option<(String, HotKey, HotKey)>,
-    /// Why the switcher's shortcut couldn't be registered.
-    switch_problem: Option<String>,
+    /// The window switcher's shortcut; with shift it goes backwards.
+    switch: SwitchShortcut,
+    /// The switcher to search in.
+    search: SwitchShortcut,
+}
+
+/// One of the switcher's shortcuts, from its text in the config.
+#[derive(Default)]
+struct SwitchShortcut {
+    /// Registered: its text, the key, and the key with shift when that's wanted.
+    active: Option<(String, HotKey, Option<HotKey>)>,
+    /// Why it couldn't be registered.
+    problem: Option<String>,
+}
+
+impl SwitchShortcut {
+    /// Registers `wanted` (`None` = off) if it changed, or failed last time.
+    /// `shifted` also registers it with shift, if that's free. Returns whether
+    /// anything changed.
+    fn sync(
+        &mut self,
+        manager: &GlobalHotKeyManager,
+        wanted: Option<String>,
+        what: &str,
+        shifted: bool,
+    ) -> bool {
+        if self.active.as_ref().map(|(text, ..)| text) == wanted.as_ref() {
+            return false;
+        }
+        if let Some((_, key, shifted)) = self.active.take() {
+            manager.unregister(key).ok();
+            if let Some(shifted) = shifted {
+                manager.unregister(shifted).ok();
+            }
+        }
+        self.problem = None;
+        let Some(text) = wanted else {
+            return true;
+        };
+        let key = match HotKey::from_str(&text) {
+            Ok(hotkey) => hotkey,
+            Err(err) => {
+                self.problem = Some(format!("{what} shortcut '{text}' is not valid ({err})"));
+                return true;
+            }
+        };
+        match manager.register(key) {
+            Ok(()) => {
+                let shifted = shifted
+                    .then(|| HotKey::new(Some(key.mods | Modifiers::SHIFT), key.key))
+                    .filter(|shifted| manager.register(*shifted).is_ok());
+                self.active = Some((text, key, shifted));
+            }
+            Err(global_hotkey::Error::AlreadyRegistered(_)) => {
+                self.problem = Some(format!("{what} shortcut '{text}' is taken by another app"));
+            }
+            Err(err) => self.problem = Some(format!("{what} shortcut '{text}': {err}")),
+        }
+        true
+    }
 }
 
 impl Global for Hotkeys {}
@@ -111,43 +166,19 @@ impl Hotkeys {
         texts.join(" or ")
     }
 
-    /// Registers the switcher's shortcut (`None` = off) if it changed, or failed
-    /// last time. Returns whether anything changed.
-    fn sync_switch(&mut self, wanted: Option<String>) -> bool {
-        if self.switch.as_ref().map(|(text, ..)| text) == wanted.as_ref() {
-            return false;
-        }
-        if let Some((_, next, back)) = self.switch.take() {
-            self.manager.unregister(next).ok();
-            self.manager.unregister(back).ok();
-        }
-        self.switch_problem = None;
-        let Some(text) = wanted else {
-            return true;
-        };
-        let next = match HotKey::from_str(&text) {
-            Ok(hotkey) => hotkey,
-            Err(err) => {
-                self.switch_problem =
-                    Some(format!("Switcher shortcut '{text}' is not valid ({err})"));
-                return true;
-            }
-        };
-        match self.manager.register(next) {
-            Ok(()) => {
-                // Nice to have, like shift+alt+tab; the switcher works without it.
-                let back = HotKey::new(Some(next.mods | Modifiers::SHIFT), next.key);
-                self.manager.register(back).ok();
-                self.switch = Some((text, next, back));
-            }
-            Err(global_hotkey::Error::AlreadyRegistered(_)) => {
-                self.switch_problem = Some(format!(
-                    "Switcher shortcut '{text}' is taken by another app"
-                ));
-            }
-            Err(err) => self.switch_problem = Some(format!("Switcher shortcut '{text}': {err}")),
-        }
-        true
+    /// Registers the switcher's shortcuts from the config if they changed, or
+    /// failed last time. Returns whether anything changed.
+    fn sync_switcher(&mut self, config: &config::Config) -> bool {
+        let switch = self
+            .switch
+            .sync(&self.manager, config.switch_hotkey(), "Switcher", true);
+        let search = self.search.sync(
+            &self.manager,
+            config.switch_search_hotkey(),
+            "Switcher search",
+            false,
+        );
+        switch || search
     }
 
     /// What the palette's footer says about shortcuts that don't work.
@@ -155,7 +186,8 @@ impl Hotkeys {
         let problems: Vec<&str> = self
             .problems
             .iter()
-            .chain(&self.switch_problem)
+            .chain(&self.switch.problem)
+            .chain(&self.search.problem)
             .map(String::as_str)
             .collect();
         palette::ShortcutNotice((!problems.is_empty()).then(|| problems.join("; ").into()))
@@ -170,9 +202,51 @@ struct PendingSwitch {
 }
 
 #[derive(Default)]
-struct Switching(Option<PendingSwitch>);
+struct Switching {
+    pending: Option<PendingSwitch>,
+    /// The switcher's order: windows in the order they were first listed. It
+    /// doesn't change when you switch, so each window keeps its place.
+    order: Vec<platform::WindowRef>,
+}
 
 impl Global for Switching {}
+
+impl Switching {
+    /// `windows` (front to back) in the switcher's order, and which one to start
+    /// on. Forwards (`delta` 1): the editor window used before the one in front,
+    /// so a quick tap goes back to it, like Alt+Tab. Backwards: the one above the
+    /// window in front.
+    fn arrange(
+        &mut self,
+        mut windows: Vec<EditorWindow>,
+        delta: isize,
+    ) -> (Vec<EditorWindow>, usize) {
+        let front = windows
+            .first()
+            .map(|w| w.window)
+            .filter(|w| Some(*w) == platform::foreground_window());
+        let previous = windows.get(usize::from(front.is_some())).map(|w| w.window);
+        // Forget closed windows; new ones go at the end.
+        self.order
+            .retain(|known| windows.iter().any(|w| w.window == *known));
+        for window in &windows {
+            if !self.order.contains(&window.window) {
+                self.order.push(window.window);
+            }
+        }
+        windows.sort_by_key(|w| self.order.iter().position(|known| *known == w.window));
+        let position = |window: Option<platform::WindowRef>| {
+            windows.iter().position(|w| Some(w.window) == window)
+        };
+        let selected = if delta < 0 {
+            let len = windows.len();
+            position(front).map_or(len.saturating_sub(1), |at| (at + len - 1) % len)
+        } else {
+            position(previous).unwrap_or(0)
+        };
+        (windows, selected)
+    }
+}
 
 /// How long the switcher's modifier must be held before its list shows.
 const SHOW_SWITCHER_AFTER: Duration = Duration::from_millis(150);
@@ -261,8 +335,8 @@ pub fn run() {
             wanted: Vec::new(),
             active: Vec::new(),
             problems: Vec::new(),
-            switch: None,
-            switch_problem: None,
+            switch: SwitchShortcut::default(),
+            search: SwitchShortcut::default(),
         };
         let problems = hotkeys.sync(&config.hotkey);
         if hotkeys.active.is_empty() {
@@ -275,7 +349,7 @@ pub fn run() {
                 ),
             );
         }
-        hotkeys.sync_switch(config.switch_hotkey());
+        hotkeys.sync_switcher(&config);
         // Some shortcuts may still fail; say which where the user will see it.
         cx.set_global(hotkeys.notice());
         let tooltip = format!("proj ({})", hotkeys.label());
@@ -369,10 +443,18 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
     };
     match command {
         Command::Hotkey(id) => {
-            let switch = cx.global::<Hotkeys>().switch.as_ref();
-            match switch.map(|(_, next, back)| (next.id(), back.id(), next.mods)) {
+            let hotkeys = cx.global::<Hotkeys>();
+            // The switcher stays up while its own modifiers (without shift) are held.
+            let switch = hotkeys
+                .switch
+                .active
+                .as_ref()
+                .map(|(_, key, back)| (key.id(), back.map(|b| b.id()), key.mods));
+            let search = hotkeys.search.active.as_ref().map(|(_, key, _)| key.id());
+            match switch {
                 Some((next, _, mods)) if id == next => switch_windows(1, mods, cx),
-                Some((_, back, mods)) if id == back => switch_windows(-1, mods, cx),
+                Some((_, back, mods)) if Some(id) == back => switch_windows(-1, mods, cx),
+                _ if Some(id) == search => search_windows(cx),
                 _ => toggle_palette(tray, cx),
             }
         }
@@ -488,12 +570,12 @@ fn check_for_updates_daily(tx: &async_channel::Sender<Command>) {
     }
 }
 
-/// Applies a changed `hotkey` or `switch_hotkey` from config.toml, like the
-/// palette does with the rest of the config each time it opens.
+/// Applies changed shortcuts from config.toml, like the palette does with the
+/// rest of the config each time it opens.
 fn reload_hotkeys(tray: Option<&Tray>, cx: &mut App) {
     let config = config::load_config();
     let hotkeys = cx.global_mut::<Hotkeys>();
-    let mut changed = hotkeys.sync_switch(config.switch_hotkey());
+    let mut changed = hotkeys.sync_switcher(&config);
     if hotkeys.wanted != config.hotkey {
         hotkeys.sync(&config.hotkey);
         if let Some(tray) = tray {
@@ -518,26 +600,16 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
         if cycled {
             return;
         }
-        // The launcher is open: swap it for the switcher.
-        handle
-            .update(cx, |_, window, _| window.remove_window())
-            .ok();
-        cx.global_mut::<PaletteWindow>().handle = None;
+        close_palette(handle, cx);
     }
-    if let Some(pending) = &mut cx.global_mut::<Switching>().0 {
+    if let Some(pending) = &mut cx.global_mut::<Switching>().pending {
         let len = pending.windows.len().max(1) as isize;
         pending.selected = (pending.selected as isize + delta).rem_euclid(len) as usize;
         return;
     }
     let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
-    // Like Alt+Tab, start on the window behind the one you're in.
-    let in_front = windows.len() > 1 && Some(windows[0].window) == platform::foreground_window();
-    let selected = if delta < 0 {
-        windows.len().saturating_sub(1)
-    } else {
-        usize::from(in_front)
-    };
-    cx.global_mut::<Switching>().0 = Some(PendingSwitch { windows, selected });
+    let (windows, selected) = cx.global_mut::<Switching>().arrange(windows, delta);
+    cx.global_mut::<Switching>().pending = Some(PendingSwitch { windows, selected });
 
     cx.spawn(async move |cx| {
         let started = Instant::now();
@@ -550,7 +622,8 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
                 continue;
             }
             cx.update(|cx| {
-                let Some(pending) = cx.global_mut::<Switching>().0.take() else {
+                // Gone when the search shortcut took over meanwhile.
+                let Some(pending) = cx.global_mut::<Switching>().pending.take() else {
                     return;
                 };
                 if released {
@@ -560,7 +633,7 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
                 } else {
                     let PendingSwitch { windows, selected } = pending;
                     show_palette(cx, move |window, cx| {
-                        Palette::switcher(window, cx, windows, selected, mods)
+                        Palette::switcher(window, cx, windows, selected, Some(mods))
                     });
                 }
             })
@@ -571,12 +644,41 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
     .detach();
 }
 
+/// The switcher's search shortcut: the same list, but it stays
+/// open to type in until enter or esc. From a switcher already showing, it
+/// just stops waiting for the modifier to be let go.
+fn search_windows(cx: &mut App) {
+    if let Some(handle) = open_palette(cx) {
+        let searching = handle
+            .update(cx, |palette, _, cx| palette.start_search(cx))
+            .unwrap_or(false);
+        if searching {
+            return;
+        }
+        close_palette(handle, cx);
+    }
+    let (windows, selected) = match cx.global_mut::<Switching>().pending.take() {
+        Some(pending) => (pending.windows, pending.selected),
+        None => {
+            let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
+            cx.global_mut::<Switching>().arrange(windows, 1)
+        }
+    };
+    show_palette(cx, move |window, cx| {
+        Palette::switcher(window, cx, windows, selected, None)
+    });
+}
+
+fn close_palette(handle: WindowHandle<Palette>, cx: &mut App) {
+    handle
+        .update(cx, |_, window, _| window.remove_window())
+        .ok();
+    cx.global_mut::<PaletteWindow>().handle = None;
+}
+
 fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
     if let Some(handle) = open_palette(cx) {
-        handle
-            .update(cx, |_, window, _| window.remove_window())
-            .ok();
-        cx.global_mut::<PaletteWindow>().handle = None;
+        close_palette(handle, cx);
         return;
     }
     reload_hotkeys(tray, cx);

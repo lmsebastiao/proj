@@ -61,17 +61,25 @@ move the cursor while you edit a search.
 
 Hold **alt** and tap the key left of 1 (**\\** on Portuguese keyboards, **`** on US ones) to
 switch between your open editor windows, like Alt+Tab but only for editors. Keep tapping to
-move down the list; **shift** goes back up. Let go of alt and that window comes to the front.
-A quick tap goes straight to the editor window you used before, without showing the list.
-**alt-esc** cancels.
+move down the list; add **shift** to go back up. Let go of alt and that window comes to the
+front. A quick tap goes straight to the editor window you used before, without showing the
+list. **alt-esc** cancels.
+
+The list keeps its order: windows stay where they first appeared, new ones are added at the
+end, and switching doesn't move anything. The highlight starts on the window you used before
+the current one.
+
+Press **ctrl+alt** and the same key (ctrl+alt+\\ on Portuguese keyboards) to search instead:
+the same list, but it stays open, typing filters it, **enter** switches and **esc** closes.
+While holding the switcher open, adding ctrl turns it into a search.
 
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
 title. Projects with a window open get an **open** badge in the normal list.
 
-`switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`. Set it to `""` to turn
-the switcher off. Windows only.
+`switch_hotkey` and `switch_search_hotkey` in config.toml set other shortcuts, e.g. `"alt+q"`.
+Set one to `""` to turn it off. Windows only.
 
 ### Opening projects together
 
@@ -134,6 +142,7 @@ proj version        # show the installed version
 ```toml
 hotkey = "ctrl+alt+space"
 # switch_hotkey = "alt+q"  # window switcher; default alt + the key left of 1, "" = off
+# switch_search_hotkey = "ctrl+alt+q"  # searching switcher; default ctrl+alt + that key
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
