@@ -29,8 +29,10 @@ pub struct Db {
     pub names: BTreeMap<String, String>,
     /// Always listed first.
     pub pinned: BTreeSet<String>,
-    /// Entry -> editors offered for it; the first is its default.
-    /// Missing = the global editor.
+    /// Entry -> its own default editor. Missing = the global editor.
+    ///
+    /// Stored as a one-item list: older versions kept a list of editors here
+    /// (and reset the whole file if they can't read it). Only the first is used.
     pub editors: BTreeMap<String, Vec<String>>,
     /// Entry -> unix seconds of last open.
     pub opened: BTreeMap<String, u64>,
@@ -48,8 +50,8 @@ pub struct Project {
     pub extra: Vec<PathBuf>,
     pub branch: Option<String>,
     pub pinned: bool,
-    /// Editors offered for this entry (first = default); empty = the global editor.
-    pub editors: Vec<String>,
+    /// This entry's own default editor; `None` = the global one.
+    pub editor: Option<String>,
     pub manual: bool,
     pub last_opened: u64,
 }
@@ -85,8 +87,8 @@ impl Project {
 
     /// The editor Enter uses: the entry's own default, else the global one.
     pub fn default_editor(&self, config: &Config) -> String {
-        self.editors
-            .first()
+        self.editor
+            .as_ref()
             .or(config.editor.as_ref())
             .cloned()
             .unwrap_or_default()
@@ -139,7 +141,7 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
             name,
             branch: git::git_branch(&path),
             pinned: db.pinned.contains(&key),
-            editors: db.editors.get(&key).cloned().unwrap_or_default(),
+            editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
             last_opened: db.opened.get(&key).copied().unwrap_or(0),
             path,
             extra: paths.collect(),
@@ -274,37 +276,12 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     db.opened.remove(&key);
 }
 
-/// Adds `editor` to a project's editor list. Starting a list keeps the global
-/// editor as the first choice, so the project offers both instead of silently
-/// switching away from it.
-pub fn offer_editor(list: &mut Vec<String>, editor: &str, global: Option<&str>) {
-    if list.iter().any(|c| c == editor) {
-        return;
-    }
-    if list.is_empty()
-        && let Some(global) = global.filter(|g| !g.trim().is_empty() && *g != editor)
-    {
-        list.push(global.to_string());
-    }
-    list.push(editor.to_string());
-}
-
-/// Moves (or inserts) `editor` to the front: the project's default.
-pub fn make_default_editor(list: &mut Vec<String>, editor: &str) {
-    list.retain(|c| c != editor);
-    list.insert(0, editor.to_string());
-}
-
-/// Removes `editor` from a project's list. If only the global editor is left
-/// (`offer_editor` put it there), the list is cleared so the project follows the
-/// global setting again, including later changes to it.
-pub fn remove_editor(list: &mut Vec<String>, editor: &str, global: Option<&str>) {
-    list.retain(|c| c != editor);
-    if let [only] = list.as_slice()
-        && Some(only.as_str()) == global
-    {
-        list.clear();
-    }
+/// Sets an entry's own default editor, or with `None` goes back to the global one.
+pub fn set_editor(db: &mut Db, key: &str, editor: Option<String>) {
+    match editor {
+        Some(editor) => db.editors.insert(key.to_string(), vec![editor]),
+        None => db.editors.remove(key),
+    };
 }
 
 /// "just now", "5m ago", "3h ago", "2d ago", "3w ago", "4mo ago", "1y ago".
@@ -344,7 +321,7 @@ mod tests {
             extra: Vec::new(),
             branch: None,
             pinned: false,
-            editors: Vec::new(),
+            editor: None,
             manual: true,
             last_opened: 0,
         }
@@ -363,38 +340,39 @@ mod tests {
     }
 
     #[test]
-    fn project_editor_lists() {
-        let mut list = Vec::new();
-        offer_editor(&mut list, "devenv", Some("zed"));
-        assert_eq!(
-            list,
-            ["zed", "devenv"],
-            "first added editor keeps the global one as default"
-        );
-        offer_editor(&mut list, "devenv", Some("zed"));
-        assert_eq!(list, ["zed", "devenv"], "no duplicates");
+    fn project_default_editors() {
+        let config = Config {
+            editor: Some("zed".into()),
+            ..Config::default()
+        };
+        let dir = std::env::temp_dir().join(format!("proj-editors-{}", std::process::id()));
+        let (app, web) = (dir.join("app"), dir.join("web"));
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&web).unwrap();
+        let key = |path: &PathBuf| entry_key(std::slice::from_ref(path));
+        let (app_key, web_key) = (key(&app), key(&web));
+        let mut db = Db {
+            manual: vec![app.clone(), web.clone()],
+            ..Db::default()
+        };
+        // Older versions kept a list to pick from: the first one is the default.
+        db.editors
+            .insert(app_key.clone(), vec!["devenv".into(), "code".into()]);
+        let editor = |db: &Db, path: &Path| {
+            let projects = collect(&config, db);
+            let project = projects.iter().find(|p| p.path == path).unwrap();
+            (project.editor.clone(), project.default_editor(&config))
+        };
+        assert_eq!(editor(&db, &app), (Some("devenv".into()), "devenv".into()));
+        assert_eq!(editor(&db, &web), (None, "zed".into()), "the global one");
 
-        let mut list = Vec::new();
-        offer_editor(&mut list, "zed", Some("zed"));
-        assert_eq!(list, ["zed"]);
-
-        let mut list = Vec::new();
-        make_default_editor(&mut list, "code");
-        assert_eq!(
-            list,
-            ["code"],
-            "make default on an empty list is a plain override"
-        );
-        let mut list = vec!["zed".to_string(), "code".to_string()];
-        make_default_editor(&mut list, "code");
-        assert_eq!(list, ["code", "zed"]);
-
-        let mut list = vec!["code".to_string(), "zed".to_string()];
-        remove_editor(&mut list, "code", Some("zed"));
-        assert!(list.is_empty(), "back to following the global editor");
-        let mut list = vec!["code".to_string(), "devenv".to_string()];
-        remove_editor(&mut list, "code", Some("zed"));
-        assert_eq!(list, ["devenv"]);
+        set_editor(&mut db, &web_key, Some("code".into()));
+        assert_eq!(editor(&db, &web).1, "code");
+        set_editor(&mut db, &app_key, None);
+        assert_eq!(editor(&db, &app), (None, "zed".into()));
+        // Still a list on disk, so older versions can read the file.
+        assert!(toml::to_string(&db).unwrap().contains(r#"= ["code"]"#));
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

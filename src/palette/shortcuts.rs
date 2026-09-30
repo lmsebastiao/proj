@@ -73,7 +73,7 @@ impl Palette {
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(&["→"], "Browse its files and folders").footer_if(!marking, "files"),
-                    s(&["mod-w"], "Open with another editor, once or always…")
+                    s(&["alt-↵"], "Open with another editor, or set its default…")
                         .footer("open with…")
                         .run(OpenWithMenu),
                     s(&["tab", "shift-tab"], "Mark to open several in one window")
@@ -115,32 +115,20 @@ impl Palette {
                 s(&["esc"], "Back to the projects").run(Dismiss),
             ],
             List::OpenWith => {
-                let own = self
-                    .open_with_project()
-                    .map(|p| p.editors.as_slice())
-                    .unwrap_or_default();
+                let own = self.open_with_project().and_then(|p| p.editor.as_ref());
                 let selected = self.selected_editor().map(|e| &e.command);
-                let (always, always_short) = if selected.is_some() && own.first() == selected {
-                    ("Stop always using it for this project", "undo always")
+                let (default, default_short) = if selected.is_some() && own == selected {
+                    ("Go back to the default for all projects", "undo default")
                 } else {
-                    ("Always open this project with it", "always")
-                };
-                let (list, list_short) = if selected.is_some_and(|c| own.contains(c)) {
-                    ("Remove it from the editors to pick between", "remove")
-                } else {
-                    (
-                        "Add it to the editors to pick between each time",
-                        "pick list",
-                    )
+                    ("Make it this project's default", "make default")
                 };
                 vec![
                     s(&["↵"], "Open with it just this once")
                         .footer("open once")
                         .run(Confirm),
-                    s(&["mod-↵"], always)
-                        .footer(always_short)
-                        .run(AlwaysOpenWith),
-                    s(&["mod-p"], list).footer(list_short).run(TogglePin),
+                    s(&["mod-↵"], default)
+                        .footer(default_short)
+                        .run(ToggleProjectDefault),
                     s(&["esc"], "Back").footer("back").run(Dismiss),
                 ]
             }

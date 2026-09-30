@@ -167,7 +167,7 @@ mod tests {
             extra: paths[1..].iter().map(PathBuf::from).collect(),
             branch: None,
             pinned: false,
-            editors: Vec::new(),
+            editor: None,
             manual: true,
             last_opened: 0,
         }

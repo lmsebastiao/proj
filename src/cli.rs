@@ -203,7 +203,7 @@ mod tests {
             extra: Vec::new(),
             branch: None,
             pinned: false,
-            editors: Vec::new(),
+            editor: None,
             manual: true,
             last_opened: 0,
         }

@@ -49,21 +49,15 @@ impl Palette {
         self.projects.iter().find(|p| p.key() == key).cloned()
     }
 
-    /// Enter on an entry: its only editor, the global one, or ask when it has several.
+    /// Enter on an entry: its own default editor, else the global one.
     pub(super) fn open_entry(
         &mut self,
         project: Project,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match project.editors.as_slice() {
-            [] => {
-                let editor = self.config.editor.clone().unwrap_or_default();
-                self.launch(&project, Target::Editor(editor), window, cx);
-            }
-            [only] => self.launch(&project, Target::Editor(only.clone()), window, cx),
-            _ => self.show_open_with(project.key(), cx),
-        }
+        let editor = project.default_editor(&self.config);
+        self.launch(&project, Target::Editor(editor), window, cx);
     }
 
     pub(super) fn show_open_with(&mut self, key: String, cx: &mut Context<Self>) {

@@ -213,10 +213,8 @@ impl Palette {
                 "Default editor for all projects".into(),
                 vec![
                     "↵ changes it for every project that doesn't have its own editor.".into(),
-                    format!(
-                        "Only for one project, once or always? Press {}-w on it instead.",
-                        secondary()
-                    ),
+                    "Only for one project, once or as its default? Press alt-↵ on it instead."
+                        .into(),
                 ],
             ),
             Mode::Rename => {
@@ -239,24 +237,18 @@ impl Palette {
                 let project = self.open_with_project()?;
                 let name = &project.name;
                 let m = secondary();
-                let now = match project.editors.as_slice() {
-                    [] => format!(
-                        "{name} opens in the default editor, {}.",
-                        self.name_of(&project.default_editor(&self.config))
-                    ),
-                    [only] => format!("{name} always opens in {}.", self.name_of(only)),
-                    _ => format!(
-                        "↵ on {name} asks between {}.",
-                        self.editor_list(&project.key())
-                    ),
+                let editor = self.name_of(&project.default_editor(&self.config));
+                let now = match project.editor {
+                    Some(_) => format!("{name}'s own default is {editor}."),
+                    None => format!("{name} opens in the default editor, {editor}."),
                 };
                 (
                     format!("Open {name} with…"),
                     vec![
                         format!("{now} Here, ↵ opens it just this once and changes nothing."),
                         format!(
-                            "{m}-↵ always open {name} with it (again to undo) · \
-                             {m}-p pick between several each time"
+                            "{m}-↵ makes the highlighted editor {name}'s default \
+                             (again: back to the default for all projects)."
                         ),
                     ],
                 )
@@ -435,9 +427,9 @@ impl Render for Palette {
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(|this, _: &AlwaysOpenWith, _, cx| {
+            .on_action(cx.listener(|this, _: &ToggleProjectDefault, window, cx| {
                 if this.list() == List::OpenWith {
-                    this.toggle_project_default(cx);
+                    this.toggle_project_default(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ShowInFileManager, window, cx| {
@@ -458,10 +450,7 @@ impl Render for Palette {
             }))
             .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(1, cx)))
             .on_action(cx.listener(|this, _: &ToggleMarkUp, _, cx| this.toggle_mark(-1, cx)))
-            .on_action(cx.listener(|this, _: &TogglePin, _, cx| match this.list() {
-                List::OpenWith => this.toggle_project_editor(cx),
-                _ => this.toggle_pin(cx),
-            }))
+            .on_action(cx.listener(|this, _: &TogglePin, _, cx| this.toggle_pin(cx)))
             .on_action(cx.listener(Self::rename))
             .on_action(cx.listener(Self::copy_path))
             .on_action(cx.listener(Self::open_remote))

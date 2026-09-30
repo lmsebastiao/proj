@@ -26,7 +26,7 @@ then opens a folder picker where you can select one or more projects at once.
 | enter                   | open in editor                             |
 | ctrl-t                  | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
-| ctrl-w                  | open with… (another editor, once or always for this project) |
+| alt-enter               | open with… (another editor once, or set the project's default) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
 | ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-p                  | pin / unpin (pinned projects stay on top)  |
@@ -87,31 +87,20 @@ Press **f2** to give it a shorter name; search still finds it by its folder name
 
 ### Per-project editors
 
-There are three scopes:
+Enter opens a project in its own default editor if it has one, and otherwise in the default
+editor for all projects. Rows of projects with their own default show its name.
 
-- **Just this once:** press **ctrl-w** on a project, pick an editor, press **enter**.
+- **Just this once:** press **alt-enter** on a project, pick an editor, press **enter**.
   Nothing is saved, so next time enter uses the usual editor again.
-- **Always for this project:** in the same ctrl-w list, press **ctrl-enter** on an editor.
-  Press ctrl-enter on it again to undo, and the project goes back to the default.
-- **Every project:** type `>` and pick **Change the default editor**. It applies to all
-  projects that don't have their own.
+- **This project's default:** in the same alt-enter list, press **ctrl-enter** on an editor
+  (on **Other…**, it asks for a program first). Press ctrl-enter on it again to go back to
+  the default for all projects.
+- **All projects:** type `>` and pick **Change the default editor**. Projects with their own
+  default keep it.
 
-In the ctrl-w list, **ctrl-p** adds an editor to a list to pick from each time, or removes
-it. The first time you add one, the default editor is kept in the list too. The list marks
-which editor is the default, and the footer says what ctrl-enter and ctrl-p will do for the
-highlighted one.
-
-What enter does on a project then depends on its editor list:
-
-| Project editors | Enter                                              |
-| --------------- | -------------------------------------------------- |
-| none            | opens with the global editor                       |
-| one             | opens with that editor                             |
-| two or more     | asks which, with the first one selected (enter twice = default) |
-
-Example: a WPF app that offers Zed and Visual Studio, and `tomi-go` that offers Zed and VS Code.
-Visual Studio is found automatically and gets the project's `.sln`/`.slnx` instead of the folder.
-The lists live in `projects.toml` under `[editors]`.
+For example, a WPF app can default to Visual Studio while everything else opens in Zed.
+Visual Studio is found automatically and gets the project's `.sln`/`.slnx` instead of the
+folder. Project defaults live in `projects.toml` under `[editors]`.
 
 Each row shows the current git branch (read from `.git/HEAD`) and when you last opened it.
 Projects that share a folder name get their parent folder added, e.g. `app (client)`.

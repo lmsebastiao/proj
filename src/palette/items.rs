@@ -169,23 +169,17 @@ impl Palette {
         }
     }
 
-    /// Right-hand details: branch, editors and last opened for projects; which
-    /// editor is the default in the editor lists.
+    /// Right-hand details: branch, own editor and last opened for projects;
+    /// which editor is the default in the editor lists.
     pub(super) fn item_meta(&self, ix: usize, now: u64) -> Meta {
         match self.list() {
             List::Projects => {
                 let project = &self.projects[ix];
-                let editors = (!project.editors.is_empty()).then(|| {
-                    project
-                        .editors
-                        .iter()
-                        .map(|c| self.name_of(c))
-                        .collect::<Vec<_>>()
-                        .join(" / ")
-                });
+                // Only projects with their own default name it; the rest use the global one.
+                let editor = project.editor.as_deref().map(|c| self.name_of(c));
                 let opened =
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now));
-                let bottom: Vec<String> = editors.into_iter().chain(opened).collect();
+                let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
                 Meta {
                     top: project.branch.clone().map(|b| (b, BRANCH)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
@@ -198,19 +192,14 @@ impl Palette {
                         bottom: None,
                     };
                 };
-                let own = self
-                    .open_with_project()
-                    .map(|p| p.editors.as_slice())
-                    .unwrap_or_default();
+                let own = self.open_with_project().and_then(|p| p.editor.as_deref());
                 let is_global = self.config.editor.as_deref() == Some(editor.command.as_str());
-                let role = if own.first() == Some(&editor.command) {
+                let role = if own == Some(editor.command.as_str()) {
                     Some("this project's default")
-                } else if own.contains(&editor.command) {
-                    Some("in this project's list")
-                } else if is_global && own.is_empty() {
+                } else if is_global && own.is_none() {
                     Some("default")
                 } else if is_global {
-                    Some("default for other projects")
+                    Some("default for all projects")
                 } else {
                     None
                 };

@@ -1,8 +1,11 @@
-//! Choosing editors: the global default, and per-project "open with" lists.
+//! Choosing editors: the global default, and each project's own default.
 
 use gpui::{Context, PathPromptOptions, Window};
 
-use crate::{config, store};
+use crate::{
+    config,
+    store::{self, Project},
+};
 
 use super::{
     Palette,
@@ -11,6 +14,7 @@ use super::{
 };
 
 impl Palette {
+    /// Enter in Open-with: open the entry with the chosen editor, just this once.
     pub(super) fn choose_open_with(
         &mut self,
         ix: usize,
@@ -32,13 +36,9 @@ impl Palette {
                     multiple: false,
                     prompt: Some("Open with".into()),
                 };
-                // A program picked for this project joins its list.
                 self.pick(options, window, cx, move |this, paths, window, cx| {
                     if let Some(path) = paths.into_iter().next() {
                         let command = path.to_string_lossy().into_owned();
-                        this.edit_project_editors(&project.key(), |list| {
-                            list.push(command.clone())
-                        });
                         this.launch(&project, Target::Editor(command), window, cx);
                     }
                 });
@@ -47,72 +47,64 @@ impl Palette {
         }
     }
 
-    /// Ctrl-P in Open-with: add/remove the selected editor for this entry.
-    pub(super) fn toggle_project_editor(&mut self, cx: &mut Context<Self>) {
-        let (Some(project), Some(editor)) = (
-            self.open_with_project().cloned(),
-            self.selected_editor().cloned(),
-        ) else {
+    /// Ctrl-Enter in Open-with: make the highlighted editor this entry's default,
+    /// or, on the one that already is, go back to the global default. On
+    /// "Other…", pick a program to be its default.
+    pub(super) fn toggle_project_default(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.open_with_project().cloned() else {
             return;
         };
-        let global = self.config.editor.clone();
-        let removing = project.editors.contains(&editor.command);
-        self.edit_project_editors(&project.key(), |list| {
-            if removing {
-                store::remove_editor(list, &editor.command, global.as_deref());
-            } else {
-                store::offer_editor(list, &editor.command, global.as_deref());
+        match self.matches.get(self.selected).map(|m| &self.editors[m.ix]) {
+            Some(EditorOption::Detected(editor)) => {
+                let command = editor.command.clone();
+                let undo = project.editor.as_ref() == Some(&command);
+                self.set_project_editor(&project, (!undo).then_some(command), cx);
             }
-        });
-        let status = if removing {
-            format!("Removed {} from {}", editor.name, project.name)
-        } else {
-            format!(
-                "{} now offers {}",
-                project.name,
-                self.editor_list(&project.key())
-            )
-        };
-        self.refresh_open_with(&editor.command, status, cx);
+            Some(EditorOption::Browse) => {
+                let options = PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: false,
+                    prompt: Some(format!("Open {} with", project.name).into()),
+                };
+                self.pick(options, window, cx, move |this, paths, _, cx| {
+                    if let Some(path) = paths.into_iter().next() {
+                        let command = path.to_string_lossy().into_owned();
+                        this.set_project_editor(&project, Some(command), cx);
+                    }
+                });
+            }
+            Some(EditorOption::FileManager) | None => {}
+        }
     }
 
-    /// Ctrl-Enter in Open-with: make the selected editor this entry's default, or,
-    /// on the one that already is, stop using it so the entry falls back to the
-    /// global default (or the next editor in its list).
-    pub(super) fn toggle_project_default(&mut self, cx: &mut Context<Self>) {
-        let (Some(project), Some(editor)) = (
-            self.open_with_project().cloned(),
-            self.selected_editor().cloned(),
-        ) else {
+    /// Sets an entry's own default editor (`None`: back to the global one) and
+    /// says so, keeping the editor that changed highlighted.
+    fn set_project_editor(
+        &mut self,
+        project: &Project,
+        editor: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        store::set_editor(&mut self.db, &project.key(), editor.clone());
+        if let Err(err) = store::save_db(&self.db) {
+            self.status = Some(format!("Could not save: {err}").into());
+            cx.notify();
             return;
-        };
-        let key = project.key();
-        let global = self.config.editor.clone();
-        let undo = project.editors.first() == Some(&editor.command);
-        self.edit_project_editors(&key, |list| {
-            if undo {
-                store::remove_editor(list, &editor.command, global.as_deref());
-            } else {
-                store::make_default_editor(list, &editor.command);
-            }
-        });
-        let Some(project) = self.projects.iter().find(|p| p.key() == key) else {
-            return;
-        };
-        let status = if undo {
-            let fallback = self.name_of(&project.default_editor(&self.config));
-            format!("{} opens in {fallback} again", project.name)
-        } else if project.editors.len() > 1 {
-            format!(
-                "{} is {}'s default; ↵ on it still asks between {}",
-                editor.name,
+        }
+        self.reload_projects();
+        let status = match &editor {
+            Some(command) => format!("{} now opens in {}", project.name, self.name_of(command)),
+            None => format!(
+                "{} opens in the default editor again, {}",
                 project.name,
-                self.editor_list(&key)
-            )
-        } else {
-            format!("{} now always opens in {}", project.name, editor.name)
+                self.name_of(self.config.editor.as_deref().unwrap_or_default())
+            ),
         };
-        self.refresh_open_with(&editor.command, status, cx);
+        let highlight = editor
+            .or_else(|| project.editor.clone())
+            .unwrap_or_default();
+        self.refresh_open_with(&highlight, status, cx);
     }
 
     /// The "Change the default editor" command: the editor for every project.
@@ -125,32 +117,6 @@ impl Palette {
             EditorOption::FileManager => current.as_deref() == Some(""),
             EditorOption::Browse => false,
         });
-    }
-
-    pub(super) fn edit_project_editors(&mut self, key: &str, edit: impl FnOnce(&mut Vec<String>)) {
-        let list = self.db.editors.entry(key.to_string()).or_default();
-        edit(list);
-        if list.is_empty() {
-            self.db.editors.remove(key);
-        }
-        if let Err(err) = store::save_db(&self.db) {
-            self.status = Some(format!("Could not save: {err}").into());
-        }
-        self.reload_projects();
-    }
-
-    pub(super) fn editor_list(&self, key: &str) -> String {
-        self.projects
-            .iter()
-            .find(|p| p.key() == key)
-            .map(|p| {
-                p.editors
-                    .iter()
-                    .map(|c| self.name_of(c))
-                    .collect::<Vec<_>>()
-                    .join(" / ")
-            })
-            .unwrap_or_default()
     }
 
     /// Rebuilds the Open-with list after an edit, keeping `command` selected.
@@ -206,11 +172,7 @@ impl Palette {
         self.reload_projects();
         let label = self.name_of(&command);
         self.back_to_projects(cx);
-        let own = self
-            .projects
-            .iter()
-            .filter(|p| !p.editors.is_empty())
-            .count();
+        let own = self.projects.iter().filter(|p| p.editor.is_some()).count();
         self.status = Some(match own {
             0 => format!("All projects now open in {label}").into(),
             1 => format!("Projects now open in {label}, except 1 with its own editor").into(),

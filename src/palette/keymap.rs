@@ -14,7 +14,7 @@ actions!(
         SelectNext,
         SelectPrev,
         Confirm,
-        AlwaysOpenWith,
+        ToggleProjectDefault,
         ShowInFileManager,
         OpenTerminal,
         OpenWithMenu,
@@ -41,9 +41,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", SelectPrev, ctx),
         // Opening
         KeyBinding::new("enter", Confirm, ctx),
-        // In the Open-with list: always open this project with the selected editor.
-        KeyBinding::new("secondary-enter", AlwaysOpenWith, ctx),
-        KeyBinding::new("secondary-w", OpenWithMenu, ctx),
+        // Open with another editor, or set the project's default editor.
+        KeyBinding::new("alt-enter", OpenWithMenu, ctx),
+        // In the Open-with list: make the highlighted editor the project's default.
+        KeyBinding::new("secondary-enter", ToggleProjectDefault, ctx),
         KeyBinding::new("secondary-t", OpenTerminal, ctx),
         KeyBinding::new("secondary-e", ShowInFileManager, ctx),
         KeyBinding::new("secondary-g", OpenRemote, ctx),
@@ -51,7 +52,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("shift-tab", ToggleMarkUp, ctx),
         // Changing the list
-        // Pin; in the Open-with list, add/remove the editor from the pick list.
         KeyBinding::new("secondary-p", TogglePin, ctx),
         KeyBinding::new("f2", Rename, ctx),
         // The search box copies its selected text instead, when there is some.

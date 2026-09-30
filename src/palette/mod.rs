@@ -195,17 +195,14 @@ impl Palette {
                     .collect();
             }
             Mode::OpenWith => {
-                // The project's own editors first (in order), then everything else.
-                let own = self
-                    .open_with_project()
-                    .map(|p| p.editors.clone())
-                    .unwrap_or_default();
+                // The project's own default first, then the global one, then the rest.
+                let own = self.open_with_project().and_then(|p| p.editor.clone());
                 let mut options: Vec<Editor> = own
-                    .iter()
                     .map(|command| Editor {
-                        name: self.name_of(command),
-                        command: command.clone(),
+                        name: self.name_of(&command),
+                        command,
                     })
+                    .into_iter()
                     .collect();
                 let global = self
                     .config
