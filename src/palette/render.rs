@@ -639,7 +639,51 @@ impl Render for Palette {
 impl Palette {
     fn toggle_shortcuts(&mut self, cx: &mut Context<Self>) {
         self.show_shortcuts = !self.show_shortcuts;
+        // While it's open the arrows move through it, from its first key.
+        self.shortcut_selected = self
+            .shortcuts()
+            .iter()
+            .position(|s| s.run.is_some())
+            .unwrap_or(0);
+        self.shortcuts_scroll.scroll_to_item(self.shortcut_selected);
         cx.notify();
+    }
+
+    /// ↑/↓ with the dropdown open: the next key in it that can be run.
+    pub(super) fn select_shortcut(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let runnable: Vec<usize> = self
+            .shortcuts()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.run.is_some())
+            .map(|(ix, _)| ix)
+            .collect();
+        if runnable.is_empty() {
+            return;
+        }
+        let at = runnable
+            .iter()
+            .position(|&ix| ix == self.shortcut_selected)
+            .unwrap_or(0) as isize;
+        self.shortcut_selected =
+            runnable[(at + delta).rem_euclid(runnable.len() as isize) as usize];
+        self.shortcuts_scroll.scroll_to_item(self.shortcut_selected);
+        cx.notify();
+    }
+
+    /// Enter with the dropdown open: closes it and runs the highlighted key,
+    /// like clicking it.
+    pub(super) fn run_shortcut(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_shortcuts = false;
+        cx.notify();
+        let run = self
+            .shortcuts()
+            .into_iter()
+            .nth(self.shortcut_selected)
+            .and_then(|s| s.run);
+        if let Some(run) = run {
+            window.dispatch_action(run, cx);
+        }
     }
 
     /// Every shortcut of the current list, above the footer's "all keys".
@@ -672,6 +716,7 @@ impl Palette {
                             .child(shortcut.keys.join("  ")),
                     )
                     .child(div().text_color(rgb(t.muted)).child(shortcut.action))
+                    .when(ix == self.shortcut_selected, |d| d.bg(rgb(t.selected)))
                     .when_some(shortcut.run, |row, run| {
                         row.cursor_pointer()
                             .hover(|d| d.bg(rgb(t.selected)))
@@ -691,6 +736,7 @@ impl Palette {
             .w(px(440.))
             .max_h(px(400.))
             .overflow_y_scroll()
+            .track_scroll(&self.shortcuts_scroll)
             .occlude()
             .py_1()
             .flex()

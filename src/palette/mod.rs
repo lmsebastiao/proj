@@ -21,8 +21,8 @@ use std::{
 use global_hotkey::hotkey::Modifiers;
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, Global, ScrollStrategy, SharedString,
-    Subscription, UniformListScrollHandle, Window, prelude::*,
+    App, Context, Entity, FocusHandle, Focusable, Global, ScrollHandle, ScrollStrategy,
+    SharedString, Subscription, UniformListScrollHandle, Window, prelude::*,
 };
 
 use crate::{
@@ -91,6 +91,9 @@ pub struct Palette {
     cloning: bool,
     /// The dropdown with every shortcut (F1) is open.
     show_shortcuts: bool,
+    /// The dropdown's highlighted row, which the arrows move while it's open.
+    shortcut_selected: usize,
+    shortcuts_scroll: ScrollHandle,
     /// Open editor windows, for `Mode::Switch` and the "open" badges.
     windows: Vec<EditorWindow>,
     /// The project each of `windows` shows, as an index into `projects`.
@@ -159,6 +162,8 @@ impl Palette {
             picking: false,
             cloning: false,
             show_shortcuts: false,
+            shortcut_selected: 0,
+            shortcuts_scroll: ScrollHandle::new(),
             windows: Vec::new(),
             window_projects: Vec::new(),
             open_keys: HashSet::new(),
@@ -390,6 +395,9 @@ impl Palette {
     }
 
     fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.show_shortcuts {
+            return self.select_shortcut(delta, cx);
+        }
         let len = self.matches.len();
         if len == 0 {
             return;
@@ -429,6 +437,9 @@ impl Palette {
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.show_shortcuts {
+            return self.run_shortcut(window, cx);
+        }
         // A pasted folder or git URL takes enter over the matches below it.
         if let Some(path) = self.add_candidate.take() {
             return self.add_paths(vec![path], cx);

@@ -34,12 +34,14 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| f1                      | list every shortcut (click one to run it)  |
+| f1                      | list every shortcut (↑/↓ and enter, or click one, to run it) |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
 
 The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
-in the footer, opens a dropdown with all of them; clicking one runs it.
+in the footer, opens a dropdown with all of them. While it's open, ↑/↓ move through it
+instead of the list and enter runs the highlighted key; clicking one runs it too. Esc or
+typing closes it.
 
 **ctrl-k** (or shift-f10, or the menu key) lists everything you can do with the highlighted
 project: open with, show in Explorer, terminal, pin, rename, copy the path, open the
