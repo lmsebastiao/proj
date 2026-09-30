@@ -1,0 +1,13 @@
+<!-- icon.svg for 16-24 px: the same layout, with thicker strokes. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2e34"/>
+      <stop offset="1" stop-color="#17181b"/>
+    </linearGradient>
+  </defs>
+  <rect x="18" y="18" width="220" height="220" rx="50" fill="url(#tile)" stroke="#ffffff" stroke-opacity="0.16" stroke-width="6"/>
+  <circle cx="112" cy="112" r="50" fill="none" stroke="#74ade8" stroke-width="26"/>
+  <path d="M150 150l42 42" stroke="#74ade8" stroke-width="32" stroke-linecap="round"/>
+  <path d="M100 92l22 20-22 20" fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

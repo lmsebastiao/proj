@@ -33,6 +33,9 @@ toml = "1.1.6"
 toml_edit = "0.25"
 ureq = { version = "3.4.2", features = ["json"] }
 
+[build-dependencies]
+embed-resource = "3"
+
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [

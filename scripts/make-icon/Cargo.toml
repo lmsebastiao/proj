@@ -1,0 +1,14 @@
+# Renders assets/icon.svg and assets/icon-small.svg into assets/proj.ico (the exe's
+# and the tray's icon on Windows) and assets/icon-32.rgba (the macOS tray icon).
+# Run from the repo root: cargo run --manifest-path scripts/make-icon/Cargo.toml
+[package]
+name = "make-icon"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Not part of proj's workspace, so proj doesn't build resvg.
+[workspace]
+
+[dependencies]
+resvg = "0.45"

@@ -4471,6 +4471,7 @@ version = "0.3.9"
 dependencies = [
  "async-channel 2.5.0",
  "dirs 7.0.0",
+ "embed-resource",
  "global-hotkey",
  "gpui",
  "raw-window-handle",

@@ -45,6 +45,10 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) Lucas Sebastião"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\proj.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start proj now"
 
+; The same icon as proj.exe (relative to this file; makensis runs from its folder).
+!define MUI_ICON "..\assets\proj.ico"
+!define MUI_UNICON "..\assets\proj.ico"
+
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
