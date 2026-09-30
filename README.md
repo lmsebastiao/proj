@@ -86,6 +86,11 @@ the same list, but it stays open, typing filters it, **enter** switches and **es
 While holding the switcher open, adding ctrl turns it into a search. From the project search,
 typing `@` gets you the same list.
 
+**ctrl+alt+1** to **9** switch straight to that window in the list, without showing it,
+like Win+1 on the taskbar. The list numbers its first nine windows, and since it keeps its
+order, each window keeps its number until it closes. Windows reads AltGr as ctrl+alt, so these
+also take AltGr+1 to 9; if that gets in the way, set `switch_number_modifiers` in config.toml.
+
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
@@ -157,6 +162,7 @@ proj version        # show the installed version
 hotkey = "ctrl+alt+space"
 # switch_hotkey = "alt+q"  # window switcher; default alt + the key left of 1, "" = off
 # switch_search_hotkey = "ctrl+alt+q"  # searching switcher; default ctrl+alt + that key
+# switch_number_modifiers = "alt+shift"  # + 1…9: straight to that window; default ctrl+alt
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day

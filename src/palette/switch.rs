@@ -24,9 +24,7 @@ impl Palette {
         selected: usize,
         hold: Option<Modifiers>,
     ) -> Self {
-        let mut this = Self::new(window, cx);
-        this.windows = windows;
-        this.match_windows();
+        let mut this = Self::new(window, cx, windows);
         this.hold = hold;
         this.set_mode(Mode::Switch, cx);
         this.selected = selected.min(this.matches.len().saturating_sub(1));

@@ -34,7 +34,7 @@ use crate::{
     launcher::{UpdateState, Updates},
     paths,
     store::{self, Db, Project},
-    switcher::{self, EditorWindow},
+    switcher::EditorWindow,
     update,
 };
 
@@ -105,7 +105,8 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The project search. `windows`: the open editor windows, in the switcher's order.
+    pub fn new(window: &mut Window, cx: &mut Context<Self>, windows: Vec<EditorWindow>) -> Self {
         let input = cx.new(|cx| TextInput::new("", cx));
         let subscriptions = vec![
             cx.subscribe(&input, |this, input, _: &input::Changed, cx| {
@@ -169,7 +170,7 @@ impl Palette {
         // Re-read everything on each open so edits made by hand or via the CLI show up.
         this.config = config::load_config();
         this.db = store::load_db();
-        this.windows = switcher::editor_windows(&this.config, &this.db);
+        this.windows = windows;
         this.reload_projects();
         let mode = if this.config.editor.is_none() {
             Mode::Editors

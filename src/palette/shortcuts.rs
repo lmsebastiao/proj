@@ -176,11 +176,22 @@ impl Palette {
                 } else {
                     ("Close", "close")
                 };
-                vec![
+                let numbers = self
+                    .config
+                    .switch_number_modifiers()
+                    .map(|mods| crate::switcher::shortcut_label(&format!("{mods}+1…9")));
+                let mut keys = vec![
                     s(&["↵"], "Switch to it").footer("switch").run(Confirm),
                     s(&["↑ ↓"], "Move the selection"),
-                    s(&["esc"], esc).footer(esc_short).run(Dismiss),
-                ]
+                ];
+                if let Some(numbers) = numbers {
+                    keys.push(s(
+                        &[numbers.as_str()],
+                        "Switch straight to the window with that number, from anywhere",
+                    ));
+                }
+                keys.push(s(&["esc"], esc).footer(esc_short).run(Dismiss));
+                keys
             }
             List::Rename => vec![
                 s(&["↵"], "Save the name").footer("save").run(Confirm),

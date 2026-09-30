@@ -76,6 +76,18 @@ impl Palette {
                     None => d.border_color(rgb(t.muted)),
                 })
         });
+        // A window's number for the switch-by-number shortcuts (ctrl+alt+1…9);
+        // the ones past 9 keep the space so the titles line up.
+        let number = (self.list() == List::Switch
+            && self.config.switch_number_modifiers().is_some())
+        .then(|| {
+            div()
+                .flex_none()
+                .w(px(12.))
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
+        });
         // Pin, rename, remove and the actions menu: shown on the highlighted row,
         // and on any row the mouse is over.
         let icons = (self.list() == List::Projects).then(|| {
@@ -156,6 +168,7 @@ impl Palette {
                     this.selected = row;
                     this.confirm(&Confirm, window, cx);
                 }))
+                .children(number)
                 .children(mark)
                 .child(
                     div()

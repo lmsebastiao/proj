@@ -46,6 +46,8 @@ struct Hotkeys {
     switch: SwitchShortcut,
     /// The switcher to search in.
     search: SwitchShortcut,
+    /// Straight to a window by its number in the switcher.
+    numbers: NumberShortcuts,
 }
 
 /// One of the switcher's shortcuts, from its text in the config.
@@ -101,6 +103,69 @@ impl SwitchShortcut {
             Err(err) => self.problem = Some(format!("{what} shortcut '{text}': {err}")),
         }
         true
+    }
+}
+
+/// The shortcuts that switch to a window by its number: the config's
+/// modifiers with 1 to 9.
+#[derive(Default)]
+struct NumberShortcuts {
+    /// Registered: the modifiers' text, and the key for each number (index 0
+    /// is 1), `None` where it couldn't be registered.
+    active: Option<(String, Vec<Option<HotKey>>)>,
+    /// Why some couldn't be registered.
+    problem: Option<String>,
+}
+
+impl NumberShortcuts {
+    /// Registers `wanted` (`None` = off) if it changed, or failed last time.
+    /// Returns whether anything changed.
+    fn sync(&mut self, manager: &GlobalHotKeyManager, wanted: Option<String>) -> bool {
+        if self.active.as_ref().map(|(text, _)| text) == wanted.as_ref() {
+            return false;
+        }
+        if let Some((_, keys)) = self.active.take() {
+            for key in keys.into_iter().flatten() {
+                manager.unregister(key).ok();
+            }
+        }
+        self.problem = None;
+        let Some(mods) = wanted else {
+            return true;
+        };
+        let mut keys = Vec::new();
+        let mut failed = Vec::new();
+        for n in 1..=9 {
+            let key = match HotKey::from_str(&format!("{mods}+{n}")) {
+                Ok(key) => key,
+                Err(err) => {
+                    self.problem = Some(format!(
+                        "Switch by number: '{mods}' is not a valid set of modifiers ({err})"
+                    ));
+                    return true;
+                }
+            };
+            let registered = manager.register(key).is_ok();
+            if !registered {
+                failed.push(n.to_string());
+            }
+            keys.push(registered.then_some(key));
+        }
+        if !failed.is_empty() {
+            self.problem = Some(format!(
+                "Shortcut {mods}+{} is taken by another app",
+                failed.join("/")
+            ));
+        }
+        self.active = Some((mods, keys));
+        true
+    }
+
+    /// The window (0 = the first) that the shortcut `id` switches to.
+    fn window_for(&self, id: u32) -> Option<usize> {
+        let (_, keys) = self.active.as_ref()?;
+        keys.iter()
+            .position(|key| key.is_some_and(|key| key.id() == id))
     }
 }
 
@@ -178,7 +243,10 @@ impl Hotkeys {
             "Switcher search",
             false,
         );
-        switch || search
+        let numbers = self
+            .numbers
+            .sync(&self.manager, config.switch_number_modifiers());
+        switch || search || numbers
     }
 
     /// What the palette's footer says about shortcuts that don't work.
@@ -188,6 +256,7 @@ impl Hotkeys {
             .iter()
             .chain(&self.switch.problem)
             .chain(&self.search.problem)
+            .chain(&self.numbers.problem)
             .map(String::as_str)
             .collect();
         palette::ShortcutNotice((!problems.is_empty()).then(|| problems.join("; ").into()))
@@ -326,6 +395,7 @@ pub fn run() {
             problems: Vec::new(),
             switch: SwitchShortcut::default(),
             search: SwitchShortcut::default(),
+            numbers: NumberShortcuts::default(),
         };
         let problems = hotkeys.sync(&config.hotkey);
         if hotkeys.active.is_empty() {
@@ -433,6 +503,9 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
     match command {
         Command::Hotkey(id) => {
             let hotkeys = cx.global::<Hotkeys>();
+            if let Some(ix) = hotkeys.numbers.window_for(id) {
+                return switch_to_number(ix, cx);
+            }
             // The switcher stays up while its own modifiers (without shift) are held.
             let switch = hotkeys
                 .switch
@@ -591,11 +664,42 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
         }
         close_palette(handle, cx);
     }
-    let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
-    let (windows, selected) = cx.global_mut::<Switching>().arrange(windows, delta);
+    let (windows, selected) = arranged_windows(delta, cx);
     show_palette(cx, move |window, cx| {
         Palette::switcher(window, cx, windows, selected, Some(mods))
     });
+}
+
+/// The open editor windows in the switcher's order, and the one to start on
+/// (see `Switching::arrange`).
+fn arranged_windows(delta: isize, cx: &mut App) -> (Vec<EditorWindow>, usize) {
+    let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
+    cx.global_mut::<Switching>().arrange(windows, delta)
+}
+
+/// A switch-by-number shortcut: straight to the `ix`th window (0 = the first)
+/// in the switcher's order, without showing the list.
+fn switch_to_number(ix: usize, cx: &mut App) {
+    let (windows, _) = arranged_windows(1, cx);
+    let Some(target) = windows.get(ix) else {
+        return;
+    };
+    // Before closing an open palette, while proj is still in front and allowed
+    // to hand over focus.
+    platform::focus_window(target.window);
+    if let Some(handle) = open_palette(cx) {
+        close_palette(handle, cx);
+    }
+    // Recently used, like switching from the list.
+    let config = config::load_config();
+    let mut db = store::load_db();
+    let projects = store::collect(&config, &db);
+    if let Some(project) = target.project(&projects) {
+        db.opened.insert(projects[project].key(), store::now());
+        if let Err(err) = store::save_db(&db) {
+            eprintln!("proj: could not save: {err}");
+        }
+    }
 }
 
 /// The switcher's search shortcut: the same list, but it stays
@@ -611,8 +715,7 @@ fn search_windows(cx: &mut App) {
         }
         close_palette(handle, cx);
     }
-    let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
-    let (windows, selected) = cx.global_mut::<Switching>().arrange(windows, 1);
+    let (windows, selected) = arranged_windows(1, cx);
     show_palette(cx, move |window, cx| {
         Palette::switcher(window, cx, windows, selected, None)
     });
@@ -631,7 +734,9 @@ fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
         return;
     }
     reload_hotkeys(tray, cx);
-    show_palette(cx, Palette::new);
+    // In the switcher's order, for the `@` list and its numbers.
+    let (windows, _) = arranged_windows(1, cx);
+    show_palette(cx, move |window, cx| Palette::new(window, cx, windows));
 }
 
 /// Opens the palette window in front, with `build` making its contents.

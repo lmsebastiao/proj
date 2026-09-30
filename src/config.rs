@@ -29,6 +29,9 @@ pub struct Config {
     /// Shortcut for the switcher to search in, which stays open when let go.
     /// Unset = ctrl+alt + the key left of 1; "" = off.
     pub switch_search_hotkey: Option<String>,
+    /// Modifiers that, with 1 to 9, switch straight to that window in the
+    /// switcher's order. Unset = ctrl+alt; "" = off.
+    pub switch_number_modifiers: Option<String>,
     /// Light or dark colours, or follow the system setting.
     #[serde(deserialize_with = "theme_or_system")]
     pub theme: ThemeSetting,
@@ -82,6 +85,7 @@ impl Default for Config {
             check_for_updates: true,
             switch_hotkey: None,
             switch_search_hotkey: None,
+            switch_number_modifiers: None,
             theme: ThemeSetting::System,
         }
     }
@@ -104,6 +108,14 @@ impl Config {
     pub fn switch_search_hotkey(&self) -> Option<String> {
         shortcut_or(self.switch_search_hotkey.as_deref(), || {
             format!("ctrl+alt+{}", crate::platform::key_left_of_1())
+        })
+    }
+
+    /// The modifiers for switching to a window by its number, or `None` when
+    /// that's turned off.
+    pub fn switch_number_modifiers(&self) -> Option<String> {
+        shortcut_or(self.switch_number_modifiers.as_deref(), || {
+            "ctrl+alt".into()
         })
     }
 }
@@ -191,6 +203,11 @@ hotkey = {hotkey}
 # enter switches, esc closes. Unset = ctrl+alt and the key left of 1 (while
 # holding the switcher, add ctrl). "" turns it off.
 # switch_search_hotkey = "ctrl+alt+q"
+
+# Switch straight to a window by its number in that list: ctrl+alt+1 for the
+# first, up to 9. Set other modifiers here, e.g. "alt+shift", or "" to turn it
+# off. (Windows reads AltGr as ctrl+alt, so these take AltGr+1 to 9 too.)
+# switch_number_modifiers = "alt+shift"
 
 # Optional: folders whose sub-folders are all listed as projects,
 # e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.
