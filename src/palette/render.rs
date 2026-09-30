@@ -3,8 +3,8 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, FontWeight, HighlightStyle, StyledText, Window, div, prelude::*, px, rgb,
-    uniform_list,
+    AnyElement, Context, FontWeight, HighlightStyle, KeyDownEvent, StyledText, Window, div,
+    prelude::*, px, rgb, uniform_list,
 };
 
 use crate::{input, paths, store};
@@ -76,10 +76,11 @@ impl Palette {
                     None => d.border_color(rgb(t.muted)),
                 })
         });
-        // A window's number for the switch-by-number shortcuts (ctrl+alt+1…9);
-        // the ones past 9 keep the space so the titles line up.
+        // A window's number, for the number keys while holding the switcher and
+        // the switch-by-number shortcuts (alt+shift+1…9); the ones past 9 keep
+        // the space so the titles line up.
         let number = (self.list() == List::Switch
-            && self.config.switch_number_modifiers().is_some())
+            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some()))
         .then(|| {
             div()
                 .flex_none()
@@ -555,6 +556,12 @@ impl Render for Palette {
 
         div()
             .key_context("Palette")
+            // While the switcher is held open, a number switches to that window.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.switch_to_number(&event.keystroke.key, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             // →/← browse into projects and folders, but only at the ends of the
             // search text, so they still move the cursor while editing it.
             .capture_action(cx.listener(|this, _: &input::Right, _, cx| {

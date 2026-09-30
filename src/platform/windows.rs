@@ -331,11 +331,3 @@ pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
         && (!mods.contains(Modifiers::SHIFT) || down(VK_SHIFT))
         && (!mods.contains(Modifiers::SUPER) || down(VK_LWIN) || down(VK_RWIN))
 }
-
-/// The virtual key of the key left of 1 (under Esc) in the current layout:
-/// ` on US keyboards, \ on Portuguese, ^ on German…
-pub fn key_left_of_1() -> u16 {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MAPVK_VSC_TO_VK, MapVirtualKeyW};
-    // Scan code 0x29 is that physical key on every layout.
-    unsafe { MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK) as u16 }
-}

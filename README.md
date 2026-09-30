@@ -10,10 +10,11 @@ cargo build --release
 proj            # start the launcher in the background
 ```
 
-Press **ctrl+alt+space** (**alt+space** on macOS) to toggle the dialog, or click the tray icon.
+Press **alt+space** to toggle the dialog, or click the tray icon.
 Right-click the tray icon for: open, start on login, open config file, check for updates, quit
 (Windows and macOS; Linux has no tray icon). `hotkey` can also be a list:
-`["ctrl+alt+space", "f8"]`.
+`["alt+space", "f8"]`. On Windows, alt+space normally opens a window's system menu, and
+PowerToys Run uses it too; if another app has it, the dialog says so and you can set another.
 
 On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
 finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
@@ -71,25 +72,26 @@ move the cursor while you edit a search.
 
 ### Switching between open projects
 
-Hold **alt** and tap the key left of 1 (**\\** on Portuguese keyboards, **`** on US ones) to
-switch between your open editor windows, like Alt+Tab but only for editors. Keep tapping to
-move down the list; add **shift** to go back up. Let go of alt and that window comes to the
-front. The list shows as soon as you press the key, like Alt+Tab; a quick tap switches to the
-editor window you used before. **alt-esc** cancels.
+Hold **alt** and tap **\\** to switch between your open editor windows, like Alt+Tab but only
+for editors. It's the \\ key wherever your layout has it: left of 1 on Portuguese keyboards,
+above enter on US ones. Keep tapping to move down the list; **alt+↑** goes back up, and a
+number (**alt+1** to **9**) switches straight to that window. Let go of alt and the highlighted
+window comes to the front. The list shows as soon as you press the key, like Alt+Tab; a quick
+tap switches to the editor window you used before. **alt-esc** cancels.
 
 The list keeps its order: windows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before
 the current one.
 
-Press **ctrl+alt** and the same key (ctrl+alt+\\ on Portuguese keyboards) to search instead:
-the same list, but it stays open, typing filters it, **enter** switches and **esc** closes.
-While holding the switcher open, adding ctrl turns it into a search. From the project search,
-typing `@` gets you the same list.
+Press **alt+shift+\\** to search instead: the same list, but it stays open, typing filters it,
+**enter** switches and **esc** closes. While holding the switcher open, adding shift turns it
+into a search. From the project search, typing `@` gets you the same list.
 
-**ctrl+alt+1** to **9** switch straight to that window in the list, without showing it,
+**alt+shift+1** to **9** switch straight to that window in the list, without showing it,
 like Win+1 on the taskbar. The list numbers its first nine windows, and since it keeps its
-order, each window keeps its number until it closes. Windows reads AltGr as ctrl+alt, so these
-also take AltGr+1 to 9; if that gets in the way, set `switch_number_modifiers` in config.toml.
+order, each window keeps its number until it closes. Set other modifiers with
+`switch_number_modifiers` in config.toml, but not ctrl+alt on Windows: Windows reads AltGr as
+ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
@@ -159,10 +161,10 @@ proj version        # show the installed version
 `config.toml` (see `proj paths`) is created on first run with comments explaining each option:
 
 ```toml
-hotkey = "ctrl+alt+space"
-# switch_hotkey = "alt+q"  # window switcher; default alt + the key left of 1, "" = off
-# switch_search_hotkey = "ctrl+alt+q"  # searching switcher; default ctrl+alt + that key
-# switch_number_modifiers = "alt+shift"  # + 1…9: straight to that window; default ctrl+alt
+hotkey = "alt+space"
+# switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
+# switch_search_hotkey = "alt+shift+q"  # searching switcher; default alt+shift+\
+# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that window; default alt+shift
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day

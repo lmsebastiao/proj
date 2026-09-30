@@ -55,6 +55,8 @@ struct Hotkeys {
 struct SwitchShortcut {
     /// Registered: its text, the key, and the key with shift when that's wanted.
     active: Option<(String, HotKey, Option<HotKey>)>,
+    /// Whether the key with shift was wanted at the last sync.
+    shifted: bool,
     /// Why it couldn't be registered.
     problem: Option<String>,
 }
@@ -70,7 +72,8 @@ impl SwitchShortcut {
         what: &str,
         shifted: bool,
     ) -> bool {
-        if self.active.as_ref().map(|(text, ..)| text) == wanted.as_ref() {
+        if self.active.as_ref().map(|(text, ..)| text) == wanted.as_ref() && self.shifted == shifted
+        {
             return false;
         }
         if let Some((_, key, shifted)) = self.active.take() {
@@ -80,6 +83,7 @@ impl SwitchShortcut {
             }
         }
         self.problem = None;
+        self.shifted = shifted;
         let Some(text) = wanted else {
             return true;
         };
@@ -104,6 +108,16 @@ impl SwitchShortcut {
         }
         true
     }
+}
+
+/// Whether `search` is `switch` with shift added, e.g. alt+shift+\ for alt+\.
+fn is_shifted(switch: Option<&str>, search: Option<&str>) -> bool {
+    let (Some(Ok(switch)), Some(Ok(search))) =
+        (switch.map(HotKey::from_str), search.map(HotKey::from_str))
+    else {
+        return false;
+    };
+    search == HotKey::new(Some(switch.mods | Modifiers::SHIFT), switch.key)
 }
 
 /// The shortcuts that switch to a window by its number: the config's
@@ -234,15 +248,16 @@ impl Hotkeys {
     /// Registers the switcher's shortcuts from the config if they changed, or
     /// failed last time. Returns whether anything changed.
     fn sync_switcher(&mut self, config: &config::Config) -> bool {
+        let (switch_text, search_text) = (config.switch_hotkey(), config.switch_search_hotkey());
+        // With the defaults (alt+\ and alt+shift+\) shift searches instead of
+        // going back; alt+up still goes back.
+        let back = !is_shifted(switch_text.as_deref(), search_text.as_deref());
         let switch = self
             .switch
-            .sync(&self.manager, config.switch_hotkey(), "Switcher", true);
-        let search = self.search.sync(
-            &self.manager,
-            config.switch_search_hotkey(),
-            "Switcher search",
-            false,
-        );
+            .sync(&self.manager, switch_text, "Switcher", back);
+        let search = self
+            .search
+            .sync(&self.manager, search_text, "Switcher search", false);
         let numbers = self
             .numbers
             .sync(&self.manager, config.switch_number_modifiers());
@@ -802,4 +817,21 @@ fn fatal(cx: &mut App, message: &str) {
     platform::attach_console();
     eprintln!("proj: {message}");
     cx.quit();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_with_shift_takes_the_place_of_going_back() {
+        assert!(is_shifted(
+            Some("alt+Backslash"),
+            Some("alt+shift+Backslash")
+        ));
+        assert!(is_shifted(Some("alt+q"), Some("shift+alt+q")));
+        assert!(!is_shifted(Some("alt+q"), Some("ctrl+alt+q")));
+        assert!(!is_shifted(Some("alt+q"), None));
+        assert!(!is_shifted(Some("not a key"), Some("alt+shift+q")));
+    }
 }

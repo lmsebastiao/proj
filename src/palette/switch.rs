@@ -109,6 +109,28 @@ impl Palette {
         true
     }
 
+    /// A key pressed while the switcher is held open: 1 to 9 switch straight to
+    /// the window with that number. Returns whether the key was one of those.
+    pub(super) fn switch_to_number(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.hold.is_none() || self.mode != Mode::Switch {
+            return false;
+        }
+        let Some(n) = key.parse::<usize>().ok().filter(|n| (1..=9).contains(n)) else {
+            return false;
+        };
+        // A number past the last window does nothing, rather than typing it.
+        if n <= self.windows.len() {
+            self.hold = None;
+            self.switch_to(n - 1, window, cx);
+        }
+        true
+    }
+
     /// Works out which project each open window shows.
     pub(super) fn match_windows(&mut self) {
         self.window_projects = self

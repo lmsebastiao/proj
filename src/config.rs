@@ -24,13 +24,14 @@ pub struct Config {
     /// Look for a new release about once a day (installed copies only).
     pub check_for_updates: bool,
     /// Hold-and-tap shortcut for switching between open editor windows (with
-    /// shift: backwards). Unset = alt + the key left of 1; "" = off.
+    /// shift: backwards, unless that's the search shortcut). Unset = alt+\;
+    /// "" = off.
     pub switch_hotkey: Option<String>,
     /// Shortcut for the switcher to search in, which stays open when let go.
-    /// Unset = ctrl+alt + the key left of 1; "" = off.
+    /// Unset = alt+shift+\; "" = off.
     pub switch_search_hotkey: Option<String>,
     /// Modifiers that, with 1 to 9, switch straight to that window in the
-    /// switcher's order. Unset = ctrl+alt; "" = off.
+    /// switcher's order. Unset = alt+shift; "" = off.
     pub switch_number_modifiers: Option<String>,
     /// Light or dark colours, or follow the system setting.
     #[serde(deserialize_with = "theme_or_system")]
@@ -99,23 +100,22 @@ impl Config {
 
     /// The window switcher's shortcut, or `None` when it's turned off.
     pub fn switch_hotkey(&self) -> Option<String> {
-        shortcut_or(self.switch_hotkey.as_deref(), || {
-            format!("alt+{}", crate::platform::key_left_of_1())
-        })
+        shortcut_or(self.switch_hotkey.as_deref(), || "alt+Backslash".into())
     }
 
     /// The searching switcher's shortcut, or `None` when it's turned off.
     pub fn switch_search_hotkey(&self) -> Option<String> {
         shortcut_or(self.switch_search_hotkey.as_deref(), || {
-            format!("ctrl+alt+{}", crate::platform::key_left_of_1())
+            "alt+shift+Backslash".into()
         })
     }
 
     /// The modifiers for switching to a window by its number, or `None` when
-    /// that's turned off.
+    /// that's turned off. Not ctrl+alt: Windows reads AltGr as ctrl+alt, and
+    /// AltGr with a number types @, { or [ on many layouts.
     pub fn switch_number_modifiers(&self) -> Option<String> {
         shortcut_or(self.switch_number_modifiers.as_deref(), || {
-            "ctrl+alt".into()
+            "alt+shift".into()
         })
     }
 }
@@ -129,13 +129,10 @@ fn shortcut_or(text: Option<&str>, default: impl FnOnce() -> String) -> Option<S
     }
 }
 
-// alt+space is the window menu on Windows and PowerToys' default.
+// The same on every platform. On Windows it takes over the window menu's key,
+// and PowerToys Run uses it too; the footer says so when it's taken.
 fn default_hotkey() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "alt+space"
-    } else {
-        "ctrl+alt+space"
-    }
+    "alt+space"
 }
 
 /// `"a"` or `["a", "b"]`. An empty list falls back to the default so the
@@ -194,20 +191,21 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 # A change applies the next time the launcher opens (with the old shortcut or the tray icon).
 hotkey = {hotkey}
 
-# Switch between your open editor windows like Alt+Tab: hold alt, tap the key
-# left of 1 to move through them (with shift: backwards), let go to switch.
+# Switch between your open editor windows like Alt+Tab: hold alt, tap \ to move
+# through them (alt+up goes back) or a number to pick one, let go to switch.
 # Set another shortcut here, e.g. "alt+q", or "" to turn it off.
 # switch_hotkey = "alt+q"
 
 # The same list to search in, which stays open when you let go: type to filter,
-# enter switches, esc closes. Unset = ctrl+alt and the key left of 1 (while
-# holding the switcher, add ctrl). "" turns it off.
-# switch_search_hotkey = "ctrl+alt+q"
+# enter switches, esc closes. Unset = alt+shift+\ (while holding the switcher,
+# add shift). "" turns it off.
+# switch_search_hotkey = "alt+shift+q"
 
-# Switch straight to a window by its number in that list: ctrl+alt+1 for the
-# first, up to 9. Set other modifiers here, e.g. "alt+shift", or "" to turn it
-# off. (Windows reads AltGr as ctrl+alt, so these take AltGr+1 to 9 too.)
-# switch_number_modifiers = "alt+shift"
+# Switch straight to a window by its number in that list: alt+shift+1 for the
+# first, up to 9. Set other modifiers here, e.g. "ctrl+shift", or "" to turn it
+# off. Avoid ctrl+alt on Windows: AltGr counts as ctrl+alt, so AltGr+2 (@),
+# AltGr+7 ({) and so on would stop typing in every app.
+# switch_number_modifiers = "ctrl+shift"
 
 # Optional: folders whose sub-folders are all listed as projects,
 # e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.

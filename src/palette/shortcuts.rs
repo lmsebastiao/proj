@@ -167,6 +167,7 @@ impl Palette {
             // While the modifier is held these keys come with alt.
             List::Switch if self.hold.is_some() => vec![
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
+                s(&["alt-1…9"], "Switch to the window with that number"),
                 s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
             ],
             List::Switch => {
