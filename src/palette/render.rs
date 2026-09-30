@@ -85,9 +85,7 @@ impl Palette {
                 .flex()
                 .flex_none()
                 .gap_1()
-                .when(row != self.selected, |d| {
-                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
-                })
+                .relative()
                 .children(ROW_ICONS.map(|icon| {
                     let (glyph, color) = match icon {
                         RowIcon::Pin if pinned => (icons::PINNED, t.accent),
@@ -113,8 +111,30 @@ impl Palette {
                             cx.stop_propagation();
                             this.click_row_icon(row, icon, cx);
                         }))
+                        .when(row != self.selected, |d| {
+                            d.invisible().group_hover(ROW_GROUP, |s| s.visible())
+                        })
                         .child(glyph)
                 }))
+                // While the icons are hidden, a pinned row still shows its pin, at the
+                // end, wherever the pin icon sits among them.
+                .when(pinned && row != self.selected, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .size(px(28.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                            .text_size(px(14.))
+                            .text_color(rgb(t.accent))
+                            .group_hover(ROW_GROUP, |s| s.invisible())
+                            .child(icons::PINNED),
+                    )
+                })
         });
 
         // uniform_list lays each row out on its own, so both levels need an explicit width.
@@ -150,9 +170,6 @@ impl Palette {
                                 .gap_2()
                                 .text_size(px(FONT_SIZE))
                                 .text_color(rgb(t.text))
-                                .when(pinned, |d| {
-                                    d.child(div().size(px(7.)).rounded_full().bg(rgb(t.accent)))
-                                })
                                 .child(StyledText::new(title).with_highlights(title_hl))
                                 .when(open, |d| {
                                     d.child(
@@ -251,7 +268,12 @@ impl Palette {
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let t = self.theme;
         let (title, lines): (String, Vec<String>) = match self.mode {
-            Mode::Projects | Mode::Switch | Mode::Actions => return None,
+            Mode::Projects | Mode::Switch => return None,
+            // Which project the actions are for.
+            Mode::Actions => {
+                let project = self.actions_project()?;
+                (project.name.clone(), vec![project.location()])
+            }
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),

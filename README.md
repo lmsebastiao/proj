@@ -42,9 +42,10 @@ in the footer, opens a dropdown with all of them; clicking one runs it.
 
 **ctrl-k** lists everything you can do with the highlighted project: open with, show in
 Explorer, terminal, pin, rename, copy the path, open the repository page, remove. Type to
-filter it and press enter. The highlighted row, and any row under the mouse, also has icons
-for pin, rename, remove and **⋯** (the same list). The remove icon asks for a second click.
-Pinned projects stay on top. Renaming to an empty name goes back to the folder name.
+filter it and press enter; the project's name and folder show above the list. The highlighted
+row, and any row under the mouse, also has icons for rename, remove, **⋯** (the same list)
+and pin. The remove icon asks for a second click. Pinned projects stay on top and keep their
+pin icon showing. Renaming to an empty name goes back to the folder name.
 Removing only takes a project off the list; the folder isn't touched.
 
 Type `>` to list commands: start on login, add projects, change the default editor, theme,

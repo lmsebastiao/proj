@@ -10,7 +10,7 @@ use super::{
     keymap::{CopyPath, OpenRemote},
 };
 
-/// The icons on a project row, left to right.
+/// The icons on a project row.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum RowIcon {
     Pin,
@@ -20,11 +20,13 @@ pub(super) enum RowIcon {
     More,
 }
 
+/// Left to right. Any order works: rows that aren't highlighted still show a
+/// pinned project's pin, at the end.
 pub(super) const ROW_ICONS: [RowIcon; 4] = [
-    RowIcon::Pin,
     RowIcon::Rename,
     RowIcon::Remove,
     RowIcon::More,
+    RowIcon::Pin,
 ];
 
 impl RowIcon {
