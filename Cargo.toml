@@ -1,6 +1,6 @@
 [package]
 name = "proj"
-version = "0.3.10"
+version = "0.3.11"
 edition = "2024"
 description = "Always-running project launcher with a Raycast-style search dialog"
 # The updater downloads releases from here.
