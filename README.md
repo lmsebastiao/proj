@@ -62,8 +62,8 @@ move the cursor while you edit a search.
 Hold **alt** and tap the key left of 1 (**\\** on Portuguese keyboards, **`** on US ones) to
 switch between your open editor windows, like Alt+Tab but only for editors. Keep tapping to
 move down the list; add **shift** to go back up. Let go of alt and that window comes to the
-front. A quick tap goes straight to the editor window you used before, without showing the
-list. **alt-esc** cancels.
+front. The list shows as soon as you press the key, like Alt+Tab; a quick tap switches to the
+editor window you used before. **alt-esc** cancels.
 
 The list keeps its order: windows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before

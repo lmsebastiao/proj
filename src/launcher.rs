@@ -194,16 +194,8 @@ impl Hotkeys {
     }
 }
 
-/// A switch started with the switcher's shortcut, before its list is shown: a
-/// quick tap switches straight away, like Alt+Tab.
-struct PendingSwitch {
-    windows: Vec<EditorWindow>,
-    selected: usize,
-}
-
 #[derive(Default)]
 struct Switching {
-    pending: Option<PendingSwitch>,
     /// The switcher's order: windows in the order they were first listed. It
     /// doesn't change when you switch, so each window keeps its place.
     order: Vec<platform::WindowRef>,
@@ -247,9 +239,6 @@ impl Switching {
         (windows, selected)
     }
 }
-
-/// How long the switcher's modifier must be held before its list shows.
-const SHOW_SWITCHER_AFTER: Duration = Duration::from_millis(150);
 
 /// Events from the hotkey and tray callbacks and the update threads, handled on
 /// the main thread.
@@ -590,8 +579,8 @@ fn reload_hotkeys(tray: Option<&Tray>, cx: &mut App) {
 }
 
 /// The switcher's shortcut: `delta` 1 forwards, -1 with shift. The first press
-/// waits a moment: let go quickly and it switches to the previous window
-/// straight away; keep holding and the list shows, and each press moves on.
+/// shows the list straight away, like Alt+Tab, and letting go switches, however
+/// quick the tap; each further press moves the selection.
 fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
     if let Some(handle) = open_palette(cx) {
         let cycled = handle
@@ -602,46 +591,11 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
         }
         close_palette(handle, cx);
     }
-    if let Some(pending) = &mut cx.global_mut::<Switching>().pending {
-        let len = pending.windows.len().max(1) as isize;
-        pending.selected = (pending.selected as isize + delta).rem_euclid(len) as usize;
-        return;
-    }
     let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
     let (windows, selected) = cx.global_mut::<Switching>().arrange(windows, delta);
-    cx.global_mut::<Switching>().pending = Some(PendingSwitch { windows, selected });
-
-    cx.spawn(async move |cx| {
-        let started = Instant::now();
-        loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(15))
-                .await;
-            let released = !platform::modifiers_held(mods);
-            if !released && started.elapsed() < SHOW_SWITCHER_AFTER {
-                continue;
-            }
-            cx.update(|cx| {
-                // Gone when the search shortcut took over meanwhile.
-                let Some(pending) = cx.global_mut::<Switching>().pending.take() else {
-                    return;
-                };
-                if released {
-                    if let Some(target) = pending.windows.get(pending.selected) {
-                        platform::focus_window(target.window);
-                    }
-                } else {
-                    let PendingSwitch { windows, selected } = pending;
-                    show_palette(cx, move |window, cx| {
-                        Palette::switcher(window, cx, windows, selected, Some(mods))
-                    });
-                }
-            })
-            .ok();
-            break;
-        }
-    })
-    .detach();
+    show_palette(cx, move |window, cx| {
+        Palette::switcher(window, cx, windows, selected, Some(mods))
+    });
 }
 
 /// The switcher's search shortcut: the same list, but it stays
@@ -657,13 +611,8 @@ fn search_windows(cx: &mut App) {
         }
         close_palette(handle, cx);
     }
-    let (windows, selected) = match cx.global_mut::<Switching>().pending.take() {
-        Some(pending) => (pending.windows, pending.selected),
-        None => {
-            let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
-            cx.global_mut::<Switching>().arrange(windows, 1)
-        }
-    };
+    let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
+    let (windows, selected) = cx.global_mut::<Switching>().arrange(windows, 1);
     show_palette(cx, move |window, cx| {
         Palette::switcher(window, cx, windows, selected, None)
     });
