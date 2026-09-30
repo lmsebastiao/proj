@@ -355,7 +355,7 @@ impl Palette {
                 self.set_query("", cx);
                 self.add_projects(&AddProjects, window, cx);
             }
-            PaletteCommand::ChangeEditor => self.set_mode(Mode::Editors, cx),
+            PaletteCommand::ChangeEditor => self.choose_default_editor(cx),
             PaletteCommand::OpenConfig => {
                 match open::open_project(&self.config, &config::config_path()) {
                     Ok(()) => window.remove_window(),

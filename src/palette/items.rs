@@ -9,7 +9,8 @@ use super::{Palette, secondary, theme::*};
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Mode {
     Projects,
-    /// Choosing the global editor.
+    /// Choosing the global editor (`Palette::open_with` remembers the project
+    /// that was selected, to return to it).
     Editors,
     /// Choosing an editor for one project (`Palette::open_with`).
     OpenWith,
@@ -102,16 +103,10 @@ impl Palette {
                 None => Default::default(),
             },
             List::Editors | List::OpenWith => match &self.editors[ix] {
-                EditorOption::Detected(editor) => {
-                    let current = self.mode == Mode::Editors
-                        && self.config.editor.as_deref() == Some(editor.command.as_str());
-                    let title = if current {
-                        format!("{}  (current)", editor.name)
-                    } else {
-                        editor.name.clone()
-                    };
-                    (title, paths::display_path(editor.command.as_ref()))
-                }
+                EditorOption::Detected(editor) => (
+                    editor.name.clone(),
+                    paths::display_path(editor.command.as_ref()),
+                ),
                 EditorOption::Browse => {
                     let what = if self.mode == Mode::OpenWith {
                         " for this project"
@@ -143,9 +138,9 @@ impl Palette {
                         format!("Pick one or more project folders · {m}-o"),
                     ),
                     PaletteCommand::ChangeEditor => (
-                        "Change default editor".into(),
+                        "Change the default editor".into(),
                         format!(
-                            "Currently {} · {m}-shift-e",
+                            "All projects open in {} unless they have their own · {m}-shift-e",
                             self.name_of(self.config.editor.as_deref().unwrap_or(""))
                         ),
                     ),
@@ -163,8 +158,8 @@ impl Palette {
         }
     }
 
-    /// Right-hand details: branch, editors and last opened for projects; the
-    /// editor's role in the Open-with list.
+    /// Right-hand details: branch, editors and last opened for projects; which
+    /// editor is the default in the editor lists.
     pub(super) fn item_meta(&self, ix: usize, now: u64) -> Meta {
         match self.list() {
             List::Projects => {
@@ -198,18 +193,26 @@ impl Palette {
                     .unwrap_or_default();
                 let is_global = self.config.editor.as_deref() == Some(editor.command.as_str());
                 let role = if own.first() == Some(&editor.command) {
-                    Some("project default")
+                    Some("this project's default")
                 } else if own.contains(&editor.command) {
-                    Some("this project")
+                    Some("in this project's list")
                 } else if is_global && own.is_empty() {
                     Some("default")
                 } else if is_global {
-                    Some("global default")
+                    Some("default for other projects")
                 } else {
                     None
                 };
                 Meta {
                     top: role.map(|r| (r.to_string(), ACCENT)),
+                    bottom: None,
+                }
+            }
+            List::Editors => {
+                let current = matches!(&self.editors[ix], EditorOption::Detected(e)
+                    if self.config.editor.as_deref() == Some(e.command.as_str()));
+                Meta {
+                    top: current.then(|| ("default".to_string(), ACCENT)),
                     bottom: None,
                 }
             }
@@ -222,7 +225,7 @@ impl Palette {
                     .map(|_| ("→".to_string(), MUTED)),
                 bottom: None,
             },
-            List::Editors | List::Commands | List::Rename => Meta {
+            List::Commands | List::Rename => Meta {
                 top: None,
                 bottom: None,
             },

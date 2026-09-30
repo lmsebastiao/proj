@@ -49,7 +49,8 @@ pub struct Palette {
     editors: Vec<EditorOption>,
     /// Editor command -> display name.
     names: HashMap<String, String>,
-    /// Key of the entry being opened in `Mode::OpenWith`.
+    /// Key of the entry being opened in `Mode::OpenWith`, or the one that was
+    /// selected when `Mode::Editors` opened.
     open_with: Option<String>,
     /// The project being browsed in `Mode::Browse`.
     browse: Option<browse::Browse>,
@@ -211,7 +212,10 @@ impl Palette {
             Mode::Projects => {
                 "Search projects, > for commands, or paste a folder path or git URL…".into()
             }
-            Mode::Editors => "Choose the editor to open projects with…".into(),
+            Mode::Editors if self.config.editor.is_none() => {
+                "Choose the editor to open projects with…".into()
+            }
+            Mode::Editors => "Default editor for all projects…".into(),
             Mode::OpenWith => "Open with…".into(),
             Mode::Browse => match &self.browse {
                 Some(browse) => format!("Search in {}…", browse.breadcrumb()),
@@ -407,18 +411,21 @@ impl Palette {
         match self.list() {
             List::Commands => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Rename => {
-                let key = self.open_with.clone().or_else(|| self.renaming.clone());
-                self.set_mode(Mode::Projects, cx);
-                self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
-            }
+            List::OpenWith | List::Rename => self.back_to_projects(cx),
             List::Projects if !self.marked.is_empty() => {
                 self.marked.clear();
                 cx.notify();
             }
-            List::Editors if self.config.editor.is_some() => self.set_mode(Mode::Projects, cx),
+            List::Editors if self.config.editor.is_some() => self.back_to_projects(cx),
             _ => window.remove_window(),
         }
+    }
+
+    /// Back to the project list, with the entry that was being edited selected.
+    fn back_to_projects(&mut self, cx: &mut Context<Self>) {
+        let key = self.open_with.clone().or_else(|| self.renaming.clone());
+        self.set_mode(Mode::Projects, cx);
+        self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {

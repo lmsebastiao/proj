@@ -182,18 +182,29 @@ impl Palette {
         let (title, lines): (String, Vec<String>) = match self.mode {
             Mode::Projects => return None,
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
-            Mode::Editors => {
-                let mut lines = vec![format!(
-                    "The default for all projects. Change it any time with {}-shift-e.",
-                    secondary()
-                )];
-                if self.config.editor.is_none() {
-                    lines.push(format!(
+            Mode::Editors if self.config.editor.is_none() => (
+                "Which editor should open your projects?".into(),
+                vec![
+                    format!(
+                        "The default for all projects. Change it any time with {}-shift-e.",
+                        secondary()
+                    ),
+                    format!(
                         "proj keeps running in the background. Press {} to bring it up.",
                         self.config.hotkey_label()
+                    ),
+                ],
+            ),
+            Mode::Editors => {
+                let mut lines =
+                    vec!["↵ changes it for every project that doesn't have its own editor.".into()];
+                if let Some(project) = self.open_with_project() {
+                    lines.push(format!(
+                        "Only for {}, once or always? Press alt-↵ instead.",
+                        project.name
                     ));
                 }
-                ("Which editor should open your projects?".into(), lines)
+                ("Default editor for all projects".into(), lines)
             }
             Mode::Rename => {
                 let project = self.renamed_project()?;
@@ -212,17 +223,29 @@ impl Palette {
                 )
             }
             Mode::OpenWith => {
-                let name = self
-                    .open_with_project()
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
+                let project = self.open_with_project()?;
+                let name = &project.name;
                 let m = secondary();
+                let now = match project.editors.as_slice() {
+                    [] => format!(
+                        "{name} opens in the default editor, {}.",
+                        self.name_of(&project.default_editor(&self.config))
+                    ),
+                    [only] => format!("{name} always opens in {}.", self.name_of(only)),
+                    _ => format!(
+                        "↵ on {name} asks between {}.",
+                        self.editor_list(&project.key())
+                    ),
+                };
                 (
                     format!("Open {name} with…"),
-                    vec![format!(
-                        "{m}-s adds or removes an editor for this project; with two or more, \
-                         enter asks which. {m}-↵ makes one its default."
-                    )],
+                    vec![
+                        format!("{now} Here, ↵ opens it just this once and changes nothing."),
+                        format!(
+                            "{m}-↵ always open {name} with it (again to undo) · \
+                             {m}-s pick between several each time"
+                        ),
+                    ],
                 )
             }
         };
@@ -400,7 +423,7 @@ impl Render for Palette {
             .on_action(cx.listener(Self::confirm))
             .on_action(
                 cx.listener(|this, _: &Reveal, window, cx| match this.list() {
-                    List::OpenWith => this.make_project_default(cx),
+                    List::OpenWith => this.toggle_project_default(cx),
                     _ => this.open_selected(Target::FileManager, window, cx),
                 }),
             )
@@ -411,6 +434,9 @@ impl Render for Palette {
                 this.open_selected(Target::Terminal, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
+                if this.list() == List::Editors {
+                    return this.open_with_from_editors(cx);
+                }
                 let entry = if this.marked.len() > 1 {
                     this.marked_workspace(cx)
                 } else {
@@ -430,9 +456,7 @@ impl Render for Palette {
             .on_action(cx.listener(Self::open_remote))
             .on_action(cx.listener(Self::remove))
             .on_action(cx.listener(Self::add_projects))
-            .on_action(
-                cx.listener(|this, _: &ChooseEditor, _, cx| this.set_mode(Mode::Editors, cx)),
-            )
+            .on_action(cx.listener(|this, _: &ChooseEditor, _, cx| this.choose_default_editor(cx)))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
             .on_action(cx.listener(Self::dismiss))
             .size_full()

@@ -295,6 +295,18 @@ pub fn make_default_editor(list: &mut Vec<String>, editor: &str) {
     list.insert(0, editor.to_string());
 }
 
+/// Removes `editor` from a project's list. If only the global editor is left
+/// (`offer_editor` put it there), the list is cleared so the project follows the
+/// global setting again, including later changes to it.
+pub fn remove_editor(list: &mut Vec<String>, editor: &str, global: Option<&str>) {
+    list.retain(|c| c != editor);
+    if let [only] = list.as_slice()
+        && Some(only.as_str()) == global
+    {
+        list.clear();
+    }
+}
+
 /// "just now", "5m ago", "3h ago", "2d ago", "3w ago", "4mo ago", "1y ago".
 pub fn ago(then: u64, now: u64) -> String {
     let secs = now.saturating_sub(then);
@@ -376,6 +388,13 @@ mod tests {
         let mut list = vec!["zed".to_string(), "code".to_string()];
         make_default_editor(&mut list, "code");
         assert_eq!(list, ["code", "zed"]);
+
+        let mut list = vec!["code".to_string(), "zed".to_string()];
+        remove_editor(&mut list, "code", Some("zed"));
+        assert!(list.is_empty(), "back to following the global editor");
+        let mut list = vec!["code".to_string(), "devenv".to_string()];
+        remove_editor(&mut list, "code", Some("zed"));
+        assert_eq!(list, ["devenv"]);
     }
 
     #[test]

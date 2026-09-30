@@ -73,8 +73,8 @@ impl Palette {
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(&["→"], "Browse its files and folders").footer_if(!marking, "files"),
-                    s(&["alt-↵"], "Open with another editor…")
-                        .footer(if marking { "open with" } else { "with" })
+                    s(&["alt-↵"], "Open with another editor, once or always…")
+                        .footer("open with…")
                         .run(OpenWithMenu),
                     s(&["tab"], "Mark to open several in one window")
                         .footer(if marking { "mark" } else { "combine" })
@@ -89,7 +89,11 @@ impl Palette {
                     s(&["mod-shift-c"], "Copy the path").run(CopyPath),
                     s(&["mod-d", "shift-del"], "Remove from the list").run(Remove),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
-                    s(&["mod-shift-e"], "Change the default editor").run(ChooseEditor),
+                    s(
+                        &["mod-shift-e"],
+                        "Change the default editor for all projects",
+                    )
+                    .run(ChooseEditor),
                     s(&[">"], "Commands: start on login, config file…"),
                     s(&["↑ ↓", "ctrl-p ctrl-n"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
@@ -112,18 +116,34 @@ impl Palette {
                 s(&["↑ ↓", "ctrl-p ctrl-n"], "Move the selection"),
                 s(&["esc"], "Back to the projects").run(Dismiss),
             ],
-            List::OpenWith => vec![
-                s(&["↵"], "Open with this editor")
-                    .footer("open")
-                    .run(Confirm),
-                s(&["mod-s"], "Add or remove it for this project")
-                    .footer("add/remove")
-                    .run(TogglePin),
-                s(&["mod-↵"], "Make it this project's default")
-                    .footer("make default")
-                    .run(Reveal),
-                s(&["esc"], "Back").footer("back").run(Dismiss),
-            ],
+            List::OpenWith => {
+                let own = self
+                    .open_with_project()
+                    .map(|p| p.editors.as_slice())
+                    .unwrap_or_default();
+                let selected = self.selected_editor().map(|e| &e.command);
+                let (always, always_short) = if selected.is_some() && own.first() == selected {
+                    ("Stop always using it for this project", "undo always")
+                } else {
+                    ("Always open this project with it", "always")
+                };
+                let (list, list_short) = if selected.is_some_and(|c| own.contains(c)) {
+                    ("Remove it from the editors to pick between", "remove")
+                } else {
+                    (
+                        "Add it to the editors to pick between each time",
+                        "pick list",
+                    )
+                };
+                vec![
+                    s(&["↵"], "Open with it just this once")
+                        .footer("open once")
+                        .run(Confirm),
+                    s(&["mod-↵"], always).footer(always_short).run(Reveal),
+                    s(&["mod-s"], list).footer(list_short).run(TogglePin),
+                    s(&["esc"], "Back").footer("back").run(Dismiss),
+                ]
+            }
             List::Commands => vec![
                 s(&["↵"], "Run").footer("run").run(Confirm),
                 s(&["esc"], "Back").footer("back").run(Dismiss),
@@ -134,10 +154,24 @@ impl Palette {
                 } else {
                     "close"
                 };
-                vec![
-                    s(&["↵"], "Select").footer("select").run(Confirm),
-                    s(&["esc"], "Back").footer(esc).run(Dismiss),
-                ]
+                let mut keys = vec![
+                    s(&["↵"], "Use it for all projects")
+                        .footer(if self.config.editor.is_some() {
+                            "set default"
+                        } else {
+                            "select"
+                        })
+                        .run(Confirm),
+                ];
+                if self.open_with.is_some() {
+                    keys.push(
+                        s(&["alt-↵"], "Only for the selected project…")
+                            .footer("this project only")
+                            .run(OpenWithMenu),
+                    );
+                }
+                keys.push(s(&["esc"], "Back").footer(esc).run(Dismiss));
+                keys
             }
             List::Rename => vec![
                 s(&["↵"], "Save the name").footer("save").run(Confirm),
