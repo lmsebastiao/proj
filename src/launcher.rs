@@ -192,8 +192,9 @@ enum Command {
     UpdateStarted(Result<(), String>),
 }
 
-/// Where the tray's update item is at.
-enum UpdateState {
+/// Where updating is at, shown by the tray item and the palette's `>` command.
+#[derive(Clone)]
+pub enum UpdateState {
     Unchecked,
     Checking,
     UpToDate,
@@ -216,13 +217,26 @@ impl UpdateState {
     }
 }
 
-struct Updates {
-    state: UpdateState,
+/// Updating, for installed copies. The palette observes this to redraw its
+/// update command.
+pub struct Updates {
+    pub state: UpdateState,
     /// For the check and install threads to report back.
     commands: async_channel::Sender<Command>,
 }
 
 impl Global for Updates {}
+
+/// The palette's update command: check for an update, or install the one found,
+/// like the tray item (which it keeps in step).
+pub fn run_update(cx: &App) {
+    if let Some(updates) = cx.try_global::<Updates>() {
+        updates
+            .commands
+            .try_send(Command::Tray(TrayCommand::Update))
+            .ok();
+    }
+}
 
 /// Invisible window that keeps the app alive: gpui quits when the last window
 /// closes, and the palette window is destroyed each time it is dismissed so

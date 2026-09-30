@@ -43,7 +43,7 @@ The footer shows the most common keys for the current list. **f1**, or clicking 
 in the footer, opens a dropdown with all of them; clicking one runs it.
 
 Type `>` to list commands: start on login, add projects, change the default editor, open the
-config file, quit.
+config file, check for updates / install update (installed copies), quit.
 
 ### Browsing inside a project
 
@@ -180,14 +180,16 @@ characters, which would truncate a long PATH.
 A copy installed with the installer looks for a newer
 [GitHub release](https://github.com/lmsebastiao/proj/releases) a minute after it starts and
 then about once a day. Set `check_for_updates = false` to turn that off. When a new version
-is out, the tray menu's **Check for updates** item becomes **Install update x.y.z**. Clicking
-it downloads the installer and runs it silently
+is out, the tray menu's **Check for updates** item becomes **Install update x.y.z**, and so does
+the same command in the `>` list. Either one checks now when clicked, or once an update is
+found, downloads the installer and runs it silently
 (`proj-setup-x.y.z.exe /S /RELAUNCH /D=<install folder>`). The installer replaces proj.exe
 and starts the new version. Nothing is installed without that click, or without running
 `proj update`.
 
 Copies built with `cargo build` don't update themselves: they have no `uninstall.exe` next to
-them, so the tray has no update item and `proj update` only says whether a newer version exists.
+them, so neither the tray nor the `>` list has the update command, and `proj update` only says
+whether a newer version exists.
 
 ## Releasing
 

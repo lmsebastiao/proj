@@ -6,7 +6,9 @@ use std::{io, path::PathBuf};
 use gpui::{ClipboardItem, Context, Focusable, PathPromptOptions, Window};
 
 use crate::{
-    autostart, config, git, open, paths, platform,
+    autostart, config, git,
+    launcher::{self, UpdateState},
+    open, paths, platform,
     store::{self, Db, Project},
 };
 
@@ -361,6 +363,13 @@ impl Palette {
                         self.status = Some(format!("Could not open config: {err}").into());
                         cx.notify();
                     }
+                }
+            }
+            // The palette stays open and the row follows along; installing
+            // restarts proj.
+            PaletteCommand::Update => {
+                if !matches!(self.update, UpdateState::Checking | UpdateState::Installing) {
+                    launcher::run_update(cx);
                 }
             }
             PaletteCommand::Quit => cx.quit(),

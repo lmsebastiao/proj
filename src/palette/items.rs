@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::{config, editors::Editor, paths, store};
+use crate::{config, editors::Editor, launcher::UpdateState, paths, store, update};
 
 use super::{Palette, secondary, theme::*};
 
@@ -50,22 +50,30 @@ pub(super) enum EditorOption {
     FileManager,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
     ChangeEditor,
     OpenConfig,
+    /// Check for an update, or install the one found.
+    Update,
     Quit,
 }
 
-pub(super) const COMMANDS: [PaletteCommand; 5] = [
-    PaletteCommand::Autostart,
-    PaletteCommand::AddProjects,
-    PaletteCommand::ChangeEditor,
-    PaletteCommand::OpenConfig,
-    PaletteCommand::Quit,
-];
+/// The `>` commands. `updates`: this copy can update itself (it was installed).
+pub(super) fn commands(updates: bool) -> Vec<PaletteCommand> {
+    [
+        PaletteCommand::Autostart,
+        PaletteCommand::AddProjects,
+        PaletteCommand::ChangeEditor,
+        PaletteCommand::OpenConfig,
+    ]
+    .into_iter()
+    .chain(updates.then_some(PaletteCommand::Update))
+    .chain([PaletteCommand::Quit])
+    .collect()
+}
 
 pub(super) enum Target {
     Editor(String),
@@ -124,7 +132,7 @@ impl Palette {
             },
             List::Commands => {
                 let m = secondary();
-                match COMMANDS[ix] {
+                match self.commands[ix] {
                     PaletteCommand::Autostart => (
                         format!(
                             "Start on login: {}",
@@ -150,6 +158,7 @@ impl Palette {
                         "Open config file".into(),
                         paths::display_path(&config::config_path()),
                     ),
+                    PaletteCommand::Update => self.update_text(),
                     PaletteCommand::Quit => (
                         "Quit proj".into(),
                         format!("Stop the background launcher · {m}-q"),
@@ -239,12 +248,43 @@ impl Palette {
         }
     }
 
+    /// The update command's title and subtitle, in step with the tray item.
+    fn update_text(&self) -> (String, String) {
+        let current = update::CURRENT;
+        match &self.update {
+            UpdateState::Unchecked => (
+                "Check for updates".into(),
+                format!("You have proj {current}"),
+            ),
+            UpdateState::Checking => (
+                "Checking for updates…".into(),
+                format!("You have proj {current}"),
+            ),
+            UpdateState::UpToDate => (
+                "Check for updates".into(),
+                format!("proj {current} is up to date"),
+            ),
+            UpdateState::Available(found) => (
+                format!("Install update {}", found.version),
+                format!("You have {current}; proj restarts on the new version"),
+            ),
+            UpdateState::Installing => (
+                "Downloading update…".into(),
+                "proj restarts when it's installed".into(),
+            ),
+            UpdateState::Failed => (
+                "Check for updates".into(),
+                "The last try failed; ↵ to try again".into(),
+            ),
+        }
+    }
+
     pub(super) fn item_count(&self) -> usize {
         match self.list() {
             List::Projects => self.projects.len(),
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
-            List::Commands => COMMANDS.len(),
+            List::Commands => self.commands.len(),
             List::Switch => self.windows.len(),
             List::Rename => 0,
         }

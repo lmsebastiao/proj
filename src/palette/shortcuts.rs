@@ -89,10 +89,7 @@ impl Palette {
                     s(&["mod-c"], "Copy the path").run(CopyPath),
                     s(&["shift-del"], "Remove from the list").run(Remove),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
-                    s(
-                        &[">"],
-                        "Commands: default editor, start on login, config file…",
-                    ),
+                    s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),

@@ -30,12 +30,14 @@ use crate::{
     editors::{self, Editor},
     fuzzy, git,
     input::{self, TextInput},
+    launcher::{UpdateState, Updates},
     paths,
     store::{self, Db, Project},
     switcher::{self, EditorWindow},
+    update,
 };
 
-use items::{COMMANDS, CloneTarget, EditorOption, List, Match, Mode, Target};
+use items::{CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, Target};
 use keymap::{Confirm, Dismiss};
 
 pub use keymap::bind_keys;
@@ -65,6 +67,10 @@ pub struct Palette {
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
     autostart: bool,
+    /// The `>` commands.
+    commands: Vec<PaletteCommand>,
+    /// Where updating is at, for the update command (kept in step by an observer).
+    update: UpdateState,
     matches: Vec<Match>,
     selected: usize,
     /// Set when the query is a path to an existing, not-yet-listed folder.
@@ -109,6 +115,8 @@ impl Palette {
                     window.remove_window();
                 }
             }),
+            // An update check or install moved on: redraw the update command.
+            cx.observe_global::<Updates>(|this, cx| this.sync_update(cx)),
         ];
         let mut this = Self {
             input,
@@ -124,6 +132,10 @@ impl Palette {
             renaming: None,
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
+            commands: items::commands(update::is_installed()),
+            update: cx
+                .try_global::<Updates>()
+                .map_or(UpdateState::Unchecked, |u| u.state.clone()),
             matches: Vec::new(),
             selected: 0,
             add_candidate: None,
@@ -400,7 +412,7 @@ impl Palette {
         match self.list() {
             List::Editors => self.choose_editor(ix, window, cx),
             List::OpenWith => self.choose_open_with(ix, window, cx),
-            List::Commands => self.run_command(COMMANDS[ix], window, cx),
+            List::Commands => self.run_command(self.commands[ix], window, cx),
             List::Switch => self.switch_to(ix, window, cx),
             List::Browse => {
                 if let Some(browse) = &self.browse {
@@ -446,6 +458,22 @@ impl Palette {
         let key = self.open_with.clone().or_else(|| self.renaming.clone());
         self.set_mode(Mode::Projects, cx);
         self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
+    }
+
+    /// Takes the latest update state. The command's title changes with it, so the
+    /// `>` list is filtered again (match highlights point into the old title),
+    /// keeping the same command selected.
+    fn sync_update(&mut self, cx: &mut Context<Self>) {
+        let Some(updates) = cx.try_global::<Updates>() else {
+            return;
+        };
+        self.update = updates.state.clone();
+        if self.list() == List::Commands {
+            let selected = self.matches.get(self.selected).map(|m| self.commands[m.ix]);
+            self.refilter(cx);
+            self.select_where(|this, ix| Some(this.commands[ix]) == selected);
+        }
+        cx.notify();
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
