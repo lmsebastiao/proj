@@ -58,6 +58,10 @@ pub struct TextInput {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// Colour of the placeholder text (0xRRGGBB).
+    placeholder_color: u32,
+    /// Colour of the cursor and, faded, the selection (0xRRGGBB).
+    accent: u32,
 }
 
 impl EventEmitter<Changed> for TextInput {}
@@ -78,7 +82,16 @@ impl TextInput {
             marked_range: None,
             last_layout: None,
             last_bounds: None,
+            placeholder_color: 0x6b6f78,
+            accent: 0x74ade8,
         }
+    }
+
+    /// The colours it draws with that don't come from the text style.
+    pub fn set_colors(&mut self, placeholder: u32, accent: u32, cx: &mut Context<Self>) {
+        self.placeholder_color = placeholder;
+        self.accent = accent;
+        cx.notify();
     }
 
     pub fn text(&self) -> &str {

@@ -63,7 +63,10 @@ impl Element for TextElement {
         let input = self.input.read(cx);
         let style = window.text_style();
         let (text, color) = if input.content.is_empty() {
-            (input.placeholder.clone(), rgb(0x6b6f78).into())
+            (
+                input.placeholder.clone(),
+                rgb(input.placeholder_color).into(),
+            )
         } else {
             (input.content.clone(), style.color)
         };
@@ -117,7 +120,7 @@ impl Element for TextElement {
                     point(bounds.left() + x, bounds.top()),
                     size(px(2.), bounds.size.height),
                 ),
-                rgb(0x74ade8),
+                rgb(input.accent),
             );
             (None, Some(cursor))
         } else {
@@ -132,7 +135,7 @@ impl Element for TextElement {
                         bounds.bottom(),
                     ),
                 ),
-                rgba(0x74ade840),
+                rgba((input.accent << 8) | 0x40),
             );
             (Some(selection), None)
         };

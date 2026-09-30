@@ -18,11 +18,12 @@ impl Palette {
         now: u64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let t = self.theme;
         let m = &self.matches[row];
         let (title, subtitle) = self.item_text(m.ix);
         let meta = self.item_meta(m.ix, now);
         let highlight = HighlightStyle {
-            color: Some(rgb(ACCENT).into()),
+            color: Some(rgb(t.accent).into()),
             font_weight: Some(FontWeight::BOLD),
             ..Default::default()
         };
@@ -48,20 +49,20 @@ impl Palette {
                 .position(|p| p == &self.projects[m.ix].path);
             div()
                 .flex_none()
-                .size(px(16.))
+                .size(px(18.))
                 .rounded_sm()
                 .border_1()
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_xs()
+                .text_size(px(SMALL_FONT_SIZE))
                 .map(|d| match position {
                     Some(i) => d
-                        .bg(rgb(ACCENT))
-                        .border_color(rgb(ACCENT))
-                        .text_color(rgb(BG))
+                        .bg(rgb(t.accent))
+                        .border_color(rgb(t.accent))
+                        .text_color(rgb(t.bg))
                         .child((i + 1).to_string()),
-                    None => d.border_color(rgb(MUTED)),
+                    None => d.border_color(rgb(t.muted)),
                 })
         });
 
@@ -76,8 +77,8 @@ impl Palette {
                 .flex()
                 .items_center()
                 .gap_3()
-                .when(row == self.selected, |d| d.bg(rgb(SELECTED)))
-                .hover(|d| d.bg(rgb(SELECTED)))
+                .when(row == self.selected, |d| d.bg(rgb(t.selected)))
+                .hover(|d| d.bg(rgb(t.selected)))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.selected = row;
@@ -95,10 +96,10 @@ impl Palette {
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .text_sm()
-                                .text_color(rgb(TEXT))
+                                .text_size(px(FONT_SIZE))
+                                .text_color(rgb(t.text))
                                 .when(pinned, |d| {
-                                    d.child(div().size(px(6.)).rounded_full().bg(rgb(ACCENT)))
+                                    d.child(div().size(px(7.)).rounded_full().bg(rgb(t.accent)))
                                 })
                                 .child(StyledText::new(title).with_highlights(title_hl))
                                 .when(open, |d| {
@@ -107,17 +108,17 @@ impl Palette {
                                             .px_1()
                                             .rounded_sm()
                                             .border_1()
-                                            .border_color(rgb(BORDER))
-                                            .text_xs()
-                                            .text_color(rgb(MUTED))
+                                            .border_color(rgb(t.border))
+                                            .text_size(px(SMALL_FONT_SIZE))
+                                            .text_color(rgb(t.muted))
                                             .child("open"),
                                     )
                                 }),
                         )
                         .child(
                             div()
-                                .text_xs()
-                                .text_color(rgb(MUTED))
+                                .text_size(px(SMALL_FONT_SIZE))
+                                .text_color(rgb(t.muted))
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
@@ -136,19 +137,20 @@ impl Palette {
                     d.child(
                         div()
                             .flex_none()
-                            .max_w(px(240.))
+                            .max_w(px(280.))
                             .flex()
                             .flex_col()
                             .items_end()
-                            .text_xs()
+                            .text_size(px(SMALL_FONT_SIZE))
                             .children(meta.top.map(|(text, color)| line(text, color)))
-                            .children(meta.bottom.map(|text| line(text, MUTED))),
+                            .children(meta.bottom.map(|text| line(text, t.muted))),
                     )
                 }),
         )
     }
 
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = self.theme;
         if self.add_candidate.is_some()
             || self.clone_candidate.is_some()
             || self.list() == List::Rename
@@ -163,8 +165,8 @@ impl Palette {
                 .items_center()
                 .justify_center()
                 .gap_3()
-                .text_sm()
-                .text_color(rgb(MUTED))
+                .text_size(px(FONT_SIZE))
+                .text_color(rgb(t.muted))
                 .child("No projects yet")
                 .child(
                     div()
@@ -172,10 +174,10 @@ impl Palette {
                         .px_4()
                         .py_2()
                         .rounded_md()
-                        .bg(rgb(SELECTED))
-                        .text_color(rgb(TEXT))
+                        .bg(rgb(t.selected))
+                        .text_color(rgb(t.text))
                         .cursor_pointer()
-                        .hover(|d| d.bg(rgb(BORDER)))
+                        .hover(|d| d.bg(rgb(t.border)))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.add_projects(&AddProjects, window, cx)
                         }))
@@ -187,13 +189,14 @@ impl Palette {
         div()
             .flex_1()
             .p_4()
-            .text_sm()
-            .text_color(rgb(MUTED))
+            .text_size(px(FONT_SIZE))
+            .text_color(rgb(t.muted))
             .child("No matches")
             .into_any_element()
     }
 
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
+        let t = self.theme;
         let (title, lines): (String, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch => return None,
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
@@ -262,9 +265,14 @@ impl Palette {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .text_xs()
-                .text_color(rgb(MUTED))
-                .child(div().text_sm().text_color(rgb(TEXT)).child(title))
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .child(
+                    div()
+                        .text_size(px(FONT_SIZE))
+                        .text_color(rgb(t.text))
+                        .child(title),
+                )
                 .children(lines),
         )
     }
@@ -285,6 +293,7 @@ fn ranges<'a>(text: &'a str, offsets: &'a [usize]) -> impl Iterator<Item = Range
 
 impl Render for Palette {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = self.theme;
         let list = if !self.matches.is_empty() {
             let now = store::now();
             uniform_list(
@@ -325,29 +334,35 @@ impl Render for Palette {
                 .px_3()
                 .h(px(ROW_HEIGHT))
                 .rounded_md()
-                .bg(rgb(SELECTED))
+                .bg(rgb(t.selected))
                 .flex()
                 .items_center()
                 .gap_2()
-                .text_sm()
-                .child(div().text_color(rgb(ACCENT)).child(label))
+                .text_size(px(FONT_SIZE))
+                .child(div().text_color(rgb(t.accent)).child(label))
                 .child(
                     div()
                         .min_w_0()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .text_color(rgb(TEXT))
+                        .text_color(rgb(t.text))
                         .child(detail),
                 )
-                .child(div().ml_auto().text_xs().text_color(rgb(MUTED)).child("↵"))
+                .child(
+                    div()
+                        .ml_auto()
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .text_color(rgb(t.muted))
+                        .child("↵"),
+                )
         });
 
         let hint = |key: String, label: &'static str| {
             div()
                 .flex()
                 .gap_1()
-                .child(div().text_color(rgb(TEXT)).child(key))
+                .child(div().text_color(rgb(t.text)).child(key))
                 .child(label)
         };
         let shortcuts = self.shortcuts();
@@ -360,8 +375,8 @@ impl Render for Palette {
             hint("f1".into(), "all keys")
                 .id("all-keys")
                 .cursor_pointer()
-                .hover(|d| d.text_color(rgb(TEXT)))
-                .when(self.show_shortcuts, |d| d.text_color(rgb(ACCENT)))
+                .hover(|d| d.text_color(rgb(t.text)))
+                .when(self.show_shortcuts, |d| d.text_color(rgb(t.accent)))
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_shortcuts(cx)))
         });
         let dropdown =
@@ -370,22 +385,22 @@ impl Render for Palette {
             hints.push(more.into_any_element());
         }
         let footer = div()
-            .h(px(30.))
+            .h(px(FOOTER_HEIGHT))
             .px_4()
             .border_t_1()
-            .border_color(rgb(BORDER))
+            .border_color(rgb(t.border))
             .flex()
             .items_center()
             .gap_4()
-            .text_xs()
-            .text_color(rgb(MUTED))
+            .text_size(px(SMALL_FONT_SIZE))
+            .text_color(rgb(t.muted))
             .child(match (&self.status, self.list()) {
                 (Some(status), _) => div()
                     .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .text_color(rgb(ACCENT))
+                    .text_color(rgb(t.accent))
                     .child(status.clone()),
                 (None, List::Projects) if !self.marked.is_empty() => {
                     let names: Vec<String> = self
@@ -399,7 +414,7 @@ impl Render for Palette {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .text_color(rgb(ACCENT))
+                        .text_color(rgb(t.accent))
                         .child(names.join(" + "))
                 }
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
@@ -462,22 +477,22 @@ impl Render for Palette {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(BG))
+            .bg(rgb(t.bg))
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(rgb(t.border))
             .rounded_lg()
             .overflow_hidden()
-            .text_color(rgb(TEXT))
+            .text_color(rgb(t.text))
             .child(
                 div()
-                    .h(px(52.))
+                    .h(px(58.))
                     .px_4()
                     .flex()
                     .items_center()
                     .border_b_1()
-                    .border_color(rgb(BORDER))
-                    .text_size(px(17.))
-                    .line_height(px(24.))
+                    .border_color(rgb(t.border))
+                    .text_size(px(INPUT_FONT_SIZE))
+                    .line_height(px(27.))
                     .child(self.input.clone()),
             )
             .children(self.render_banner())
@@ -501,6 +516,7 @@ impl Palette {
         shortcuts: Vec<Shortcut>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let t = self.theme;
         let rows: Vec<_> = shortcuts
             .into_iter()
             .enumerate()
@@ -509,7 +525,7 @@ impl Palette {
                     .id(("shortcut", ix))
                     .mx_1()
                     .px_2()
-                    .h(px(24.))
+                    .h(px(28.))
                     .flex_none()
                     .rounded_sm()
                     .flex()
@@ -517,15 +533,15 @@ impl Palette {
                     .gap_3()
                     .child(
                         div()
-                            .w(px(130.))
+                            .w(px(160.))
                             .flex_none()
-                            .text_color(rgb(TEXT))
+                            .text_color(rgb(t.text))
                             .child(shortcut.keys.join("  ")),
                     )
-                    .child(div().text_color(rgb(MUTED)).child(shortcut.action))
+                    .child(div().text_color(rgb(t.muted)).child(shortcut.action))
                     .when_some(shortcut.run, |row, run| {
                         row.cursor_pointer()
-                            .hover(|d| d.bg(rgb(SELECTED)))
+                            .hover(|d| d.bg(rgb(t.selected)))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.show_shortcuts = false;
                                 cx.notify();
@@ -538,20 +554,20 @@ impl Palette {
             .id("shortcuts")
             .absolute()
             .right(px(8.))
-            .bottom(px(34.))
-            .w(px(380.))
-            .max_h(px(340.))
+            .bottom(px(FOOTER_HEIGHT + 4.))
+            .w(px(440.))
+            .max_h(px(400.))
             .overflow_y_scroll()
             .occlude()
             .py_1()
             .flex()
             .flex_col()
-            .bg(rgb(BG))
+            .bg(rgb(t.bg))
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(rgb(t.border))
             .rounded_md()
             .shadow_lg()
-            .text_xs()
+            .text_size(px(SMALL_FONT_SIZE))
             .children(rows)
     }
 }

@@ -39,6 +39,7 @@ use crate::{
 
 use items::{CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, Target};
 use keymap::{Confirm, Dismiss};
+use theme::Theme;
 
 pub use keymap::bind_keys;
 
@@ -67,6 +68,8 @@ pub struct Palette {
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
     autostart: bool,
+    /// The colours in use, from `config.theme` and the system setting.
+    theme: Theme,
     /// The `>` commands.
     commands: Vec<PaletteCommand>,
     /// Where updating is at, for the update command (kept in step by an observer).
@@ -117,6 +120,10 @@ impl Palette {
             }),
             // An update check or install moved on: redraw the update command.
             cx.observe_global::<Updates>(|this, cx| this.sync_update(cx)),
+            // Windows switched between light and dark: follow it, if the theme does.
+            cx.observe_window_appearance(window, |this, window, cx| {
+                this.apply_theme(window, cx);
+            }),
         ];
         let mut this = Self {
             input,
@@ -132,6 +139,7 @@ impl Palette {
             renaming: None,
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
+            theme: theme::DARK,
             commands: items::commands(update::is_installed()),
             update: cx
                 .try_global::<Updates>()
@@ -162,6 +170,7 @@ impl Palette {
             Mode::Projects
         };
         this.set_mode(mode, cx);
+        this.apply_theme(window, cx);
         this.status = cx
             .try_global::<ShortcutNotice>()
             .and_then(|notice| notice.0.clone());
@@ -460,14 +469,29 @@ impl Palette {
         self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
     }
 
-    /// Takes the latest update state. The command's title changes with it, so the
-    /// `>` list is filtered again (match highlights point into the old title),
-    /// keeping the same command selected.
+    /// Takes the latest update state, which the update command shows.
     fn sync_update(&mut self, cx: &mut Context<Self>) {
         let Some(updates) = cx.try_global::<Updates>() else {
             return;
         };
         self.update = updates.state.clone();
+        self.refresh_commands(cx);
+    }
+
+    /// Picks the colours for `config.theme` and the system setting.
+    fn apply_theme(&mut self, window: &Window, cx: &mut Context<Self>) {
+        self.theme = Theme::for_setting(self.config.theme, window.appearance());
+        let theme = self.theme;
+        self.input.update(cx, |input, cx| {
+            input.set_colors(theme.placeholder, theme.accent, cx);
+        });
+        self.refresh_commands(cx);
+    }
+
+    /// A command's title changed (update state, theme): filter the `>` list
+    /// again, as match highlights point into the old title, keeping the same
+    /// command selected.
+    fn refresh_commands(&mut self, cx: &mut Context<Self>) {
         if self.list() == List::Commands {
             let selected = self.matches.get(self.selected).map(|m| self.commands[m.ix]);
             self.refilter(cx);

@@ -29,6 +29,46 @@ pub struct Config {
     /// Shortcut for the switcher to search in, which stays open when let go.
     /// Unset = ctrl+alt + the key left of 1; "" = off.
     pub switch_search_hotkey: Option<String>,
+    /// Light or dark colours, or follow the system setting.
+    #[serde(deserialize_with = "theme_or_system")]
+    pub theme: ThemeSetting,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum ThemeSetting {
+    /// Follow Windows' light/dark app setting.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeSetting {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    /// The next one, for the palette command that goes through them.
+    pub fn next(self) -> Self {
+        match self {
+            Self::System => Self::Light,
+            Self::Light => Self::Dark,
+            Self::Dark => Self::System,
+        }
+    }
+}
+
+/// A misspelt theme falls back to "system" instead of failing the whole file.
+fn theme_or_system<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ThemeSetting, D::Error> {
+    Ok(match String::deserialize(deserializer)?.trim() {
+        "light" => ThemeSetting::Light,
+        "dark" => ThemeSetting::Dark,
+        _ => ThemeSetting::System,
+    })
 }
 
 impl Default for Config {
@@ -42,6 +82,7 @@ impl Default for Config {
             check_for_updates: true,
             switch_hotkey: None,
             switch_search_hotkey: None,
+            theme: ThemeSetting::System,
         }
     }
 }
@@ -163,10 +204,24 @@ scan_depth = 1
 # menu offers "Install update"; nothing is installed without asking.
 check_for_updates = true
 
+# Colours: "system" follows Windows' light/dark app setting, or "light" / "dark".
+# Also changed from the launcher: type > and pick "Theme".
+theme = "system"
+
 # Program used to open projects; the project path is appended after editor_args.
-# Chosen from the launcher (type > and pick "Change the default editor"). "" opens projects in the file manager.
+# Chosen from the launcher (type > and pick "Change the default editor").
+# "" opens projects in the file manager.
 # editor_args = ["--new-window"]
 "#;
+
+/// Sets `theme` in config.toml, preserving the rest of the file.
+pub fn set_theme(theme: ThemeSetting) -> io::Result<()> {
+    let path = config_path();
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    doc["theme"] = toml_edit::value(theme.as_str());
+    write_atomic(&path, &doc.to_string())
+}
 
 /// Sets `editor` in config.toml, preserving the rest of the file.
 pub fn set_editor(command: &str) -> io::Result<()> {
@@ -210,6 +265,21 @@ mod tests {
 
         let replaced = with_editor(&added, "code").unwrap();
         assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
+    }
+
+    #[test]
+    fn themes() {
+        let parse = |text: &str| toml::from_str::<Config>(text).unwrap().theme;
+        assert_eq!(parse(""), ThemeSetting::System);
+        assert_eq!(parse(r#"theme = "light""#), ThemeSetting::Light);
+        assert_eq!(parse(r#"theme = "dark""#), ThemeSetting::Dark);
+        assert_eq!(
+            parse(r#"theme = "blue""#),
+            ThemeSetting::System,
+            "not an error"
+        );
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
+        assert_eq!(parse(&template), ThemeSetting::System);
     }
 
     #[test]

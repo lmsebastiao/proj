@@ -2,9 +2,14 @@
 
 use std::path::PathBuf;
 
-use crate::{config, editors::Editor, launcher::UpdateState, paths, store, update};
+use crate::{
+    config::{self, ThemeSetting},
+    editors::Editor,
+    launcher::UpdateState,
+    paths, store, update,
+};
 
-use super::{Palette, secondary, theme::*};
+use super::{Palette, secondary};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Mode {
@@ -55,6 +60,8 @@ pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
     ChangeEditor,
+    /// Go through system → light → dark.
+    Theme,
     OpenConfig,
     /// Check for an update, or install the one found.
     Update,
@@ -67,6 +74,7 @@ pub(super) fn commands(updates: bool) -> Vec<PaletteCommand> {
         PaletteCommand::Autostart,
         PaletteCommand::AddProjects,
         PaletteCommand::ChangeEditor,
+        PaletteCommand::Theme,
         PaletteCommand::OpenConfig,
     ]
     .into_iter()
@@ -158,6 +166,23 @@ impl Palette {
                         "Open config file".into(),
                         paths::display_path(&config::config_path()),
                     ),
+                    PaletteCommand::Theme => {
+                        let setting = self.config.theme;
+                        let now = if self.theme.is_dark() {
+                            "dark"
+                        } else {
+                            "light"
+                        };
+                        let title = match setting {
+                            ThemeSetting::System => format!("Theme: system ({now})"),
+                            _ => format!("Theme: {now}"),
+                        };
+                        let next = match setting.next() {
+                            ThemeSetting::System => "follow the system setting".to_string(),
+                            other => format!("use {}", other.as_str()),
+                        };
+                        (title, format!("↵ to {next}"))
+                    }
                     PaletteCommand::Update => self.update_text(),
                     PaletteCommand::Quit => (
                         "Quit proj".into(),
@@ -190,7 +215,7 @@ impl Palette {
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now));
                 let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
                 Meta {
-                    top: project.branch.clone().map(|b| (b, BRANCH)),
+                    top: project.branch.clone().map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
                 }
             }
@@ -213,7 +238,7 @@ impl Palette {
                     None
                 };
                 Meta {
-                    top: role.map(|r| (r.to_string(), ACCENT)),
+                    top: role.map(|r| (r.to_string(), self.theme.accent)),
                     bottom: None,
                 }
             }
@@ -221,7 +246,7 @@ impl Palette {
                 let current = matches!(&self.editors[ix], EditorOption::Detected(e)
                     if self.config.editor.as_deref() == Some(e.command.as_str()));
                 Meta {
-                    top: current.then(|| ("default".to_string(), ACCENT)),
+                    top: current.then(|| ("default".to_string(), self.theme.accent)),
                     bottom: None,
                 }
             }
@@ -231,13 +256,15 @@ impl Palette {
                     .browse
                     .as_ref()
                     .filter(|b| b.entries[ix].is_dir)
-                    .map(|_| ("→".to_string(), MUTED)),
+                    .map(|_| ("→".to_string(), self.theme.muted)),
                 bottom: None,
             },
             List::Switch => {
                 let project = self.window_projects[ix].map(|p| &self.projects[p]);
                 Meta {
-                    top: project.and_then(|p| p.branch.clone()).map(|b| (b, BRANCH)),
+                    top: project
+                        .and_then(|p| p.branch.clone())
+                        .map(|b| (b, self.theme.branch)),
                     bottom: project.map(|_| self.windows[ix].editor.clone()),
                 }
             }

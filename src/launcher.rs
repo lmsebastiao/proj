@@ -641,7 +641,7 @@ fn show_palette(
 ) {
     let display = platform::launcher_display(cx);
 
-    let window_size = size(px(680.), px(440.));
+    let window_size = size(px(720.), px(500.));
     let bounds = match &display {
         Some(display) => {
             let screen = display.bounds();

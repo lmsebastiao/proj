@@ -356,6 +356,18 @@ impl Palette {
                 self.add_projects(&AddProjects, window, cx);
             }
             PaletteCommand::ChangeEditor => self.choose_default_editor(cx),
+            // Saved to config.toml and applied right away; the palette stays open
+            // so it can be pressed again.
+            PaletteCommand::Theme => {
+                let theme = self.config.theme.next();
+                if let Err(err) = config::set_theme(theme) {
+                    self.status = Some(format!("Could not save config: {err}").into());
+                    cx.notify();
+                    return;
+                }
+                self.config.theme = theme;
+                self.apply_theme(window, cx);
+            }
             PaletteCommand::OpenConfig => {
                 match open::open_project(&self.config, &config::config_path()) {
                     Ok(()) => window.remove_window(),

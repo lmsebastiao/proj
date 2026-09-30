@@ -42,8 +42,11 @@ then opens a folder picker where you can select one or more projects at once.
 The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
 in the footer, opens a dropdown with all of them; clicking one runs it.
 
-Type `>` to list commands: start on login, add projects, change the default editor, open the
-config file, check for updates / install update (installed copies), quit.
+Type `>` to list commands: start on login, add projects, change the default editor, theme,
+open the config file, check for updates / install update (installed copies), quit.
+
+The dialog follows Windows' light/dark app setting, switching live when Windows does. `>`
+**Theme** goes through system → light → dark and saves the choice as `theme` in config.toml.
 
 ### Browsing inside a project
 
@@ -146,6 +149,7 @@ hotkey = "ctrl+alt+space"
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
+theme = "system"        # or "light" / "dark"; also set with > Theme
 editor = "zed"          # set from the launcher; "" = file manager
 editor_args = []        # e.g. ["--new-window"]
 ```
