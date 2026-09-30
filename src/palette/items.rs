@@ -9,8 +9,7 @@ use super::{Palette, secondary, theme::*};
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Mode {
     Projects,
-    /// Choosing the global editor (`Palette::open_with` remembers the project
-    /// that was selected, to return to it).
+    /// Choosing the global editor.
     Editors,
     /// Choosing an editor for one project (`Palette::open_with`).
     OpenWith,
@@ -143,7 +142,7 @@ impl Palette {
                     PaletteCommand::ChangeEditor => (
                         "Change the default editor".into(),
                         format!(
-                            "All projects open in {} unless they have their own · alt-↵",
+                            "All projects open in {} unless they have their own",
                             self.name_of(self.config.editor.as_deref().unwrap_or(""))
                         ),
                     ),

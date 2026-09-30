@@ -200,25 +200,25 @@ impl Palette {
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
                 vec![
-                    "The default for all projects. Change it any time with alt-↵.".into(),
+                    "The default for all projects. Change it any time: type > and pick \
+                     \"Change the default editor\"."
+                        .into(),
                     format!(
                         "proj keeps running in the background. Press {} to bring it up.",
                         self.config.hotkey_label()
                     ),
                 ],
             ),
-            Mode::Editors => {
-                let mut lines =
-                    vec!["↵ changes it for every project that doesn't have its own editor.".into()];
-                if let Some(project) = self.open_with_project() {
-                    lines.push(format!(
-                        "Only for {}, once or always? Press {}-w instead.",
-                        project.name,
+            Mode::Editors => (
+                "Default editor for all projects".into(),
+                vec![
+                    "↵ changes it for every project that doesn't have its own editor.".into(),
+                    format!(
+                        "Only for one project, once or always? Press {}-w on it instead.",
                         secondary()
-                    ));
-                }
-                ("Default editor for all projects".into(), lines)
-            }
+                    ),
+                ],
+            ),
             Mode::Rename => {
                 let project = self.renamed_project()?;
                 let folders: Vec<String> = project
@@ -447,11 +447,6 @@ impl Render for Palette {
                 this.open_selected(Target::Terminal, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
-                match this.list() {
-                    List::Editors => return this.open_with_from_editors(cx),
-                    List::Switch => return,
-                    _ => {}
-                }
                 let entry = if this.marked.len() > 1 {
                     this.marked_workspace(cx)
                 } else {
@@ -472,13 +467,6 @@ impl Render for Palette {
             .on_action(cx.listener(Self::open_remote))
             .on_action(cx.listener(Self::remove))
             .on_action(cx.listener(Self::add_projects))
-            .on_action(
-                cx.listener(|this, _: &ChooseEditor, window, cx| match this.list() {
-                    // alt is held in the switcher, so this is its enter.
-                    List::Switch => this.confirm(&Confirm, window, cx),
-                    _ => this.choose_default_editor(cx),
-                }),
-            )
             .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
             .on_action(cx.listener(Self::dismiss))
             .size_full()

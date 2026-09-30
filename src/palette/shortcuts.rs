@@ -87,10 +87,12 @@ impl Palette {
                     s(&["f2"], "Rename").run(Rename),
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
                     s(&["mod-c"], "Copy the path").run(CopyPath),
-                    s(&["mod-d", "shift-del"], "Remove from the list").run(Remove),
+                    s(&["shift-del"], "Remove from the list").run(Remove),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
-                    s(&["alt-↵"], "Change the default editor for all projects").run(ChooseEditor),
-                    s(&[">"], "Commands: start on login, config file…"),
+                    s(
+                        &[">"],
+                        "Commands: default editor, start on login, config file…",
+                    ),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
@@ -139,11 +141,6 @@ impl Palette {
                         .footer(always_short)
                         .run(AlwaysOpenWith),
                     s(&["mod-p"], list).footer(list_short).run(TogglePin),
-                    s(
-                        &["alt-↵"],
-                        "Change the default editor for all projects instead",
-                    )
-                    .run(ChooseEditor),
                     s(&["esc"], "Back").footer("back").run(Dismiss),
                 ]
             }
@@ -157,7 +154,7 @@ impl Palette {
                 } else {
                     "close"
                 };
-                let mut keys = vec![
+                vec![
                     s(&["↵"], "Use it for all projects")
                         .footer(if self.config.editor.is_some() {
                             "set default"
@@ -165,21 +162,12 @@ impl Palette {
                             "select"
                         })
                         .run(Confirm),
-                ];
-                if self.open_with.is_some() {
-                    keys.push(
-                        s(&["mod-w"], "Only for the selected project…")
-                            .footer("this project only")
-                            .run(OpenWithMenu),
-                    );
-                }
-                keys.push(s(&["esc"], "Back").footer(esc).run(Dismiss));
-                keys
+                    s(&["esc"], "Back").footer(esc).run(Dismiss),
+                ]
             }
             // Shown while the modifier is held, so these keys come with alt.
             List::Switch => vec![
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
-                s(&["alt-↵"], "Switch now").footer("switch").run(Confirm),
                 s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
             ],
             List::Rename => vec![

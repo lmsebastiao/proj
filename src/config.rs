@@ -141,7 +141,7 @@ scan_depth = 1
 check_for_updates = true
 
 # Program used to open projects; the project path is appended after editor_args.
-# Chosen from the launcher (alt-enter). "" opens projects in the file manager.
+# Chosen from the launcher (type > and pick "Change the default editor"). "" opens projects in the file manager.
 # editor_args = ["--new-window"]
 "#;
 

@@ -115,12 +115,9 @@ impl Palette {
         self.refresh_open_with(&editor.command, status, cx);
     }
 
-    /// Alt-Enter: the default editor for every project. Remembers the selected
-    /// project so esc returns to it and ctrl-w can switch to just that one.
+    /// The "Change the default editor" command: the editor for every project.
     pub(super) fn choose_default_editor(&mut self, cx: &mut Context<Self>) {
-        let key = self.selected_project().map(store::Project::key);
         self.set_mode(Mode::Editors, cx);
-        self.open_with = key;
         // Start on the current default, so a stray enter changes nothing.
         let current = self.config.editor.clone();
         self.select_where(|this, ix| match &this.editors[ix] {
@@ -128,24 +125,6 @@ impl Palette {
             EditorOption::FileManager => current.as_deref() == Some(""),
             EditorOption::Browse => false,
         });
-    }
-
-    /// Ctrl-W in the default-editor list: open (or set up) the remembered
-    /// project with the highlighted editor instead of changing every project.
-    pub(super) fn open_with_from_editors(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.open_with.clone() else {
-            return;
-        };
-        let command = match self.matches.get(self.selected).map(|m| &self.editors[m.ix]) {
-            Some(EditorOption::Detected(editor)) => Some(editor.command.clone()),
-            _ => None,
-        };
-        self.show_open_with(key, cx);
-        if let Some(command) = command {
-            self.select_where(|this, ix| {
-                matches!(&this.editors[ix], EditorOption::Detected(e) if e.command == command)
-            });
-        }
     }
 
     pub(super) fn edit_project_editors(&mut self, key: &str, edit: impl FnOnce(&mut Vec<String>)) {

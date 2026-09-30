@@ -15,7 +15,6 @@ actions!(
         SelectPrev,
         Confirm,
         AlwaysOpenWith,
-        ChooseEditor,
         ShowInFileManager,
         OpenTerminal,
         OpenWithMenu,
@@ -44,8 +43,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", Confirm, ctx),
         // In the Open-with list: always open this project with the selected editor.
         KeyBinding::new("secondary-enter", AlwaysOpenWith, ctx),
-        // The default editor for all projects (in the switcher: switch now).
-        KeyBinding::new("alt-enter", ChooseEditor, ctx),
         KeyBinding::new("secondary-w", OpenWithMenu, ctx),
         KeyBinding::new("secondary-t", OpenTerminal, ctx),
         KeyBinding::new("secondary-e", ShowInFileManager, ctx),
@@ -59,7 +56,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f2", Rename, ctx),
         // The search box copies its selected text instead, when there is some.
         KeyBinding::new("secondary-c", CopyPath, ctx),
-        KeyBinding::new("secondary-d", Remove, ctx),
         KeyBinding::new("shift-delete", Remove, ctx),
         KeyBinding::new("secondary-o", AddProjects, ctx),
         // The palette itself

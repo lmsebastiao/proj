@@ -56,8 +56,7 @@ pub struct Palette {
     editors: Vec<EditorOption>,
     /// Editor command -> display name.
     names: HashMap<String, String>,
-    /// Key of the entry being opened in `Mode::OpenWith`, or the one that was
-    /// selected when `Mode::Editors` opened.
+    /// Key of the entry being opened in `Mode::OpenWith`.
     open_with: Option<String>,
     /// The project being browsed in `Mode::Browse`.
     browse: Option<browse::Browse>,

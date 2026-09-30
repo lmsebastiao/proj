@@ -34,8 +34,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| alt-enter               | change the default editor for all projects |
-| ctrl-d, shift-delete    | remove project                             |
+| shift-delete            | remove project                             |
 | f1                      | list every shortcut (click one to run it)  |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
@@ -43,8 +42,8 @@ then opens a folder picker where you can select one or more projects at once.
 The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
 in the footer, opens a dropdown with all of them; clicking one runs it.
 
-Type `>` to list commands: start on login, add projects, change editor, open the config
-file, quit.
+Type `>` to list commands: start on login, add projects, change the default editor, open the
+config file, quit.
 
 ### Browsing inside a project
 
@@ -82,7 +81,7 @@ tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Co
 Esc clears the marks.
 
 The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
-history, pin and editor list, so next time you just search for it. Removing it with ctrl-d
+history, pin and editor list, so next time you just search for it. Removing it with shift-delete
 forgets the combination, not the projects. Folders are passed in the order you marked them.
 Press **f2** to give it a shorter name; search still finds it by its folder names too.
 
@@ -94,8 +93,8 @@ There are three scopes:
   Nothing is saved, so next time enter uses the usual editor again.
 - **Always for this project:** in the same ctrl-w list, press **ctrl-enter** on an editor.
   Press ctrl-enter on it again to undo, and the project goes back to the default.
-- **Every project:** **alt-enter** sets the default editor. It applies to all projects that
-  don't have their own. From that screen, ctrl-w switches to the project you had selected.
+- **Every project:** type `>` and pick **Change the default editor**. It applies to all
+  projects that don't have their own.
 
 In the ctrl-w list, **ctrl-p** adds an editor to a list to pick from each time, or removes
 it. The first time you add one, the default editor is kept in the list too. The list marks
