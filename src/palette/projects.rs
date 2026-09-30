@@ -15,7 +15,7 @@ use crate::{
 use super::{
     Palette,
     items::{CloneTarget, List, Mode, PaletteCommand, Target},
-    keymap::{AddProjects, CopyPath, OpenRemote, Remove, Rename},
+    keymap::{AddProjects, CopyPath, OpenRemote},
 };
 
 impl Palette {
@@ -142,8 +142,8 @@ impl Palette {
         self.status = Some(format!("{verb} {}", project.name).into());
     }
 
-    /// F2: type a new name for the selected entry in the search box.
-    pub(super) fn rename(&mut self, _: &Rename, _: &mut Window, cx: &mut Context<Self>) {
+    /// Type a new name for the selected entry in the search box.
+    pub(super) fn rename(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.selected_project().map(Project::key) else {
             return;
         };
@@ -318,7 +318,7 @@ impl Palette {
         window.remove_window();
     }
 
-    pub(super) fn remove(&mut self, _: &Remove, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn remove(&mut self, cx: &mut Context<Self>) {
         let Some(project) = self.selected_project().cloned() else {
             return;
         };

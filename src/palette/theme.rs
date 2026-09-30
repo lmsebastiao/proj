@@ -14,6 +14,8 @@ pub struct Theme {
     pub branch: u32,
     pub selected: u32,
     pub accent: u32,
+    /// Warnings, e.g. the remove icon waiting for its second click.
+    pub danger: u32,
 }
 
 pub const DARK: Theme = Theme {
@@ -25,6 +27,7 @@ pub const DARK: Theme = Theme {
     branch: 0xb4a0e0,
     selected: 0x2c3038,
     accent: 0x74ade8,
+    danger: 0xe5707a,
 };
 
 pub const LIGHT: Theme = Theme {
@@ -36,6 +39,7 @@ pub const LIGHT: Theme = Theme {
     branch: 0x7353c4,
     selected: 0xe7eaf0,
     accent: 0x2468c4,
+    danger: 0xc4314b,
 };
 
 impl Theme {
@@ -55,6 +59,30 @@ impl Theme {
     pub fn is_dark(&self) -> bool {
         self.bg == DARK.bg
     }
+}
+
+/// Icons for the row buttons. Windows 10 and 11 ship the Segoe MDL2 Assets icon
+/// font; elsewhere plain symbols stand in.
+pub(super) mod icons {
+    #[cfg(windows)]
+    mod glyphs {
+        pub const FONT: &str = "Segoe MDL2 Assets";
+        pub const PIN: &str = "\u{E718}";
+        pub const PINNED: &str = "\u{E840}";
+        pub const RENAME: &str = "\u{E8AC}";
+        pub const REMOVE: &str = "\u{E74D}";
+        pub const MORE: &str = "\u{E712}";
+    }
+    #[cfg(not(windows))]
+    mod glyphs {
+        pub const FONT: &str = "";
+        pub const PIN: &str = "☆";
+        pub const PINNED: &str = "★";
+        pub const RENAME: &str = "✎";
+        pub const REMOVE: &str = "✕";
+        pub const MORE: &str = "⋯";
+    }
+    pub use glyphs::*;
 }
 
 /// Row titles, and the add / clone row.

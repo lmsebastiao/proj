@@ -43,7 +43,7 @@ impl Shortcut {
 }
 
 /// "Show in Explorer" and the footer's short name for it.
-fn file_manager() -> (&'static str, &'static str) {
+pub(super) fn file_manager() -> (&'static str, &'static str) {
     if cfg!(windows) {
         ("Show in Explorer", "explorer")
     } else if cfg!(target_os = "macos") {
@@ -79,15 +79,13 @@ impl Palette {
                     s(&["tab", "shift-tab"], "Mark to open several in one window")
                         .footer(if marking { "mark" } else { "combine" })
                         .run(ToggleMark),
-                    s(&["mod-e"], reveal)
-                        .footer_if(!marking, reveal_short)
-                        .run(ShowInFileManager),
+                    s(&["mod-k"], "Actions: pin, rename, remove, copy path…")
+                        .footer_if(!marking, "actions")
+                        .run(ShowActions),
+                    s(&["mod-e"], reveal).run(ShowInFileManager),
                     s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
-                    s(&["mod-p"], "Pin or unpin (pinned stay on top)").run(TogglePin),
-                    s(&["f2"], "Rename").run(Rename),
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
                     s(&["mod-c"], "Copy the path").run(CopyPath),
-                    s(&["shift-del"], "Remove from the list").run(Remove),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["↑ ↓"], "Move the selection"),
@@ -129,6 +127,13 @@ impl Palette {
                     s(&["esc"], "Back").footer("back").run(Dismiss),
                 ]
             }
+            List::Actions => vec![
+                s(&["↵"], "Run it").footer("run").run(Confirm),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc"], "Back to the projects")
+                    .footer("back")
+                    .run(Dismiss),
+            ],
             List::Commands => vec![
                 s(&["↵"], "Run").footer("run").run(Confirm),
                 s(&["esc"], "Back").footer("back").run(Dismiss),

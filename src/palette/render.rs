@@ -9,7 +9,18 @@ use gpui::{
 
 use crate::{input, paths, store};
 
-use super::{Palette, items::*, keymap::*, secondary, shortcuts::Shortcut, theme::*};
+use super::{
+    Palette,
+    actions::{ROW_ICONS, RowIcon},
+    items::*,
+    keymap::*,
+    secondary,
+    shortcuts::Shortcut,
+    theme::*,
+};
+
+/// The group of a list row, so its icons can show while the mouse is over it.
+const ROW_GROUP: &str = "row";
 
 impl Palette {
     pub(super) fn render_row(
@@ -65,11 +76,52 @@ impl Palette {
                     None => d.border_color(rgb(t.muted)),
                 })
         });
+        // Pin, rename, remove and the actions menu: shown on the highlighted row,
+        // and on any row the mouse is over.
+        let icons = (self.list() == List::Projects).then(|| {
+            let project = &self.projects[m.ix];
+            let armed = self.confirm_remove.as_ref() == Some(&project.key());
+            div()
+                .flex()
+                .flex_none()
+                .gap_1()
+                .when(row != self.selected, |d| {
+                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
+                })
+                .children(ROW_ICONS.map(|icon| {
+                    let (glyph, color) = match icon {
+                        RowIcon::Pin if pinned => (icons::PINNED, t.accent),
+                        RowIcon::Pin => (icons::PIN, t.muted),
+                        RowIcon::Rename => (icons::RENAME, t.muted),
+                        RowIcon::Remove => (icons::REMOVE, if armed { t.danger } else { t.muted }),
+                        RowIcon::More => (icons::MORE, t.muted),
+                    };
+                    div()
+                        .id((icon.id(), row))
+                        .size(px(28.))
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                        .text_size(px(14.))
+                        .text_color(rgb(color))
+                        .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.text)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            // Not also a click on the row, which opens the project.
+                            cx.stop_propagation();
+                            this.click_row_icon(row, icon, cx);
+                        }))
+                        .child(glyph)
+                }))
+        });
 
         // uniform_list lays each row out on its own, so both levels need an explicit width.
         div().w_full().px_2().child(
             div()
                 .id(row)
+                .group(ROW_GROUP)
                 .w_full()
                 .h(px(ROW_HEIGHT))
                 .px_3()
@@ -125,6 +177,7 @@ impl Palette {
                                 .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
                         ),
                 )
+                .children(icons)
                 .when(meta.top.is_some() || meta.bottom.is_some(), |d| {
                     let line = |text: String, color: u32| {
                         div()
@@ -198,7 +251,7 @@ impl Palette {
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let t = self.theme;
         let (title, lines): (String, Vec<String>) = match self.mode {
-            Mode::Projects | Mode::Switch => return None,
+            Mode::Projects | Mode::Switch | Mode::Actions => return None,
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
@@ -466,11 +519,9 @@ impl Render for Palette {
             }))
             .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(1, cx)))
             .on_action(cx.listener(|this, _: &ToggleMarkUp, _, cx| this.toggle_mark(-1, cx)))
-            .on_action(cx.listener(|this, _: &TogglePin, _, cx| this.toggle_pin(cx)))
-            .on_action(cx.listener(Self::rename))
+            .on_action(cx.listener(|this, _: &ShowActions, _, cx| this.show_actions(cx)))
             .on_action(cx.listener(Self::copy_path))
             .on_action(cx.listener(Self::open_remote))
-            .on_action(cx.listener(Self::remove))
             .on_action(cx.listener(Self::add_projects))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
             .on_action(cx.listener(Self::dismiss))

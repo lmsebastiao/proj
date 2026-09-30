@@ -28,19 +28,24 @@ then opens a folder picker where you can select one or more projects at once.
 | → / ←                   | browse into a project / back up (see below) |
 | alt-enter               | open with… (another editor once, or set the project's default) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
+| ctrl-k                  | actions for the project: pin, rename, remove, and the ones below |
 | ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
-| ctrl-p                  | pin / unpin (pinned projects stay on top)  |
-| f2                      | rename (empty = back to the folder name)   |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| shift-delete            | remove project                             |
 | f1                      | list every shortcut (click one to run it)  |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
 
 The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
 in the footer, opens a dropdown with all of them; clicking one runs it.
+
+**ctrl-k** lists everything you can do with the highlighted project: open with, show in
+Explorer, terminal, pin, rename, copy the path, open the repository page, remove. Type to
+filter it and press enter. The highlighted row, and any row under the mouse, also has icons
+for pin, rename, remove and **⋯** (the same list). The remove icon asks for a second click.
+Pinned projects stay on top. Renaming to an empty name goes back to the folder name.
+Removing only takes a project off the list; the folder isn't touched.
 
 Type `>` to list commands: start on login, add projects, change the default editor, theme,
 open the config file, check for updates / install update (installed copies), quit.
@@ -92,9 +97,10 @@ tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Co
 Esc clears the marks.
 
 The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
-history, pin and editor list, so next time you just search for it. Removing it with shift-delete
+history, pin and editor list, so next time you just search for it. Removing it (ctrl-k or the bin icon)
 forgets the combination, not the projects. Folders are passed in the order you marked them.
-Press **f2** to give it a shorter name; search still finds it by its folder names too.
+Rename it (ctrl-k or the pencil icon) to give it a shorter name; search still finds it by its
+folder names too.
 
 ### Per-project editors
 

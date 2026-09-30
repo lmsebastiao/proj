@@ -2,6 +2,7 @@
 //! `projects`, `editor_choice`, `browse` and `switch` (the window switcher),
 //! drawing in `render`, and the list of keys in `shortcuts`.
 
+mod actions;
 mod browse;
 mod editor_choice;
 mod items;
@@ -65,6 +66,10 @@ pub struct Palette {
     browse: Option<browse::Browse>,
     /// Key of the entry being renamed in `Mode::Rename`.
     renaming: Option<String>,
+    /// Key of the entry whose actions menu is open (`Mode::Actions`).
+    actions_for: Option<String>,
+    /// Key of the entry whose remove icon was clicked once; a second click removes it.
+    confirm_remove: Option<String>,
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
     autostart: bool,
@@ -137,6 +142,8 @@ impl Palette {
             open_with: None,
             browse: None,
             renaming: None,
+            actions_for: None,
+            confirm_remove: None,
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
             theme: theme::DARK,
@@ -206,8 +213,9 @@ impl Palette {
                 self.open_with = None;
                 self.browse = None;
                 self.renaming = None;
+                self.actions_for = None;
             }
-            Mode::Browse | Mode::Rename | Mode::Switch => {}
+            Mode::Browse | Mode::Rename | Mode::Switch | Mode::Actions => {}
             Mode::Editors => {
                 self.editors = editors::detected_editors(true)
                     .into_iter()
@@ -261,6 +269,10 @@ impl Palette {
             },
             Mode::Rename => "Leave empty to use the folder name".into(),
             Mode::Switch => "Switch to…".into(),
+            Mode::Actions => match self.actions_project() {
+                Some(project) => format!("Actions for {}…", project.name),
+                None => String::new(),
+            },
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
@@ -291,6 +303,7 @@ impl Palette {
             Mode::Browse => List::Browse,
             Mode::Rename => List::Rename,
             Mode::Switch => List::Switch,
+            Mode::Actions => List::Actions,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             Mode::Projects => List::Projects,
         }
@@ -362,6 +375,7 @@ impl Palette {
             });
 
         self.selected = 0;
+        self.confirm_remove = None;
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         cx.notify();
     }
@@ -372,6 +386,7 @@ impl Palette {
             return;
         }
         self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
+        self.confirm_remove = None;
         self.scroll
             .scroll_to_item(self.selected, ScrollStrategy::Center);
         cx.notify();
@@ -423,6 +438,7 @@ impl Palette {
             List::OpenWith => self.choose_open_with(ix, window, cx),
             List::Commands => self.run_command(self.commands[ix], window, cx),
             List::Switch => self.switch_to(ix, window, cx),
+            List::Actions => self.run_action(items::PROJECT_ACTIONS[ix], window, cx),
             List::Browse => {
                 if let Some(browse) = &self.browse {
                     let editor = browse.project.default_editor(&self.config);
@@ -452,7 +468,7 @@ impl Palette {
         match self.list() {
             List::Commands => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Rename => self.back_to_projects(cx),
+            List::OpenWith | List::Rename | List::Actions => self.back_to_projects(cx),
             List::Projects if !self.marked.is_empty() => {
                 self.marked.clear();
                 cx.notify();
@@ -464,7 +480,11 @@ impl Palette {
 
     /// Back to the project list, with the entry that was being edited selected.
     fn back_to_projects(&mut self, cx: &mut Context<Self>) {
-        let key = self.open_with.clone().or_else(|| self.renaming.clone());
+        let key = self
+            .open_with
+            .clone()
+            .or_else(|| self.renaming.clone())
+            .or_else(|| self.actions_for.clone());
         self.set_mode(Mode::Projects, cx);
         self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
     }

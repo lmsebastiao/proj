@@ -24,6 +24,8 @@ pub(super) enum Mode {
     Rename,
     /// The window switcher: open editor windows (`Palette::windows`).
     Switch,
+    /// Ctrl-K: what can be done with one project (`Palette::actions_for`).
+    Actions,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -37,7 +39,32 @@ pub(super) enum List {
     /// Nothing: the search box holds the new name.
     Rename,
     Switch,
+    Actions,
 }
+
+/// An entry in a project's actions menu (ctrl-k).
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ProjectAction {
+    OpenWith,
+    ShowInFileManager,
+    Terminal,
+    TogglePin,
+    Rename,
+    CopyPath,
+    RepoPage,
+    Remove,
+}
+
+pub(super) const PROJECT_ACTIONS: [ProjectAction; 8] = [
+    ProjectAction::OpenWith,
+    ProjectAction::ShowInFileManager,
+    ProjectAction::Terminal,
+    ProjectAction::TogglePin,
+    ProjectAction::Rename,
+    ProjectAction::CopyPath,
+    ProjectAction::RepoPage,
+    ProjectAction::Remove,
+];
 
 /// A git URL pasted into the search.
 #[derive(Clone)]
@@ -199,6 +226,37 @@ impl Palette {
                     None => (window.title.clone(), window.editor.clone()),
                 }
             }
+            List::Actions => {
+                let pinned = self.actions_project().is_some_and(|p| p.pinned);
+                let (title, subtitle) = match PROJECT_ACTIONS[ix] {
+                    ProjectAction::OpenWith => (
+                        "Open with…",
+                        "Another editor just this once, or set its default",
+                    ),
+                    ProjectAction::ShowInFileManager => {
+                        (super::shortcuts::file_manager().0, "The project's folder")
+                    }
+                    ProjectAction::Terminal => (
+                        "Open a terminal there",
+                        "Windows Terminal if it's installed",
+                    ),
+                    ProjectAction::TogglePin if pinned => ("Unpin", "Back into the recent order"),
+                    ProjectAction::TogglePin => ("Pin", "Pinned projects stay on top"),
+                    ProjectAction::Rename => (
+                        "Rename…",
+                        "A shorter name; search still finds it by its folder",
+                    ),
+                    ProjectAction::CopyPath => ("Copy the path", "To the clipboard"),
+                    ProjectAction::RepoPage => (
+                        "Open the repository page",
+                        "From the git origin remote (GitHub, GitLab…)",
+                    ),
+                    ProjectAction::Remove => {
+                        ("Remove from the list", "The folder itself isn't touched")
+                    }
+                };
+                (title.into(), subtitle.into())
+            }
             List::Rename => Default::default(),
         }
     }
@@ -268,6 +326,24 @@ impl Palette {
                     bottom: project.map(|_| self.windows[ix].editor.clone()),
                 }
             }
+            // The action's own shortcut, where it has one.
+            List::Actions => {
+                let m = secondary();
+                let key = match PROJECT_ACTIONS[ix] {
+                    ProjectAction::OpenWith => Some("alt-↵".to_string()),
+                    ProjectAction::ShowInFileManager => Some(format!("{m}-e")),
+                    ProjectAction::Terminal => Some(format!("{m}-t")),
+                    ProjectAction::CopyPath => Some(format!("{m}-c")),
+                    ProjectAction::RepoPage => Some(format!("{m}-g")),
+                    ProjectAction::TogglePin | ProjectAction::Rename | ProjectAction::Remove => {
+                        None
+                    }
+                };
+                Meta {
+                    top: key.map(|k| (k, self.theme.muted)),
+                    bottom: None,
+                }
+            }
             List::Commands | List::Rename => Meta {
                 top: None,
                 bottom: None,
@@ -313,6 +389,7 @@ impl Palette {
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => self.commands.len(),
             List::Switch => self.windows.len(),
+            List::Actions => PROJECT_ACTIONS.len(),
             List::Rename => 0,
         }
     }

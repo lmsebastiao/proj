@@ -21,10 +21,8 @@ actions!(
         OpenRemote,
         ToggleMark,
         ToggleMarkUp,
-        TogglePin,
-        Rename,
+        ShowActions,
         CopyPath,
-        Remove,
         AddProjects,
         ToggleShortcuts,
         Dismiss,
@@ -51,12 +49,11 @@ pub fn bind_keys(cx: &mut App) {
         // Mark projects to open together, then move down / up (other lists: just move).
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("shift-tab", ToggleMarkUp, ctx),
-        // Changing the list
-        KeyBinding::new("secondary-p", TogglePin, ctx),
-        KeyBinding::new("f2", Rename, ctx),
+        // Everything else for the project (pin, rename, remove…), also on the
+        // row's icons.
+        KeyBinding::new("secondary-k", ShowActions, ctx),
         // The search box copies its selected text instead, when there is some.
         KeyBinding::new("secondary-c", CopyPath, ctx),
-        KeyBinding::new("shift-delete", Remove, ctx),
         KeyBinding::new("secondary-o", AddProjects, ctx),
         // The palette itself
         KeyBinding::new("f1", ToggleShortcuts, ctx),
