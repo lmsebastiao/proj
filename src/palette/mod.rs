@@ -330,15 +330,20 @@ impl Palette {
         self.projects.iter().find(|p| &p.key() == key)
     }
 
+    /// What the list is filtered by: the query without a `>` or `@` in front.
+    fn filter_query(&self) -> &str {
+        match self.list() {
+            List::Commands => self.query[1..].trim(),
+            List::Switch if self.mode == Mode::Projects => {
+                self.query[SWITCH_PREFIX.len_utf8()..].trim()
+            }
+            _ => &self.query,
+        }
+    }
+
     fn refilter(&mut self, cx: &mut Context<Self>) {
         let list = self.list();
-        let query = match list {
-            List::Commands => self.query[1..].trim().to_string(),
-            List::Switch if self.mode == Mode::Projects => {
-                self.query[SWITCH_PREFIX.len_utf8()..].trim().to_string()
-            }
-            _ => self.query.clone(),
-        };
+        let query = self.filter_query().to_string();
         self.matches.clear();
         if query.is_empty() {
             self.matches.extend((0..self.item_count()).map(|ix| Match {

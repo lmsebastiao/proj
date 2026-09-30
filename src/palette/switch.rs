@@ -5,14 +5,57 @@
 use std::time::Duration;
 
 use global_hotkey::hotkey::Modifiers;
-use gpui::{Context, Window};
+use gpui::{Context, Pixels, SharedString, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    platform, store,
+    launcher, platform, store,
     switcher::{self, EditorWindow},
 };
 
-use super::{Palette, items::Mode, keymap::Confirm};
+use super::{
+    Palette,
+    items::{List, Mode},
+    keymap::Confirm,
+    theme::{FONT_SIZE, ROW_HEIGHT, Theme},
+};
+
+/// A switcher row being dragged to another place in the list, drawn under the
+/// mouse as a copy of the row.
+#[derive(Clone)]
+pub(super) struct DraggedWindow {
+    /// Its index in `Palette::windows`.
+    pub(super) ix: usize,
+    pub(super) title: SharedString,
+    pub(super) width: Pixels,
+    pub(super) theme: Theme,
+}
+
+impl Render for DraggedWindow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let t = self.theme;
+        div()
+            .w(self.width)
+            .h(px(ROW_HEIGHT))
+            .px_3()
+            .rounded_md()
+            .flex()
+            .items_center()
+            .bg(rgb(t.selected))
+            .border_1()
+            .border_color(rgb(t.border))
+            .shadow_lg()
+            .text_size(px(FONT_SIZE))
+            .text_color(rgb(t.text))
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(self.title.clone()),
+            )
+    }
+}
 
 impl Palette {
     /// The switcher, with `selected` highlighted: until `hold` is let go, or
@@ -82,6 +125,11 @@ impl Palette {
                     if platform::modifiers_held(mods) {
                         return false;
                     }
+                    // Let go while dragging a row: keep the list open to drop it.
+                    if cx.has_active_drag() {
+                        this.start_search(cx);
+                        return true;
+                    }
                     this.hold = None;
                     if this.matches.is_empty() {
                         window.remove_window();
@@ -129,6 +177,27 @@ impl Palette {
             self.switch_to(n - 1, window, cx);
         }
         true
+    }
+
+    /// Whether rows can be dragged to reorder the list: only while it shows
+    /// every window in order, not search results.
+    pub(super) fn can_reorder(&self) -> bool {
+        self.list() == List::Switch && self.filter_query().is_empty()
+    }
+
+    /// A row dropped on another: the window at `from` takes the place of the
+    /// one at `to`, and stays highlighted. The switcher keeps the new order.
+    pub(super) fn move_window(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        let len = self.windows.len();
+        if from == to || from >= len || to >= len || !self.can_reorder() {
+            return;
+        }
+        let moved = self.windows.remove(from);
+        self.windows.insert(to, moved);
+        self.match_windows();
+        launcher::set_switch_order(self.windows.iter().map(|w| w.window).collect(), cx);
+        self.selected = to;
+        cx.notify();
     }
 
     /// Works out which project each open window shows.

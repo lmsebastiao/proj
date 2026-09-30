@@ -184,6 +184,7 @@ impl Palette {
                 let mut keys = vec![
                     s(&["↵"], "Switch to it").footer("switch").run(Confirm),
                     s(&["↑ ↓"], "Move the selection"),
+                    s(&["drag"], "Move a window to another place in the list"),
                 ];
                 if let Some(numbers) = numbers {
                     keys.push(s(

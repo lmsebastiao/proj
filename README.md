@@ -83,7 +83,10 @@ tap switches to the editor window you used before. **alt-esc** cancels.
 
 The list keeps its order: windows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before
-the current one.
+the current one. To put a window somewhere else, drag its row with the mouse and drop it on
+another; a line shows where it will go. It keeps that place (and number) until it closes.
+Dragging works while the list shows every window, not while you're searching it. If you let
+go of alt mid-drag, the list stays open so you can drop the row.
 
 Press **alt+shift+\\** to search instead: the same list, but it stays open, typing filters it,
 **enter** switches and **esc** closes. While holding the switcher open, adding shift turns it

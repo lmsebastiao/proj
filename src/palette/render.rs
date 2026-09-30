@@ -1,6 +1,6 @@
 //! Drawing the palette.
 
-use std::ops::Range;
+use std::{cmp::Ordering, ops::Range};
 
 use gpui::{
     AnyElement, Context, FontWeight, HighlightStyle, KeyDownEvent, StyledText, Window, div,
@@ -16,6 +16,7 @@ use super::{
     keymap::*,
     secondary,
     shortcuts::Shortcut,
+    switch::DraggedWindow,
     theme::*,
 };
 
@@ -88,6 +89,14 @@ impl Palette {
                 .text_size(px(SMALL_FONT_SIZE))
                 .text_color(rgb(t.muted))
                 .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
+        });
+        // Switcher rows can be dragged to another place in the list (the list's
+        // rows are the windows in order then, so `row` is also the window).
+        let dragged = self.can_reorder().then(|| DraggedWindow {
+            ix: m.ix,
+            title: title.clone().into(),
+            width: px(0.),
+            theme: t,
         });
         // Pin, rename, remove and the actions menu: shown on the highlighted row,
         // and on any row the mouse is over.
@@ -169,6 +178,29 @@ impl Palette {
                     this.selected = row;
                     this.confirm(&Confirm, window, cx);
                 }))
+                .when_some(dragged, |d, dragged| {
+                    d.on_drag(dragged, |dragged, _, window, cx| {
+                        let width = window.viewport_size().width - px(18.);
+                        cx.new(|_| DraggedWindow {
+                            width,
+                            ..dragged.clone()
+                        })
+                    })
+                    // A line where it would land: above this row when coming
+                    // from below, under it when coming from above.
+                    .drag_over::<DraggedWindow>(move |style, dragged, _, _| {
+                        match dragged.ix.cmp(&row) {
+                            Ordering::Greater => style.border_t_2().border_color(rgb(t.accent)),
+                            Ordering::Less => style.border_b_2().border_color(rgb(t.accent)),
+                            Ordering::Equal => style,
+                        }
+                    })
+                    .on_drop(cx.listener(
+                        move |this, dragged: &DraggedWindow, _, cx| {
+                            this.move_window(dragged.ix, row, cx);
+                        },
+                    ))
+                })
                 .children(number)
                 .children(mark)
                 .child(

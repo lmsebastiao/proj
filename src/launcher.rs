@@ -324,6 +324,12 @@ impl Switching {
     }
 }
 
+/// The switcher's list after dragging a window to another place in it: the
+/// windows keep these places from now on.
+pub fn set_switch_order(order: Vec<platform::WindowRef>, cx: &mut App) {
+    cx.default_global::<Switching>().order = order;
+}
+
 /// Events from the hotkey and tray callbacks and the update threads, handled on
 /// the main thread.
 enum Command {
