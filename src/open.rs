@@ -85,7 +85,7 @@ fn opens_solutions(editor: &str) -> bool {
 }
 
 /// A `.sln`/`.slnx` in the project root, or else one level down.
-fn find_solution(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn find_solution(dir: &Path) -> Option<PathBuf> {
     let solutions_in = |dir: &Path| -> Vec<PathBuf> {
         let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
             .into_iter()

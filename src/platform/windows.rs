@@ -195,3 +195,147 @@ fn open_environment_key(access: u32) -> std::io::Result<Key> {
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
+
+/// Visible top-level windows as Alt+Tab would list them, front to back: no
+/// owned, tool or cloaked (other virtual desktop) windows, and none from proj.
+pub fn top_windows() -> Vec<super::TopWindow> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
+        System::Threading::{
+            OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW,
+        },
+        UI::WindowsAndMessaging::{
+            EnumWindows, GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongW, GetWindowTextW,
+            GetWindowThreadProcessId, IsWindowVisible, WS_EX_TOOLWINDOW,
+        },
+    };
+
+    unsafe extern "system" fn collect(hwnd: HWND, data: LPARAM) -> i32 {
+        unsafe { (*(data as *mut Vec<HWND>)).push(hwnd) };
+        1
+    }
+    let mut handles: Vec<HWND> = Vec::new();
+    unsafe { EnumWindows(Some(collect), &mut handles as *mut _ as LPARAM) };
+
+    let own = std::process::id();
+    let mut exes: std::collections::HashMap<u32, Option<std::path::PathBuf>> = Default::default();
+    let mut windows = Vec::new();
+    for hwnd in handles {
+        let listed = unsafe {
+            IsWindowVisible(hwnd) != 0
+                && GetWindow(hwnd, GW_OWNER).is_null()
+                && GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW == 0
+        };
+        if !listed {
+            continue;
+        }
+        let mut cloaked = 0u32;
+        unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED as u32,
+                (&mut cloaked as *mut u32).cast(),
+                size_of::<u32>() as u32,
+            )
+        };
+        if cloaked != 0 {
+            continue;
+        }
+        let mut buffer = [0u16; 512];
+        let len = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        if len <= 0 {
+            continue;
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == own {
+            continue;
+        }
+        let exe = exes.entry(pid).or_insert_with(|| unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let mut path = [0u16; 1024];
+            let mut size = path.len() as u32;
+            let ok = QueryFullProcessImageNameW(
+                process,
+                PROCESS_NAME_WIN32,
+                path.as_mut_ptr(),
+                &mut size,
+            );
+            CloseHandle(process);
+            (ok != 0).then(|| String::from_utf16_lossy(&path[..size as usize]).into())
+        });
+        let Some(exe) = exe.clone() else {
+            continue;
+        };
+        windows.push(super::TopWindow {
+            window: super::WindowRef(hwnd as isize),
+            title: String::from_utf16_lossy(&buffer[..len as usize]),
+            exe,
+        });
+    }
+    windows
+}
+
+pub fn foreground_window() -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    unsafe { GetForegroundWindow() as isize }
+}
+
+/// Brings a window to the front, restoring it if minimized.
+pub fn focus_window(hwnd: isize) {
+    use windows_sys::Win32::{
+        System::Threading::{AttachThreadInput, GetCurrentThreadId},
+        UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SW_RESTORE, ShowWindow,
+        },
+    };
+    let hwnd = hwnd as HWND;
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd);
+        if GetForegroundWindow() == hwnd {
+            return;
+        }
+        // Windows only lets the app that got the last input take the foreground;
+        // after a quick shortcut tap that is the app in front (it got the key
+        // release). Sharing its input state for a moment lifts that.
+        let front = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+        let ours = GetCurrentThreadId();
+        if front != 0 && front != ours && AttachThreadInput(ours, front, 1) != 0 {
+            SetForegroundWindow(hwnd);
+            AttachThreadInput(ours, front, 0);
+        }
+        if GetForegroundWindow() != hwnd {
+            // What Windows' own task switching uses; not bound by that rule.
+            windows_sys::Win32::UI::WindowsAndMessaging::SwitchToThisWindow(hwnd, 1);
+        }
+    }
+}
+
+/// Whether every one of these modifiers is physically held down right now.
+pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
+    use global_hotkey::hotkey::Modifiers;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+    let down = |vk: u16| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0;
+    (!mods.contains(Modifiers::ALT) || down(VK_MENU))
+        && (!mods.contains(Modifiers::CONTROL) || down(VK_CONTROL))
+        && (!mods.contains(Modifiers::SHIFT) || down(VK_SHIFT))
+        && (!mods.contains(Modifiers::SUPER) || down(VK_LWIN) || down(VK_RWIN))
+}
+
+/// The virtual key of the key left of 1 (under Esc) in the current layout:
+/// ` on US keyboards, \ on Portuguese, ^ on German…
+pub fn key_left_of_1() -> u16 {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MAPVK_VSC_TO_VK, MapVirtualKeyW};
+    // Scan code 0x29 is that physical key on every layout.
+    unsafe { MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK) as u16 }
+}

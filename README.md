@@ -26,7 +26,7 @@ then opens a folder picker where you can select one or more projects at once.
 | enter                   | open in editor                             |
 | shift-enter             | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
-| alt-enter               | open with… (choose an editor for this project) |
+| alt-enter               | open with… (another editor, once or always for this project) |
 | tab                     | mark projects to open together in one window |
 | ctrl-e, ctrl-enter      | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-s                  | pin / unpin (pinned projects stay on top)  |
@@ -34,7 +34,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-shift-c            | copy the project path                      |
 | ctrl-o                  | add projects (multi-select folder picker)  |
-| ctrl-shift-e            | change the default editor                  |
+| ctrl-shift-e            | change the default editor for all projects |
 | ctrl-d, shift-delete    | remove project                             |
 | f1                      | list every shortcut (click one to run it)  |
 | esc, clicking elsewhere | close                                      |
@@ -58,6 +58,22 @@ project's window (`zed <project> <file>`), or opens a subfolder as its own works
 →/← only browse when the text cursor is at the end/start of the search box, so they still
 move the cursor while you edit a search.
 
+### Switching between open projects
+
+Hold **alt** and tap the key left of 1 (**\\** on Portuguese keyboards, **`** on US ones) to
+switch between your open editor windows, like Alt+Tab but only for editors. Keep tapping to
+move down the list; **shift** goes back up. Let go of alt and that window comes to the front.
+A quick tap goes straight to the editor window you used before, without showing the list.
+**alt-esc** cancels.
+
+Each window is listed under its project, with the branch and the editor. proj works out the
+project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
+folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
+title. Projects with a window open get an **open** badge in the normal list.
+
+`switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`. Set it to `""` to turn
+the switcher off. Windows only.
+
 ### Opening projects together
 
 Press **tab** on a project to mark it; marks stay while you change the search. Then press
@@ -72,12 +88,19 @@ Press **f2** to give it a shorter name; search still finds it by its folder name
 
 ### Per-project editors
 
-The global editor (ctrl-shift-e) opens everything by default. For a single project, press
-**alt-enter** to open it with any editor. In that list:
+There are three scopes:
 
-- **ctrl-s** adds or removes an editor for the project. The first time you add one, the
-  global editor is kept alongside it.
-- **ctrl-enter** makes the selected editor the project's default.
+- **Just this once:** press **alt-enter** on a project, pick an editor, press **enter**.
+  Nothing is saved, so next time enter uses the usual editor again.
+- **Always for this project:** in the same alt-enter list, press **ctrl-enter** on an editor.
+  Press ctrl-enter on it again to undo, and the project goes back to the default.
+- **Every project:** **ctrl-shift-e** sets the default editor. It applies to all projects that
+  don't have their own. From that screen, alt-enter switches to the project you had selected.
+
+In the alt-enter list, **ctrl-s** adds an editor to a list to pick from each time, or removes
+it. The first time you add one, the default editor is kept in the list too. The list marks
+which editor is the default, and the footer says what ctrl-enter and ctrl-s will do for the
+highlighted one.
 
 What enter does on a project then depends on its editor list:
 
@@ -122,6 +145,7 @@ proj version        # show the installed version
 
 ```toml
 hotkey = "ctrl+alt+space"
+# switch_hotkey = "alt+q"  # window switcher; default alt + the key left of 1, "" = off
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day

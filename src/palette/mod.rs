@@ -1,6 +1,6 @@
 //! The search dialog: state, modes, filtering and selection. Actions live in
-//! `projects`, `editor_choice` and `browse`, drawing in `render`, and the list
-//! of keys in `shortcuts`.
+//! `projects`, `editor_choice`, `browse` and `switch` (the window switcher),
+//! drawing in `render`, and the list of keys in `shortcuts`.
 
 mod browse;
 mod editor_choice;
@@ -9,9 +9,15 @@ mod keymap;
 mod projects;
 mod render;
 mod shortcuts;
+mod switch;
 mod theme;
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
+
+use global_hotkey::hotkey::Modifiers;
 
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, Global, ScrollStrategy, SharedString,
@@ -26,6 +32,7 @@ use crate::{
     input::{self, TextInput},
     paths,
     store::{self, Db, Project},
+    switcher::{self, EditorWindow},
 };
 
 use items::{COMMANDS, CloneTarget, EditorOption, List, Match, Mode, Target};
@@ -71,6 +78,14 @@ pub struct Palette {
     cloning: bool,
     /// The dropdown with every shortcut (F1) is open.
     show_shortcuts: bool,
+    /// Open editor windows, for `Mode::Switch` and the "open" badges.
+    windows: Vec<EditorWindow>,
+    /// The project each of `windows` shows, as an index into `projects`.
+    window_projects: Vec<Option<usize>>,
+    /// Keys of the projects that have a window open.
+    open_keys: HashSet<String>,
+    /// The switcher's modifiers while they're held; letting go switches.
+    hold: Option<Modifiers>,
     status: Option<SharedString>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -117,6 +132,10 @@ impl Palette {
             picking: false,
             cloning: false,
             show_shortcuts: false,
+            windows: Vec::new(),
+            window_projects: Vec::new(),
+            open_keys: HashSet::new(),
+            hold: None,
             status: None,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -124,6 +143,7 @@ impl Palette {
         // Re-read everything on each open so edits made by hand or via the CLI show up.
         this.config = config::load_config();
         this.db = store::load_db();
+        this.windows = switcher::editor_windows(&this.config, &this.db);
         this.reload_projects();
         let mode = if this.config.editor.is_none() {
             Mode::Editors
@@ -148,6 +168,7 @@ impl Palette {
             .chain(self.config.editor.iter())
             .map(|command| (command.clone(), editors::editor_name(command, &detected)))
             .collect();
+        self.match_windows();
     }
 
     fn name_of(&self, command: &str) -> String {
@@ -166,7 +187,7 @@ impl Palette {
                 self.browse = None;
                 self.renaming = None;
             }
-            Mode::Browse | Mode::Rename => {}
+            Mode::Browse | Mode::Rename | Mode::Switch => {}
             Mode::Editors => {
                 self.editors = editors::detected_editors(true)
                     .into_iter()
@@ -222,6 +243,7 @@ impl Palette {
                 None => String::new(),
             },
             Mode::Rename => "Leave empty to use the folder name".into(),
+            Mode::Switch => "Switch to…".into(),
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
@@ -251,6 +273,7 @@ impl Palette {
             Mode::OpenWith => List::OpenWith,
             Mode::Browse => List::Browse,
             Mode::Rename => List::Rename,
+            Mode::Switch => List::Switch,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             Mode::Projects => List::Projects,
         }
@@ -382,6 +405,7 @@ impl Palette {
             List::Editors => self.choose_editor(ix, window, cx),
             List::OpenWith => self.choose_open_with(ix, window, cx),
             List::Commands => self.run_command(COMMANDS[ix], window, cx),
+            List::Switch => self.switch_to(ix, window, cx),
             List::Browse => {
                 if let Some(browse) = &self.browse {
                     let editor = browse.project.default_editor(&self.config);

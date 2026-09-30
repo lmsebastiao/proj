@@ -23,6 +23,9 @@ pub struct Config {
     pub scan_depth: u8,
     /// Look for a new release about once a day (installed copies only).
     pub check_for_updates: bool,
+    /// Hold-and-tap shortcut for switching between open editor windows.
+    /// Unset = alt + the key left of 1; "" = off.
+    pub switch_hotkey: Option<String>,
 }
 
 impl Default for Config {
@@ -34,6 +37,7 @@ impl Default for Config {
             scan_dirs: Vec::new(),
             scan_depth: 1,
             check_for_updates: true,
+            switch_hotkey: None,
         }
     }
 }
@@ -42,6 +46,15 @@ impl Config {
     /// The shortcuts for display, e.g. "ctrl+alt+space or alt+p".
     pub fn hotkey_label(&self) -> String {
         self.hotkey.join(" or ")
+    }
+
+    /// The window switcher's shortcut, or `None` when it's turned off.
+    pub fn switch_hotkey(&self) -> Option<String> {
+        match self.switch_hotkey.as_deref().map(str::trim) {
+            None => Some(format!("alt+{}", crate::platform::key_left_of_1())),
+            Some("") => None,
+            Some(text) => Some(text.to_string()),
+        }
     }
 }
 
@@ -109,6 +122,11 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 # them: ["ctrl+alt+space", "alt+p"].
 # A change applies the next time the launcher opens (with the old shortcut or the tray icon).
 hotkey = {hotkey}
+
+# Switch between your open editor windows like Alt+Tab: hold alt, tap the key
+# left of 1 to move through them, let go to switch. Set another shortcut here,
+# e.g. "alt+q", or "" to turn it off.
+# switch_hotkey = "alt+q"
 
 # Optional: folders whose sub-folders are all listed as projects,
 # e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.

@@ -18,6 +18,8 @@ pub(super) enum Mode {
     Browse,
     /// Typing a new name for an entry (`Palette::renaming`).
     Rename,
+    /// The window switcher: open editor windows (`Palette::windows`).
+    Switch,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -30,6 +32,7 @@ pub(super) enum List {
     Commands,
     /// Nothing: the search box holds the new name.
     Rename,
+    Switch,
 }
 
 /// A git URL pasted into the search.
@@ -154,6 +157,15 @@ impl Palette {
                     ),
                 }
             }
+            // The project's name over the window's title ("proj — main.rs");
+            // windows of no known project show just their title.
+            List::Switch => {
+                let window = &self.windows[ix];
+                match self.window_projects[ix] {
+                    Some(project) => (self.projects[project].name.clone(), window.title.clone()),
+                    None => (window.title.clone(), window.editor.clone()),
+                }
+            }
             List::Rename => Default::default(),
         }
     }
@@ -225,6 +237,13 @@ impl Palette {
                     .map(|_| ("→".to_string(), MUTED)),
                 bottom: None,
             },
+            List::Switch => {
+                let project = self.window_projects[ix].map(|p| &self.projects[p]);
+                Meta {
+                    top: project.and_then(|p| p.branch.clone()).map(|b| (b, BRANCH)),
+                    bottom: project.map(|_| self.windows[ix].editor.clone()),
+                }
+            }
             List::Commands | List::Rename => Meta {
                 top: None,
                 bottom: None,
@@ -238,6 +257,7 @@ impl Palette {
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => COMMANDS.len(),
+            List::Switch => self.windows.len(),
             List::Rename => 0,
         }
     }

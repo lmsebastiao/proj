@@ -38,6 +38,75 @@ pub fn trim_memory() {
     windows::trim_memory();
 }
 
+/// Another app's top-level window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WindowRef(isize);
+
+pub struct TopWindow {
+    pub window: WindowRef,
+    pub title: String,
+    /// The program that owns it.
+    pub exe: std::path::PathBuf,
+}
+
+/// Other apps' windows as Alt+Tab lists them, front to back (Windows only).
+pub fn top_windows() -> Vec<TopWindow> {
+    #[cfg(windows)]
+    return windows::top_windows();
+    #[cfg(not(windows))]
+    Vec::new()
+}
+
+pub fn foreground_window() -> Option<WindowRef> {
+    #[cfg(windows)]
+    return Some(WindowRef(windows::foreground_window()));
+    #[cfg(not(windows))]
+    None
+}
+
+pub fn focus_window(window: WindowRef) {
+    #[cfg(windows)]
+    windows::focus_window(window.0);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
+/// Whether all of `mods` are still held down, e.g. while cycling the switcher.
+pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
+    #[cfg(windows)]
+    return windows::modifiers_held(mods);
+    #[cfg(not(windows))]
+    {
+        let _ = mods;
+        false
+    }
+}
+
+/// The key left of 1 (under Esc) as a shortcut key name, which depends on
+/// the keyboard layout: "Backquote" on US keyboards, "Backslash" on Portuguese…
+pub fn key_left_of_1() -> &'static str {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            VK_OEM_1, VK_OEM_2, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_MINUS, VK_OEM_PLUS,
+        };
+        match windows::key_left_of_1() {
+            VK_OEM_5 => "Backslash",
+            VK_OEM_7 => "Quote",
+            VK_OEM_1 => "Semicolon",
+            VK_OEM_2 => "Slash",
+            VK_OEM_4 => "BracketLeft",
+            VK_OEM_6 => "BracketRight",
+            VK_OEM_MINUS => "Minus",
+            VK_OEM_PLUS => "Equal",
+            // VK_OEM_3, and layouts whose key there has no name here.
+            _ => "Backquote",
+        }
+    }
+    #[cfg(not(windows))]
+    "Backquote"
+}
+
 /// Whether the folder containing proj.exe is on the user's PATH.
 pub fn exe_dir_on_path() -> std::io::Result<bool> {
     #[cfg(windows)]

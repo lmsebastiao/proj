@@ -33,6 +33,9 @@ impl Palette {
             .map(|r| (r, highlight))
             .collect();
         let pinned = self.list() == List::Projects && self.projects[m.ix].pinned;
+        // Projects with an editor window open (the switcher lists those).
+        let open =
+            self.list() == List::Projects && self.open_keys.contains(&self.projects[m.ix].key());
         // While marking, single projects get a numbered check box (the order is the
         // folder order in the workspace).
         let mark = (self.list() == List::Projects
@@ -97,7 +100,19 @@ impl Palette {
                                 .when(pinned, |d| {
                                     d.child(div().size(px(6.)).rounded_full().bg(rgb(ACCENT)))
                                 })
-                                .child(StyledText::new(title).with_highlights(title_hl)),
+                                .child(StyledText::new(title).with_highlights(title_hl))
+                                .when(open, |d| {
+                                    d.child(
+                                        div()
+                                            .px_1()
+                                            .rounded_sm()
+                                            .border_1()
+                                            .border_color(rgb(BORDER))
+                                            .text_xs()
+                                            .text_color(rgb(MUTED))
+                                            .child("open"),
+                                    )
+                                }),
                         )
                         .child(
                             div()
@@ -180,7 +195,7 @@ impl Palette {
 
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let (title, lines): (String, Vec<String>) = match self.mode {
-            Mode::Projects => return None,
+            Mode::Projects | Mode::Switch => return None,
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
@@ -399,6 +414,7 @@ impl Render for Palette {
                 }
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
                 (None, List::Browse) => div().child(format!("{} items", self.item_count())),
+                (None, List::Switch) => div().child("let go to switch"),
                 (None, _) => div(),
             })
             .child(div().flex_1())
@@ -433,9 +449,12 @@ impl Render for Palette {
             .on_action(cx.listener(|this, _: &OpenTerminal, window, cx| {
                 this.open_selected(Target::Terminal, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
-                if this.list() == List::Editors {
-                    return this.open_with_from_editors(cx);
+            .on_action(cx.listener(|this, _: &OpenWithMenu, window, cx| {
+                match this.list() {
+                    List::Editors => return this.open_with_from_editors(cx),
+                    // Enter with alt still held.
+                    List::Switch => return this.confirm(&Confirm, window, cx),
+                    _ => {}
                 }
                 let entry = if this.marked.len() > 1 {
                     this.marked_workspace(cx)

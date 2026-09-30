@@ -173,6 +173,12 @@ impl Palette {
                 keys.push(s(&["esc"], "Back").footer(esc).run(Dismiss));
                 keys
             }
+            // Shown while the modifier is held, so these keys come with alt.
+            List::Switch => vec![
+                s(&["alt-↓", "alt-↑"], "Move the selection"),
+                s(&["alt-↵"], "Switch now").footer("switch").run(Confirm),
+                s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
+            ],
             List::Rename => vec![
                 s(&["↵"], "Save the name").footer("save").run(Confirm),
                 s(&["esc"], "Cancel").footer("cancel").run(Dismiss),

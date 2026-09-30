@@ -5,7 +5,10 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
+use global_hotkey::{
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
+    hotkey::{HotKey, Modifiers},
+};
 use gpui::{
     App, Application, Bounds, Context, Focusable, Global, Window, WindowBackgroundAppearance,
     WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point, prelude::*, px, size,
@@ -14,7 +17,8 @@ use gpui::{
 use crate::{
     autostart, config, editors, open,
     palette::{self, Palette},
-    platform,
+    platform, store,
+    switcher::{self, EditorWindow},
     tray::{Tray, TrayCommand},
     update::{self, Update},
 };
@@ -29,13 +33,20 @@ struct PaletteWindow {
 impl Global for PaletteWindow {}
 
 /// The registered global shortcuts. Opening the palette re-registers them when
-/// `hotkey` in config.toml has changed.
+/// `hotkey` or `switch_hotkey` in config.toml has changed.
 struct Hotkeys {
     manager: GlobalHotKeyManager,
     /// The config's `hotkey` list at the last sync.
     wanted: Vec<String>,
     /// The shortcuts that registered, with their text from the config.
     active: Vec<(String, HotKey)>,
+    /// Why some of `wanted` couldn't be registered.
+    problems: Vec<String>,
+    /// The window switcher's shortcut: its text, and the key forwards and
+    /// with shift (backwards).
+    switch: Option<(String, HotKey, HotKey)>,
+    /// Why the switcher's shortcut couldn't be registered.
+    switch_problem: Option<String>,
 }
 
 impl Global for Hotkeys {}
@@ -45,6 +56,12 @@ impl Hotkeys {
     /// message for each one that failed. If none of them work, the current ones
     /// stay so proj can still be opened.
     fn sync(&mut self, wanted: &[String]) -> Vec<String> {
+        let problems = self.sync_toggles(wanted);
+        self.problems.clone_from(&problems);
+        problems
+    }
+
+    fn sync_toggles(&mut self, wanted: &[String]) -> Vec<String> {
         self.wanted = wanted.to_vec();
         let mut problems = Vec::new();
         let mut next: Vec<(String, HotKey)> = Vec::new();
@@ -93,12 +110,78 @@ impl Hotkeys {
         let texts: Vec<&str> = self.active.iter().map(|(text, _)| text.as_str()).collect();
         texts.join(" or ")
     }
+
+    /// Registers the switcher's shortcut (`None` = off) if it changed, or failed
+    /// last time. Returns whether anything changed.
+    fn sync_switch(&mut self, wanted: Option<String>) -> bool {
+        if self.switch.as_ref().map(|(text, ..)| text) == wanted.as_ref() {
+            return false;
+        }
+        if let Some((_, next, back)) = self.switch.take() {
+            self.manager.unregister(next).ok();
+            self.manager.unregister(back).ok();
+        }
+        self.switch_problem = None;
+        let Some(text) = wanted else {
+            return true;
+        };
+        let next = match HotKey::from_str(&text) {
+            Ok(hotkey) => hotkey,
+            Err(err) => {
+                self.switch_problem =
+                    Some(format!("Switcher shortcut '{text}' is not valid ({err})"));
+                return true;
+            }
+        };
+        match self.manager.register(next) {
+            Ok(()) => {
+                // Nice to have, like shift+alt+tab; the switcher works without it.
+                let back = HotKey::new(Some(next.mods | Modifiers::SHIFT), next.key);
+                self.manager.register(back).ok();
+                self.switch = Some((text, next, back));
+            }
+            Err(global_hotkey::Error::AlreadyRegistered(_)) => {
+                self.switch_problem = Some(format!(
+                    "Switcher shortcut '{text}' is taken by another app"
+                ));
+            }
+            Err(err) => self.switch_problem = Some(format!("Switcher shortcut '{text}': {err}")),
+        }
+        true
+    }
+
+    /// What the palette's footer says about shortcuts that don't work.
+    fn notice(&self) -> palette::ShortcutNotice {
+        let problems: Vec<&str> = self
+            .problems
+            .iter()
+            .chain(&self.switch_problem)
+            .map(String::as_str)
+            .collect();
+        palette::ShortcutNotice((!problems.is_empty()).then(|| problems.join("; ").into()))
+    }
 }
+
+/// A switch started with the switcher's shortcut, before its list is shown: a
+/// quick tap switches straight away, like Alt+Tab.
+struct PendingSwitch {
+    windows: Vec<EditorWindow>,
+    selected: usize,
+}
+
+#[derive(Default)]
+struct Switching(Option<PendingSwitch>);
+
+impl Global for Switching {}
+
+/// How long the switcher's modifier must be held before its list shows.
+const SHOW_SWITCHER_AFTER: Duration = Duration::from_millis(150);
 
 /// Events from the hotkey and tray callbacks and the update threads, handled on
 /// the main thread.
 enum Command {
-    Hotkey,
+    /// A global shortcut, by its id.
+    Hotkey(u32),
     Tray(TrayCommand),
     /// A finished update check; `manual` when it was asked for from the tray.
     UpdateChecked {
@@ -163,6 +246,9 @@ pub fn run() {
             manager,
             wanted: Vec::new(),
             active: Vec::new(),
+            problems: Vec::new(),
+            switch: None,
+            switch_problem: None,
         };
         let problems = hotkeys.sync(&config.hotkey);
         if hotkeys.active.is_empty() {
@@ -175,10 +261,12 @@ pub fn run() {
                 ),
             );
         }
+        hotkeys.sync_switch(config.switch_hotkey());
         // Some shortcuts may still fail; say which where the user will see it.
-        cx.set_global(notice(&problems));
+        cx.set_global(hotkeys.notice());
         let tooltip = format!("proj ({})", hotkeys.label());
         cx.set_global(hotkeys);
+        cx.set_global(Switching::default());
 
         palette::bind_keys(cx);
         // Finds installed editors off the main thread so the first open is instant.
@@ -224,7 +312,7 @@ pub fn run() {
         let hotkey_tx = tx.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
             if event.state == HotKeyState::Pressed {
-                hotkey_tx.try_send(Command::Hotkey).ok();
+                hotkey_tx.try_send(Command::Hotkey(event.id)).ok();
             }
         }));
         let updates = update::is_installed();
@@ -266,7 +354,14 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
         }
     };
     match command {
-        Command::Hotkey => toggle_palette(tray, cx),
+        Command::Hotkey(id) => {
+            let switch = cx.global::<Hotkeys>().switch.as_ref();
+            match switch.map(|(_, next, back)| (next.id(), back.id(), next.mods)) {
+                Some((next, _, mods)) if id == next => switch_windows(1, mods, cx),
+                Some((_, back, mods)) if id == back => switch_windows(-1, mods, cx),
+                _ => toggle_palette(tray, cx),
+            }
+        }
         Command::Tray(TrayCommand::Toggle) => {
             // Clicking the tray icon takes focus from the palette, which closes it
             // just before the click arrives; treat that click as "close".
@@ -379,23 +474,87 @@ fn check_for_updates_daily(tx: &async_channel::Sender<Command>) {
     }
 }
 
-fn notice(problems: &[String]) -> palette::ShortcutNotice {
-    palette::ShortcutNotice((!problems.is_empty()).then(|| problems.join("; ").into()))
+/// Applies a changed `hotkey` or `switch_hotkey` from config.toml, like the
+/// palette does with the rest of the config each time it opens.
+fn reload_hotkeys(tray: Option<&Tray>, cx: &mut App) {
+    let config = config::load_config();
+    let hotkeys = cx.global_mut::<Hotkeys>();
+    let mut changed = hotkeys.sync_switch(config.switch_hotkey());
+    if hotkeys.wanted != config.hotkey {
+        hotkeys.sync(&config.hotkey);
+        if let Some(tray) = tray {
+            tray.set_tooltip(&format!("proj ({})", hotkeys.label()));
+        }
+        changed = true;
+    }
+    if changed {
+        let notice = hotkeys.notice();
+        cx.set_global(notice);
+    }
 }
 
-/// Applies a changed `hotkey` from config.toml, like the palette does with the
-/// rest of the config each time it opens.
-fn reload_hotkeys(tray: Option<&Tray>, cx: &mut App) {
-    let wanted = config::load_config().hotkey;
-    let hotkeys = cx.global_mut::<Hotkeys>();
-    if hotkeys.wanted == wanted {
+/// The switcher's shortcut: `delta` 1 forwards, -1 with shift. The first press
+/// waits a moment: let go quickly and it switches to the previous window
+/// straight away; keep holding and the list shows, and each press moves on.
+fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
+    if let Some(handle) = open_palette(cx) {
+        let cycled = handle
+            .update(cx, |palette, _, cx| palette.cycle(delta, cx))
+            .unwrap_or(false);
+        if cycled {
+            return;
+        }
+        // The launcher is open: swap it for the switcher.
+        handle
+            .update(cx, |_, window, _| window.remove_window())
+            .ok();
+        cx.global_mut::<PaletteWindow>().handle = None;
+    }
+    if let Some(pending) = &mut cx.global_mut::<Switching>().0 {
+        let len = pending.windows.len().max(1) as isize;
+        pending.selected = (pending.selected as isize + delta).rem_euclid(len) as usize;
         return;
     }
-    let problems = hotkeys.sync(&wanted);
-    if let Some(tray) = tray {
-        tray.set_tooltip(&format!("proj ({})", hotkeys.label()));
-    }
-    cx.set_global(notice(&problems));
+    let windows = switcher::editor_windows(&config::load_config(), &store::load_db());
+    // Like Alt+Tab, start on the window behind the one you're in.
+    let in_front = windows.len() > 1 && Some(windows[0].window) == platform::foreground_window();
+    let selected = if delta < 0 {
+        windows.len().saturating_sub(1)
+    } else {
+        usize::from(in_front)
+    };
+    cx.global_mut::<Switching>().0 = Some(PendingSwitch { windows, selected });
+
+    cx.spawn(async move |cx| {
+        let started = Instant::now();
+        loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(15))
+                .await;
+            let released = !platform::modifiers_held(mods);
+            if !released && started.elapsed() < SHOW_SWITCHER_AFTER {
+                continue;
+            }
+            cx.update(|cx| {
+                let Some(pending) = cx.global_mut::<Switching>().0.take() else {
+                    return;
+                };
+                if released {
+                    if let Some(target) = pending.windows.get(pending.selected) {
+                        platform::focus_window(target.window);
+                    }
+                } else {
+                    let PendingSwitch { windows, selected } = pending;
+                    show_palette(cx, move |window, cx| {
+                        Palette::switcher(window, cx, windows, selected, mods)
+                    });
+                }
+            })
+            .ok();
+            break;
+        }
+    })
+    .detach();
 }
 
 fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
@@ -407,7 +566,14 @@ fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
         return;
     }
     reload_hotkeys(tray, cx);
+    show_palette(cx, Palette::new);
+}
 
+/// Opens the palette window in front, with `build` making its contents.
+fn show_palette(
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut Context<Palette>) -> Palette + 'static,
+) {
     let display = platform::launcher_display(cx);
 
     let window_size = size(px(680.), px(440.));
@@ -438,7 +604,7 @@ fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
         app_id: Some("proj".into()),
         ..Default::default()
     };
-    match cx.open_window(options, |window, cx| cx.new(|cx| Palette::new(window, cx))) {
+    match cx.open_window(options, |window, cx| cx.new(|cx| build(window, cx))) {
         Ok(handle) => {
             handle
                 .update(cx, |palette, window, cx| {

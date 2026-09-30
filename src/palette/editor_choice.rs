@@ -121,6 +121,13 @@ impl Palette {
         let key = self.selected_project().map(store::Project::key);
         self.set_mode(Mode::Editors, cx);
         self.open_with = key;
+        // Start on the current default, so a stray enter changes nothing.
+        let current = self.config.editor.clone();
+        self.select_where(|this, ix| match &this.editors[ix] {
+            EditorOption::Detected(e) => current.as_deref() == Some(e.command.as_str()),
+            EditorOption::FileManager => current.as_deref() == Some(""),
+            EditorOption::Browse => false,
+        });
     }
 
     /// Alt-Enter in the default-editor list: open (or set up) the remembered

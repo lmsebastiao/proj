@@ -14,6 +14,7 @@ mod palette;
 mod paths;
 mod platform;
 mod store;
+mod switcher;
 mod tray;
 mod update;
 
