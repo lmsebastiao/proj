@@ -12,7 +12,7 @@ use crate::{input, paths, store};
 use super::{
     Palette,
     actions::{ActionEntry, ROW_ICONS, RowIcon},
-    app_icon::app_icon,
+    app_icon::{self, app_icon},
     items::*,
     keymap::*,
     secondary,
@@ -110,7 +110,13 @@ impl Palette {
             List::Switch => Some(Some(self.windows[self.switch_rows[m.ix][0]].exe.clone())),
             _ => None,
         }
-        .map(app_icon);
+        .map(|program| app_icon(program, app_icon::ROW_SIZE));
+        // A project with its own editor: that editor's icon, before its name
+        // on the right.
+        let own_editor = (self.list() == List::Projects && !self.projects[m.ix].missing)
+            .then(|| self.projects[m.ix].editor.as_ref())
+            .flatten()
+            .and_then(|command| self.apps.get(command).cloned().flatten());
         // A project whose folder is gone is dimmed; tags show after the name.
         let project = (self.list() == List::Projects).then(|| &self.projects[m.ix]);
         let missing = project.is_some_and(|p| p.missing);
@@ -331,7 +337,16 @@ impl Palette {
                             .items_end()
                             .text_size(px(SMALL_FONT_SIZE))
                             .children(meta.top.map(|(text, color)| line(text, color)))
-                            .children(meta.bottom.map(|text| line(text, t.muted)))
+                            .children(meta.bottom.map(|text| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .children(own_editor.map(|program| {
+                                        app_icon(Some(program), app_icon::SMALL_SIZE)
+                                    }))
+                                    .child(line(text, t.muted))
+                            }))
                             // What the branch's marks, "missing" or "· →" mean.
                             .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
                     )

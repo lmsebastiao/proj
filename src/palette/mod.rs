@@ -67,6 +67,8 @@ pub struct Palette {
     editors: Vec<EditorOption>,
     /// Editor command -> display name.
     names: HashMap<String, String>,
+    /// Projects' own editors' commands -> the program, for its icon.
+    apps: HashMap<String, Option<PathBuf>>,
     /// Key of the entry being opened in `Mode::OpenWith`.
     open_with: Option<String>,
     /// The project being browsed in `Mode::Browse`.
@@ -169,6 +171,7 @@ impl Palette {
             projects: Vec::new(),
             editors: Vec::new(),
             names: HashMap::new(),
+            apps: HashMap::new(),
             open_with: None,
             browse: None,
             editing: None,
@@ -238,6 +241,18 @@ impl Palette {
             .chain(self.config.editor.iter())
             .map(|command| (command.clone(), editors::editor_name(command, &detected)))
             .collect();
+        // Found once here, as finding one looks on disk.
+        let mut apps = HashMap::new();
+        for command in self.projects.iter().filter_map(|p| p.editor.as_ref()) {
+            if !apps.contains_key(command) {
+                let app = detected
+                    .iter()
+                    .find(|e| &e.command == command)
+                    .map_or_else(|| editors::app_path(command), |e| e.app.clone());
+                apps.insert(command.clone(), app);
+            }
+        }
+        self.apps = apps;
         self.match_windows();
     }
 
