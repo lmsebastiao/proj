@@ -125,6 +125,11 @@ impl TextInput {
         cx.notify();
     }
 
+    /// Types `text` at the cursor, over any selection.
+    pub fn insert(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.replace_text_in_range(None, text, window, cx);
+    }
+
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         let offset = if self.selected_range.is_empty() {
             self.previous_boundary(self.selected_range.start)

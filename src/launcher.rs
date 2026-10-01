@@ -33,7 +33,7 @@ struct PaletteWindow {
 impl Global for PaletteWindow {}
 
 /// The registered global shortcuts. Opening the palette re-registers them when
-/// `hotkey`, `switch_hotkey` or `switch_search_hotkey` in config.toml changed.
+/// `hotkey` or `switch_hotkey` in config.toml changed.
 struct Hotkeys {
     manager: GlobalHotKeyManager,
     /// The config's `hotkey` list at the last sync.
@@ -44,36 +44,25 @@ struct Hotkeys {
     problems: Vec<String>,
     /// The window switcher's shortcut; with shift it goes backwards.
     switch: SwitchShortcut,
-    /// The switcher to search in.
-    search: SwitchShortcut,
     /// Straight to a window by its number in the switcher.
     numbers: NumberShortcuts,
 }
 
-/// One of the switcher's shortcuts, from its text in the config.
+/// The switcher's shortcut, from its text in the config.
 #[derive(Default)]
 struct SwitchShortcut {
-    /// Registered: its text, the key, and the key with shift when that's wanted.
+    /// Registered: its text, the key, and the key with shift (backwards) if
+    /// that was free.
     active: Option<(String, HotKey, Option<HotKey>)>,
-    /// Whether the key with shift was wanted at the last sync.
-    shifted: bool,
     /// Why it couldn't be registered.
     problem: Option<String>,
 }
 
 impl SwitchShortcut {
-    /// Registers `wanted` (`None` = off) if it changed, or failed last time.
-    /// `shifted` also registers it with shift, if that's free. Returns whether
-    /// anything changed.
-    fn sync(
-        &mut self,
-        manager: &GlobalHotKeyManager,
-        wanted: Option<String>,
-        what: &str,
-        shifted: bool,
-    ) -> bool {
-        if self.active.as_ref().map(|(text, ..)| text) == wanted.as_ref() && self.shifted == shifted
-        {
+    /// Registers `wanted` (`None` = off), and it with shift if that's free, if
+    /// it changed or failed last time. Returns whether anything changed.
+    fn sync(&mut self, manager: &GlobalHotKeyManager, wanted: Option<String>) -> bool {
+        if self.active.as_ref().map(|(text, ..)| text) == wanted.as_ref() {
             return false;
         }
         if let Some((_, key, shifted)) = self.active.take() {
@@ -83,41 +72,31 @@ impl SwitchShortcut {
             }
         }
         self.problem = None;
-        self.shifted = shifted;
         let Some(text) = wanted else {
             return true;
         };
         let key = match HotKey::from_str(&text) {
             Ok(hotkey) => hotkey,
             Err(err) => {
-                self.problem = Some(format!("{what} shortcut '{text}' is not valid ({err})"));
+                self.problem = Some(format!("Switcher shortcut '{text}' is not valid ({err})"));
                 return true;
             }
         };
         match manager.register(key) {
             Ok(()) => {
-                let shifted = shifted
-                    .then(|| HotKey::new(Some(key.mods | Modifiers::SHIFT), key.key))
+                let shifted = Some(HotKey::new(Some(key.mods | Modifiers::SHIFT), key.key))
                     .filter(|shifted| manager.register(*shifted).is_ok());
                 self.active = Some((text, key, shifted));
             }
             Err(global_hotkey::Error::AlreadyRegistered(_)) => {
-                self.problem = Some(format!("{what} shortcut '{text}' is taken by another app"));
+                self.problem = Some(format!(
+                    "Switcher shortcut '{text}' is taken by another app"
+                ));
             }
-            Err(err) => self.problem = Some(format!("{what} shortcut '{text}': {err}")),
+            Err(err) => self.problem = Some(format!("Switcher shortcut '{text}': {err}")),
         }
         true
     }
-}
-
-/// Whether `search` is `switch` with shift added, e.g. alt+shift+\ for alt+\.
-fn is_shifted(switch: Option<&str>, search: Option<&str>) -> bool {
-    let (Some(Ok(switch)), Some(Ok(search))) =
-        (switch.map(HotKey::from_str), search.map(HotKey::from_str))
-    else {
-        return false;
-    };
-    search == HotKey::new(Some(switch.mods | Modifiers::SHIFT), switch.key)
 }
 
 /// The shortcuts that switch to a window by its number: the config's
@@ -248,20 +227,11 @@ impl Hotkeys {
     /// Registers the switcher's shortcuts from the config if they changed, or
     /// failed last time. Returns whether anything changed.
     fn sync_switcher(&mut self, config: &config::Config) -> bool {
-        let (switch_text, search_text) = (config.switch_hotkey(), config.switch_search_hotkey());
-        // With the defaults (alt+\ and alt+shift+\) shift searches instead of
-        // going back; alt+up still goes back.
-        let back = !is_shifted(switch_text.as_deref(), search_text.as_deref());
-        let switch = self
-            .switch
-            .sync(&self.manager, switch_text, "Switcher", back);
-        let search = self
-            .search
-            .sync(&self.manager, search_text, "Switcher search", false);
+        let switch = self.switch.sync(&self.manager, config.switch_hotkey());
         let numbers = self
             .numbers
             .sync(&self.manager, config.switch_number_modifiers());
-        switch || search || numbers
+        switch || numbers
     }
 
     /// What the palette's footer says about shortcuts that don't work.
@@ -270,7 +240,6 @@ impl Hotkeys {
             .problems
             .iter()
             .chain(&self.switch.problem)
-            .chain(&self.search.problem)
             .chain(&self.numbers.problem)
             .map(String::as_str)
             .collect();
@@ -415,7 +384,6 @@ pub fn run() {
             active: Vec::new(),
             problems: Vec::new(),
             switch: SwitchShortcut::default(),
-            search: SwitchShortcut::default(),
             numbers: NumberShortcuts::default(),
         };
         let problems = hotkeys.sync(&config.hotkey);
@@ -533,11 +501,9 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
                 .active
                 .as_ref()
                 .map(|(_, key, back)| (key.id(), back.map(|b| b.id()), key.mods));
-            let search = hotkeys.search.active.as_ref().map(|(_, key, _)| key.id());
             match switch {
                 Some((next, _, mods)) if id == next => switch_windows(1, mods, cx),
                 Some((_, back, mods)) if Some(id) == back => switch_windows(-1, mods, cx),
-                _ if Some(id) == search => search_windows(cx),
                 _ => toggle_palette(tray, cx),
             }
         }
@@ -687,7 +653,7 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
     }
     let (windows, selected) = arranged_windows(delta, cx);
     show_palette(cx, move |window, cx| {
-        Palette::switcher(window, cx, windows, selected, Some(mods))
+        Palette::switcher(window, cx, windows, selected, mods)
     });
 }
 
@@ -721,25 +687,6 @@ fn switch_to_number(ix: usize, cx: &mut App) {
             eprintln!("proj: could not save: {err}");
         }
     }
-}
-
-/// The switcher's search shortcut: the same list, but it stays
-/// open to type in until enter or esc. From a switcher already showing, it
-/// just stops waiting for the modifier to be let go.
-fn search_windows(cx: &mut App) {
-    if let Some(handle) = open_palette(cx) {
-        let searching = handle
-            .update(cx, |palette, _, cx| palette.start_search(cx))
-            .unwrap_or(false);
-        if searching {
-            return;
-        }
-        close_palette(handle, cx);
-    }
-    let (windows, selected) = arranged_windows(1, cx);
-    show_palette(cx, move |window, cx| {
-        Palette::switcher(window, cx, windows, selected, None)
-    });
 }
 
 fn close_palette(handle: WindowHandle<Palette>, cx: &mut App) {
@@ -823,21 +770,4 @@ fn fatal(cx: &mut App, message: &str) {
     platform::attach_console();
     eprintln!("proj: {message}");
     cx.quit();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn search_with_shift_takes_the_place_of_going_back() {
-        assert!(is_shifted(
-            Some("alt+Backslash"),
-            Some("alt+shift+Backslash")
-        ));
-        assert!(is_shifted(Some("alt+q"), Some("shift+alt+q")));
-        assert!(!is_shifted(Some("alt+q"), Some("ctrl+alt+q")));
-        assert!(!is_shifted(Some("alt+q"), None));
-        assert!(!is_shifted(Some("not a key"), Some("alt+shift+q")));
-    }
 }

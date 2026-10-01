@@ -28,6 +28,8 @@ async-channel = "2"
 dirs = "7.0.0"
 global-hotkey = "0.8.0"
 gpui = "0.2.2"
+# The pixel buffer type gpui images are made of.
+image = { version = "0.25", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.6"
 toml_edit = "0.25"
@@ -39,15 +41,16 @@ embed-resource = "3"
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Dwm",
-    "Win32_Graphics_Gdi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_Console",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Registry",
-    "Win32_System_Threading",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Console",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
 ] }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]

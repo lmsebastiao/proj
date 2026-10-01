@@ -24,12 +24,8 @@ pub struct Config {
     /// Look for a new release about once a day (installed copies only).
     pub check_for_updates: bool,
     /// Hold-and-tap shortcut for switching between open editor windows (with
-    /// shift: backwards, unless that's the search shortcut). Unset = alt+\;
-    /// "" = off.
+    /// shift: backwards). Unset = alt+\; "" = off.
     pub switch_hotkey: Option<String>,
-    /// Shortcut for the switcher to search in, which stays open when let go.
-    /// Unset = alt+shift+\; "" = off.
-    pub switch_search_hotkey: Option<String>,
     /// Modifiers that, with 1 to 9, switch straight to that window in the
     /// switcher's order. Unset = alt+shift; "" = off.
     pub switch_number_modifiers: Option<String>,
@@ -85,7 +81,6 @@ impl Default for Config {
             scan_depth: 1,
             check_for_updates: true,
             switch_hotkey: None,
-            switch_search_hotkey: None,
             switch_number_modifiers: None,
             theme: ThemeSetting::System,
         }
@@ -101,13 +96,6 @@ impl Config {
     /// The window switcher's shortcut, or `None` when it's turned off.
     pub fn switch_hotkey(&self) -> Option<String> {
         shortcut_or(self.switch_hotkey.as_deref(), || "alt+Backslash".into())
-    }
-
-    /// The searching switcher's shortcut, or `None` when it's turned off.
-    pub fn switch_search_hotkey(&self) -> Option<String> {
-        shortcut_or(self.switch_search_hotkey.as_deref(), || {
-            "alt+shift+Backslash".into()
-        })
     }
 
     /// The modifiers for switching to a window by its number, or `None` when
@@ -192,14 +180,11 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 hotkey = {hotkey}
 
 # Switch between your open editor windows like Alt+Tab: hold alt, tap \ to move
-# through them (alt+up goes back) or a number to pick one, let go to switch.
-# Set another shortcut here, e.g. "alt+q", or "" to turn it off.
+# through them (alt+shift+\ goes back) or a number to pick one, let go to switch.
+# Type while holding it to search the list instead: it stays open, enter
+# switches, esc closes. Set another shortcut here, e.g. "alt+q", or "" to turn
+# it off.
 # switch_hotkey = "alt+q"
-
-# The same list to search in, which stays open when you let go: type to filter,
-# enter switches, esc closes. Unset = alt+shift+\ (while holding the switcher,
-# add shift). "" turns it off.
-# switch_search_hotkey = "alt+shift+q"
 
 # Switch straight to a window by its number in that list: alt+shift+1 for the
 # first, up to 9. Set other modifiers here, e.g. "ctrl+shift", or "" to turn it

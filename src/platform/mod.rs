@@ -38,6 +38,18 @@ pub fn trim_memory() {
     windows::trim_memory();
 }
 
+/// A program's icon at about `size` pixels square: width, height and BGRA
+/// pixels with straight alpha (Windows only).
+pub fn app_icon(path: &std::path::Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
+    #[cfg(windows)]
+    return windows::app_icon(path, size);
+    #[cfg(not(windows))]
+    {
+        let _ = (path, size);
+        None
+    }
+}
+
 /// Another app's top-level window.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WindowRef(isize);

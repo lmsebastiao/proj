@@ -3,6 +3,7 @@
 //! drawing in `render`, and the list of keys in `shortcuts`.
 
 mod actions;
+mod app_icon;
 mod browse;
 mod editor_choice;
 mod items;
@@ -233,10 +234,7 @@ impl Palette {
                 // The project's own default first, then the global one, then the rest.
                 let own = self.open_with_project().and_then(|p| p.editor.clone());
                 let mut options: Vec<Editor> = own
-                    .map(|command| Editor {
-                        name: self.name_of(&command),
-                        command,
-                    })
+                    .map(|command| Editor::new(self.name_of(&command), command))
                     .into_iter()
                     .collect();
                 let global = self
@@ -244,10 +242,7 @@ impl Palette {
                     .editor
                     .clone()
                     .filter(|e| !e.trim().is_empty())
-                    .map(|command| Editor {
-                        name: self.name_of(&command),
-                        command,
-                    });
+                    .map(|command| Editor::new(self.name_of(&command), command));
                 for editor in global.into_iter().chain(editors::detected_editors(false)) {
                     if !options.iter().any(|o| o.command == editor.command) {
                         options.push(editor);

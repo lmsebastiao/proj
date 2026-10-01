@@ -12,6 +12,7 @@ use crate::{input, paths, store};
 use super::{
     Palette,
     actions::{ROW_ICONS, RowIcon},
+    app_icon::app_icon,
     items::*,
     keymap::*,
     secondary,
@@ -98,6 +99,17 @@ impl Palette {
             width: px(0.),
             theme: t,
         });
+        // The editor's or window's program icon. "Other…" and "No editor" get
+        // none, but keep the space.
+        let program = match self.list() {
+            List::Editors | List::OpenWith => Some(match &self.editors[m.ix] {
+                EditorOption::Detected(editor) => editor.app.clone(),
+                EditorOption::Browse | EditorOption::FileManager => None,
+            }),
+            List::Switch => Some(Some(self.windows[m.ix].exe.clone())),
+            _ => None,
+        }
+        .map(app_icon);
         // Pin, rename, remove and the actions menu: shown on the highlighted row,
         // and on any row the mouse is over.
         let icons = (self.list() == List::Projects).then(|| {
@@ -203,6 +215,7 @@ impl Palette {
                 })
                 .children(number)
                 .children(mark)
+                .children(program)
                 .child(
                     div()
                         .flex_1()
@@ -588,9 +601,12 @@ impl Render for Palette {
 
         div()
             .key_context("Palette")
-            // While the switcher is held open, a number switches to that window.
+            // While the switcher is held open, a number switches to that window
+            // and other keys start a search.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.switch_to_number(&event.keystroke.key, window, cx) {
+                if this.switch_to_number(&event.keystroke.key, window, cx)
+                    || this.type_in_switcher(&event.keystroke, window, cx)
+                {
                     cx.stop_propagation();
                 }
             }))

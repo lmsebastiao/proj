@@ -12,7 +12,23 @@ pub struct Editor {
     pub name: String,
     /// Value stored in `config.editor`: the bare name if it's on PATH, else a full path.
     pub command: String,
+    /// The program the command starts, for its icon (see [`app_path`]).
+    pub app: Option<PathBuf>,
 }
+
+impl Editor {
+    pub fn new(name: String, command: String) -> Self {
+        let app = app_path(&command);
+        Self { name, command, app }
+    }
+}
+
+/// GUI programs whose name differs from the command that opens them.
+pub const GUI_NAMES: &[(&str, &str)] = &[
+    ("codium", "vscodium"),
+    ("subl", "sublime_text"),
+    ("idea", "idea64"),
+];
 
 static DETECTED: Mutex<Option<Vec<Editor>>> = Mutex::new(None);
 
@@ -77,10 +93,7 @@ fn detect_editors() -> Vec<Editor> {
         if let Some(command) = command
             && !found.iter().any(|e| same_program(&e.command, &command))
         {
-            found.push(Editor {
-                name: name.into(),
-                command,
-            });
+            found.push(Editor::new(name.into(), command));
         }
     }
     found.extend(visual_studio());
@@ -122,10 +135,10 @@ fn visual_studio() -> Vec<Editor> {
                 } else {
                     version
                 };
-                found.push(Editor {
-                    name: format!("Visual Studio {year}"),
-                    command: devenv.to_string_lossy().into_owned(),
-                });
+                found.push(Editor::new(
+                    format!("Visual Studio {year}"),
+                    devenv.to_string_lossy().into_owned(),
+                ));
             }
         }
     }
@@ -145,6 +158,51 @@ pub fn editor_name(command: &str, detected: &[Editor]) -> String {
         .unwrap_or_else(|| editor_label(command))
 }
 
+/// The program an editor command starts, for its icon. Commands are often
+/// launchers inside the install (`bin\code.cmd`, `resources\app\bin\cursor.cmd`),
+/// so look a few folders up for the program of the same name, or its GUI name.
+pub fn app_path(command: &str) -> Option<PathBuf> {
+    if command.trim().is_empty() {
+        return None;
+    }
+    let path = which(command).unwrap_or_else(|| PathBuf::from(command));
+    if !cfg!(windows) {
+        return path.is_file().then_some(path);
+    }
+    let stem = path.file_stem()?.to_string_lossy().to_lowercase();
+    let names: Vec<&str> = GUI_NAMES
+        .iter()
+        .filter(|&&(cli, _)| cli == stem)
+        .map(|&(_, gui)| gui)
+        .chain([stem.as_str()])
+        .collect();
+    let is_exe = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    path.ancestors()
+        .skip(1)
+        .take(4)
+        .find_map(|dir| {
+            // Listed rather than joined, for the file's own casing ("Code.exe").
+            let files: Vec<PathBuf> = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            names.iter().find_map(|name| {
+                let exe = format!("{name}.exe");
+                files
+                    .iter()
+                    .find(|f| {
+                        f.file_name().is_some_and(|n| n.eq_ignore_ascii_case(&exe)) && f.is_file()
+                    })
+                    .cloned()
+            })
+        })
+        .or_else(|| (is_exe && path.is_file()).then_some(path))
+}
+
 pub fn same_program(a: &str, b: &str) -> bool {
     let resolve = |s: &str| which(s).unwrap_or_else(|| PathBuf::from(s));
     resolve(a) == resolve(b)
@@ -159,4 +217,35 @@ pub fn editor_label(command: &str) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| command.to_string())
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn finds_the_program_behind_a_launcher() {
+        let dir = std::env::temp_dir().join(format!("proj-app-{}", std::process::id()));
+        let file = |path: &str| {
+            let path = dir.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "").unwrap();
+            path
+        };
+        let cmd = file(r"VS Code\bin\code.cmd");
+        let exe = file(r"VS Code\Code.exe");
+        assert_eq!(app_path(&cmd.to_string_lossy()), Some(exe));
+        let cmd = file(r"cursor\resources\app\bin\cursor.cmd");
+        let exe = file(r"cursor\Cursor.exe");
+        assert_eq!(app_path(&cmd.to_string_lossy()), Some(exe));
+        let cmd = file(r"VSCodium\bin\codium.cmd");
+        let exe = file(r"VSCodium\VSCodium.exe");
+        assert_eq!(app_path(&cmd.to_string_lossy()), Some(exe), "by GUI name");
+        let cli = file(r"Zed\bin\zed.exe");
+        assert_eq!(app_path(&cli.to_string_lossy()), Some(cli), "itself");
+        let script = file(r"tools\edit.cmd");
+        assert_eq!(app_path(&script.to_string_lossy()), None);
+        fs::remove_dir_all(dir).ok();
+    }
 }

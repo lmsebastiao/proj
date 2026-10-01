@@ -331,3 +331,95 @@ pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
         && (!mods.contains(Modifiers::SHIFT) || down(VK_SHIFT))
         && (!mods.contains(Modifiers::SUPER) || down(VK_LWIN) || down(VK_RWIN))
 }
+
+/// A program's icon at about `size` pixels square: width, height and BGRA
+/// pixels with straight alpha. `None` if it has none.
+pub fn app_icon(path: &std::path::Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Graphics::Gdi::DeleteObject,
+        UI::{
+            Shell::SHDefExtractIconW,
+            WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO},
+        },
+    };
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut icon: HICON = std::ptr::null_mut();
+    // S_OK only: S_FALSE means the file has no icon.
+    let found =
+        unsafe { SHDefExtractIconW(wide.as_ptr(), 0, 0, &mut icon, std::ptr::null_mut(), size) }
+            == 0;
+    if !found || icon.is_null() {
+        return None;
+    }
+    let mut info = ICONINFO::default();
+    let pixels = (unsafe { GetIconInfo(icon, &mut info) } != 0).then(|| {
+        let (width, height, mut bgra) = bitmap_pixels(info.hbmColor)?;
+        // Old icons without alpha get it from their mask (black: opaque).
+        if bgra.as_chunks::<4>().0.iter().all(|p| p[3] == 0) {
+            let (_, _, mask) = bitmap_pixels(info.hbmMask)?;
+            if mask.len() == bgra.len() {
+                let pixels = bgra.as_chunks_mut::<4>().0.iter_mut();
+                for (p, m) in pixels.zip(mask.as_chunks::<4>().0) {
+                    p[3] = if m[0] == 0 { 255 } else { 0 };
+                }
+            }
+        }
+        Some((width, height, bgra))
+    });
+    unsafe {
+        DeleteObject(info.hbmColor);
+        DeleteObject(info.hbmMask);
+        DestroyIcon(icon);
+    }
+    pixels.flatten()
+}
+
+/// A bitmap's pixels as top-down 32-bit BGRA.
+fn bitmap_pixels(
+    bitmap: windows_sys::Win32::Graphics::Gdi::HBITMAP,
+) -> Option<(u32, u32, Vec<u8>)> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+        GetDIBits, GetObjectW,
+    };
+    if bitmap.is_null() {
+        return None;
+    }
+    let mut bm = BITMAP::default();
+    let got = unsafe { GetObjectW(bitmap, size_of::<BITMAP>() as i32, (&raw mut bm).cast()) };
+    if got == 0 {
+        return None;
+    }
+    let (width, height) = (bm.bmWidth, bm.bmHeight.abs());
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            // Negative: top-down rows.
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (width, height) = (u32::try_from(width).ok()?, u32::try_from(height).ok()?);
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let lines = unsafe {
+        let dc = CreateCompatibleDC(std::ptr::null_mut());
+        let lines = GetDIBits(
+            dc,
+            bitmap,
+            0,
+            height,
+            pixels.as_mut_ptr().cast(),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
+        DeleteDC(dc);
+        lines
+    };
+    (u32::try_from(lines).ok() == Some(height)).then_some((width, height, pixels))
+}

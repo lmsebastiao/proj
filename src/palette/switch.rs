@@ -1,16 +1,13 @@
 //! The window switcher: open editor windows, like Alt+Tab for your projects.
 //! It stays up while the shortcut's modifiers are held and letting go switches;
-//! opened with the search shortcut it stays up to type in instead.
+//! typing while holding them keeps it up to search in instead.
 
 use std::time::Duration;
 
 use global_hotkey::hotkey::Modifiers;
-use gpui::{Context, Pixels, SharedString, Window, div, prelude::*, px, rgb};
+use gpui::{Context, Keystroke, Pixels, SharedString, Window, div, prelude::*, px, rgb};
 
-use crate::{
-    launcher, platform, store,
-    switcher::{self, EditorWindow},
-};
+use crate::{launcher, platform, store, switcher::EditorWindow};
 
 use super::{
     Palette,
@@ -58,17 +55,16 @@ impl Render for DraggedWindow {
 }
 
 impl Palette {
-    /// The switcher, with `selected` highlighted: until `hold` is let go, or
-    /// with `None`, for searching until enter or esc.
+    /// The switcher, with `selected` highlighted, until `hold` is let go.
     pub fn switcher(
         window: &mut Window,
         cx: &mut Context<Self>,
         windows: Vec<EditorWindow>,
         selected: usize,
-        hold: Option<Modifiers>,
+        hold: Modifiers,
     ) -> Self {
         let mut this = Self::new(window, cx, windows);
-        this.hold = hold;
+        this.hold = Some(hold);
         this.set_mode(Mode::Switch, cx);
         this.selected = selected.min(this.matches.len().saturating_sub(1));
         this.set_switch_placeholder(cx);
@@ -76,35 +72,56 @@ impl Palette {
             .windows
             .is_empty()
             .then(|| "No editor windows are open".into());
-        if hold.is_some() {
-            this.wait_for_release(window, cx);
-        }
+        this.wait_for_release(window, cx);
         this
     }
 
-    /// The search shortcut while the switcher is up: keep it open to type in.
-    /// Returns false when the palette isn't the switcher.
-    pub fn start_search(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.mode != Mode::Switch {
-            return false;
-        }
+    /// Stops waiting for the modifiers to be let go: the switcher stays open
+    /// to search in until enter or esc.
+    fn keep_open(&mut self, cx: &mut Context<Self>) {
         self.hold = None;
         self.set_switch_placeholder(cx);
         cx.notify();
-        true
     }
 
     fn set_switch_placeholder(&mut self, cx: &mut Context<Self>) {
-        let placeholder = match (self.hold, self.config.switch_search_hotkey()) {
-            (Some(_), Some(search)) => format!(
-                "Let go to switch · {} to search",
-                switcher::shortcut_label(&search)
-            ),
-            (Some(_), None) => "Let go to switch".into(),
-            (None, _) => "Search open windows…".into(),
+        let placeholder = if self.hold.is_some() {
+            "Let go to switch · type to search"
+        } else {
+            "Search open windows…"
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
+    }
+
+    /// A key typed in the switcher. Typed with alt, as it is while holding the
+    /// switcher open, it wouldn't reach the search box by itself, so it's typed
+    /// here; the first one keeps the switcher open to search in. Returns
+    /// whether the key was typed.
+    pub(super) fn type_in_switcher(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.mode != Mode::Switch || (self.hold.is_none() && !keystroke.modifiers.alt) {
+            return false;
+        }
+        // Not keys like "up" or "f1", nor space or tab.
+        let text = keystroke
+            .key_char
+            .clone()
+            .or_else(|| (keystroke.key.chars().count() == 1).then(|| keystroke.key.clone()))
+            .filter(|text| text.chars().all(|c| !c.is_whitespace() && !c.is_control()));
+        let Some(text) = text else {
+            return false;
+        };
+        if self.hold.is_some() {
+            self.keep_open(cx);
+        }
+        self.input
+            .update(cx, |input, cx| input.insert(&text, window, cx));
+        true
     }
 
     fn wait_for_release(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -127,7 +144,7 @@ impl Palette {
                     }
                     // Let go while dragging a row: keep the list open to drop it.
                     if cx.has_active_drag() {
-                        this.start_search(cx);
+                        this.keep_open(cx);
                         return true;
                     }
                     this.hold = None;

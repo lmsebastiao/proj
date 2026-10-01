@@ -76,7 +76,8 @@ move the cursor while you edit a search.
 
 Hold **alt** and tap **\\** to switch between your open editor windows, like Alt+Tab but only
 for editors. It's the \\ key wherever your layout has it: left of 1 on Portuguese keyboards,
-above enter on US ones. Keep tapping to move down the list; **alt+↑** goes back up, and a
+above enter on US ones. Keep tapping to move down the list; **alt+shift+\\** or **alt+↑** goes
+back up, and a
 number (**alt+1** to **9**) switches straight to that window. Let go of alt and the highlighted
 window comes to the front. The list shows as soon as you press the key, like Alt+Tab; a quick
 tap switches to the editor window you used before. **alt-esc** cancels.
@@ -88,9 +89,9 @@ another; a line shows where it will go. It keeps that place (and number) until i
 Dragging works while the list shows every window, not while you're searching it. If you let
 go of alt mid-drag, the list stays open so you can drop the row.
 
-Press **alt+shift+\\** to search instead: the same list, but it stays open, typing filters it,
-**enter** switches and **esc** closes. While holding the switcher open, adding shift turns it
-into a search. From the project search, typing `@` gets you the same list.
+To search instead, start typing while you still hold alt: the list stays open when you let
+go, typing filters it, **enter** switches and **esc** closes. From the project search, typing
+`@` gets you the same list.
 
 **alt+shift+1** to **9** switch straight to that window in the list, without showing it,
 like Win+1 on the taskbar. The list numbers its first nine windows, and since it keeps its
@@ -103,8 +104,8 @@ project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed 
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
 title. Projects with a window open get an **open** badge in the normal list.
 
-`switch_hotkey` and `switch_search_hotkey` in config.toml set other shortcuts, e.g. `"alt+q"`.
-Set one to `""` to turn it off. Windows only.
+`switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`, or `""` turns the
+switcher off. Windows only.
 
 ### Opening projects together
 
@@ -167,9 +168,7 @@ proj version        # show the installed version
 
 ```toml
 hotkey = "alt+space"
-# switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
-# switch_search_hotkey = "alt+shift+q"  # searching switcher; default alt+shift+\
-# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that window; default alt+shift
+# switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that window; default alt+shift
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day

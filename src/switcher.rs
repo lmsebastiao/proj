@@ -18,6 +18,8 @@ pub struct EditorWindow {
     pub title: String,
     /// e.g. "Zed", "Visual Studio Code".
     pub editor: String,
+    /// The program that owns it, for its icon.
+    pub exe: PathBuf,
     /// Lowercase program name, e.g. "zed", "devenv".
     process: String,
 }
@@ -45,13 +47,6 @@ pub fn shortcut_label(shortcut: &str) -> String {
     }
 }
 
-/// GUI programs whose name differs from the command that opens them.
-const GUI_NAMES: &[(&str, &str)] = &[
-    ("codium", "vscodium"),
-    ("subl", "sublime_text"),
-    ("idea", "idea64"),
-];
-
 /// Windows of the detected and configured editors, front to back.
 pub fn editor_windows(config: &Config, db: &Db) -> Vec<EditorWindow> {
     let detected = editors::detected_editors(false);
@@ -77,6 +72,7 @@ pub fn editor_windows(config: &Config, db: &Db) -> Vec<EditorWindow> {
                 window: window.window,
                 title: window.title,
                 editor,
+                exe: window.exe,
                 process,
             })
         })
@@ -92,7 +88,7 @@ fn editor_of(exe: &Path, process: &str, known: &[(PathBuf, String)]) -> Option<S
         .filter(|(command, _)| {
             let name = stem(command);
             name == process
-                || GUI_NAMES
+                || editors::GUI_NAMES
                     .iter()
                     .any(|&(cli, gui)| cli == name && gui == process)
         })
