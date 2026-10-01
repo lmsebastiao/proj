@@ -656,6 +656,8 @@ impl Palette {
         }
         // Put the newly added projects first so they can be opened right away.
         self.projects.sort_by_key(|p| !added.contains(&p.path));
+        // `window_projects` points into the old order.
+        self.match_windows();
         self.refilter(cx);
         let added = match added.as_slice() {
             [one] => format!("Added {}", paths::display_path(one)),

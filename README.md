@@ -67,7 +67,11 @@ tags, open the repository page, its pull requests or its CI runs, copy the clone
 what its git site runs, copy the path, start a new project from it, remove. Each shows its own key, if it has one. Type to filter it and press
 enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
 highlighted row, and any row under the mouse, also has a **⋯** icon (the same menu) and a
-pin. Pinned projects stay on top and keep their pin showing.
+pin. Pinned projects keep their pin showing.
+
+With nothing typed, the projects with an editor window open come first: the one you were
+in when you pressed the shortcut, then the others, the one used last first. Then the pinned
+ones, then the rest, the one opened last first. Lines separate the three.
 
 **f2** renames a project; renaming to an empty name goes back to the folder name.
 **shift-delete** removes it, only from the list, as the folder isn't touched. The footer

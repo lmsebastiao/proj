@@ -346,6 +346,56 @@ impl Palette {
         }
         self.apps = apps;
         self.match_windows();
+        self.open_first();
+    }
+
+    /// Puts the projects with an editor window open first: the one in view
+    /// (its window was in front when the palette opened), then the others,
+    /// the one used last first. The rest keep their order: pinned, then
+    /// recently opened.
+    fn open_first(&mut self) {
+        // Per project, its best window: in front first, then by recent use.
+        let mut rank: HashMap<usize, (bool, usize)> = HashMap::new();
+        for (w, project) in self.window_projects.iter().enumerate() {
+            let Some(project) = *project else {
+                continue;
+            };
+            let (front, z) = self.windows[w].rank();
+            let this = (!front, z);
+            rank.entry(project)
+                .and_modify(|best| *best = (*best).min(this))
+                .or_insert(this);
+        }
+        if rank.is_empty() {
+            return;
+        }
+        let mut order: Vec<usize> = (0..self.projects.len()).collect();
+        // Projects without a window last, in the order they were in.
+        let last = (true, usize::MAX);
+        order.sort_by_key(|&ix| (rank.get(&ix).copied().unwrap_or(last), ix));
+        let mut slots: Vec<Option<Project>> = std::mem::take(&mut self.projects)
+            .into_iter()
+            .map(Some)
+            .collect();
+        self.projects = order
+            .into_iter()
+            .filter_map(|ix| slots[ix].take())
+            .collect();
+        // `window_projects` points into the old order.
+        self.match_windows();
+    }
+
+    /// The group a project is in while the list shows them all in order,
+    /// for the lines between groups: open, pinned, the rest.
+    fn project_group(&self, ix: usize) -> u8 {
+        let project = &self.projects[ix];
+        if self.open_keys.contains(&project.key()) {
+            0
+        } else if project.pinned {
+            1
+        } else {
+            2
+        }
     }
 
     /// Shows the last known `git status` of each repository straight away,

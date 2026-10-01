@@ -343,13 +343,12 @@ impl Palette {
                 }))
         });
 
-        // A line between the pinned projects and the rest, while the list
-        // shows them all in order.
+        // A line between the open projects, the pinned ones and the rest,
+        // while the list shows them all in order.
         let after_pins = is_projects
             && self.filter_query().is_empty()
             && row > 0
-            && !pinned
-            && self.projects[self.matches[row - 1].ix].pinned;
+            && self.project_group(m.ix) != self.project_group(self.matches[row - 1].ix);
 
         // uniform_list lays each row out on its own, so both levels need an explicit width.
         div()
