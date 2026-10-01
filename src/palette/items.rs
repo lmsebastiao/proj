@@ -142,12 +142,15 @@ pub(super) struct Match {
 pub(super) struct Meta {
     pub(super) top: Option<(String, u32)>,
     pub(super) bottom: Option<String>,
+    /// What it means, shown when the mouse rests on it.
+    pub(super) tip: Option<String>,
 }
 
 impl Meta {
     const NONE: Self = Self {
         top: None,
         bottom: None,
+        tip: None,
     };
 }
 
@@ -431,6 +434,31 @@ impl Palette {
         Some(format!("{branch}{status}"))
     }
 
+    /// What the marks after a branch mean, when it has any.
+    fn branch_tip(&self, project: &Project) -> Option<String> {
+        let status = self.git_status.get(&project.path)?;
+        let commits = |n: u32| if n == 1 { "commit" } else { "commits" };
+        let mut parts = Vec::new();
+        if status.dirty {
+            parts.push("● uncommitted changes".to_string());
+        }
+        if status.ahead > 0 {
+            parts.push(format!(
+                "↑{} {} to push",
+                status.ahead,
+                commits(status.ahead)
+            ));
+        }
+        if status.behind > 0 {
+            parts.push(format!(
+                "↓{} {} to pull (as of the last fetch)",
+                status.behind,
+                commits(status.behind)
+            ));
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     /// Right-hand details: branch, own editor and last opened for projects;
     /// which editor is the default in the editor lists.
     pub(super) fn item_meta(&self, ix: usize, now: u64) -> Meta {
@@ -438,9 +466,21 @@ impl Palette {
             List::Projects => {
                 let project = &self.projects[ix];
                 if project.missing {
+                    let gone = project
+                        .paths()
+                        .into_iter()
+                        .find(|p| !p.is_dir())
+                        .unwrap_or_else(|| project.path.clone());
                     return Meta {
                         top: Some(("missing".into(), self.theme.danger)),
                         bottom: Some("its folder is gone".into()),
+                        tip: Some(format!(
+                            "{} isn't there: moved, deleted, or on a drive that isn't \
+                             connected. Remove it with {}-k, or every missing one with > \
+                             Remove missing projects.",
+                            paths::display_path(&gone),
+                            secondary()
+                        )),
                     };
                 }
                 // Only projects with their own default name it; the rest use the global one.
@@ -451,6 +491,7 @@ impl Palette {
                 Meta {
                     top: self.branch_label(project).map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
+                    tip: self.branch_tip(project),
                 }
             }
             List::OpenWith => {
@@ -471,6 +512,7 @@ impl Palette {
                 Meta {
                     top: role.map(|r| (r.to_string(), self.theme.accent)),
                     bottom: None,
+                    tip: None,
                 }
             }
             List::Editors => {
@@ -479,6 +521,7 @@ impl Palette {
                 Meta {
                     top: current.then(|| ("default".to_string(), self.theme.accent)),
                     bottom: None,
+                    tip: None,
                 }
             }
             // Folders get a hint that → goes inside.
@@ -489,6 +532,7 @@ impl Palette {
                     .filter(|b| b.entries[ix].is_dir)
                     .map(|_| ("→".to_string(), self.theme.muted)),
                 bottom: None,
+                tip: None,
             },
             List::Switch => {
                 let row = &self.switch_rows[ix];
@@ -509,6 +553,16 @@ impl Palette {
                         let more = if row.len() > 1 { " · →" } else { "" };
                         format!("{}{more}", editors.join(", "))
                     }),
+                    tip: match project {
+                        Some(p) if row.len() > 1 && !expanded => Some(format!(
+                            "{} windows of {}: ↵ switches to the one you used last, → lists \
+                             them",
+                            row.len(),
+                            p.name
+                        )),
+                        Some(p) => self.branch_tip(p),
+                        None => None,
+                    },
                 }
             }
             // The action's own shortcut, where it has one.
@@ -534,6 +588,7 @@ impl Palette {
                 Meta {
                     top: key.map(|k| (k, self.theme.muted)),
                     bottom: None,
+                    tip: None,
                 }
             }
             List::Templates => Meta {
@@ -545,6 +600,7 @@ impl Palette {
                     self.theme.muted,
                 )),
                 bottom: None,
+                tip: None,
             },
             List::Commands | List::Text => Meta::NONE,
         }

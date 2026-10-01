@@ -19,6 +19,7 @@ use super::{
     shortcuts::Shortcut,
     switch::DraggedWindow,
     theme::*,
+    tooltip::tooltip,
 };
 
 /// The group of a list row, so its icons can show while the mouse is over it.
@@ -142,6 +143,7 @@ impl Palette {
                 .text_size(px(12.))
                 .text_color(rgb(t.muted))
                 .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.danger)))
+                .tooltip(tooltip(format!("Close the window · {}-w", secondary()), t))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     // Not also a click on the row, which switches to it.
@@ -171,8 +173,17 @@ impl Palette {
                         RowIcon::Remove => (icons::REMOVE, if armed { t.danger } else { t.muted }),
                         RowIcon::More => (icons::MORE, t.muted),
                     };
+                    let tip = match icon {
+                        RowIcon::Pin if pinned => "Unpin: back into the recent order".to_string(),
+                        RowIcon::Pin => "Pin: keep it at the top".into(),
+                        RowIcon::Rename => "Rename… (search still finds it by its folder)".into(),
+                        RowIcon::Remove if armed => "Click again to remove it".into(),
+                        RowIcon::Remove => "Remove from the list (the folder stays)".into(),
+                        RowIcon::More => format!("All actions · {}-k", secondary()),
+                    };
                     div()
                         .id((icon.id(), row))
+                        .tooltip(tooltip(tip, t))
                         .size(px(28.))
                         .rounded_md()
                         .flex()
@@ -299,6 +310,7 @@ impl Palette {
                     };
                     d.child(
                         div()
+                            .id(("meta", row))
                             .flex_none()
                             .max_w(px(280.))
                             .flex()
@@ -306,7 +318,9 @@ impl Palette {
                             .items_end()
                             .text_size(px(SMALL_FONT_SIZE))
                             .children(meta.top.map(|(text, color)| line(text, color)))
-                            .children(meta.bottom.map(|text| line(text, t.muted))),
+                            .children(meta.bottom.map(|text| line(text, t.muted)))
+                            // What the branch's marks, "missing" or "· →" mean.
+                            .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
                     )
                 })
                 .children(close),
@@ -358,9 +372,6 @@ impl Palette {
                     let title_hl: Vec<_> = ranges(&title, &m.title_hl)
                         .map(|r| (r, highlight))
                         .collect();
-                    let subtitle_hl: Vec<_> = ranges(&subtitle, &m.subtitle_hl)
-                        .map(|r| (r, highlight))
-                        .collect();
                     div()
                         .id(("action", row))
                         .mx_2()
@@ -368,8 +379,10 @@ impl Palette {
                         .rounded_md()
                         .flex()
                         .flex_col()
-                        .when(selected, |d| d.bg(rgb(t.selected)).pb_1())
+                        .when(selected, |d| d.bg(rgb(t.selected)))
                         .hover(|d| d.bg(rgb(t.selected)))
+                        // What it does, when the mouse rests on it.
+                        .when(!subtitle.is_empty(), |d| d.tooltip(tooltip(subtitle, t)))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.selected = row;
@@ -417,19 +430,6 @@ impl Palette {
                                         .child(text)
                                 })),
                         )
-                        // Under the icon's column: 18px and the gap.
-                        .when(selected && !subtitle.is_empty(), |d| {
-                            d.child(
-                                div()
-                                    .pl(px(30.))
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(SMALL_FONT_SIZE))
-                                    .text_color(rgb(t.muted))
-                                    .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
-                            )
-                        })
                         .into_any_element()
                 }
             })
@@ -778,14 +778,24 @@ impl Render for Palette {
                 .child(label)
         };
         let shortcuts = self.shortcuts();
+        // Each says in full what it does when the mouse rests on it.
         let mut hints: Vec<AnyElement> = shortcuts
             .iter()
-            .filter_map(|s| Some(hint(s.keys[0].clone(), s.footer?).into_any_element()))
+            .enumerate()
+            .filter_map(|(ix, s)| {
+                Some(
+                    hint(s.keys[0].clone(), s.footer?)
+                        .id(("hint", ix))
+                        .tooltip(tooltip(s.action, t))
+                        .into_any_element(),
+                )
+            })
             .collect();
         // The rest are in the dropdown, opened by F1 or by clicking this.
         let more = shortcuts.iter().any(|s| s.footer.is_none()).then(|| {
             hint("f1".into(), "all keys")
                 .id("all-keys")
+                .tooltip(tooltip("Every key of this list; click one to run it", t))
                 .cursor_pointer()
                 .hover(|d| d.text_color(rgb(t.text)))
                 .when(self.show_shortcuts, |d| d.text_color(rgb(t.accent)))

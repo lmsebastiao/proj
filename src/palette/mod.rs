@@ -13,6 +13,7 @@ mod render;
 mod shortcuts;
 mod switch;
 mod theme;
+mod tooltip;
 
 use std::{
     collections::{HashMap, HashSet},
