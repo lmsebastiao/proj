@@ -72,7 +72,6 @@ pub fn run(args: &[String]) -> i32 {
             }
             let key = path.to_string_lossy();
             db.names.remove(key.as_ref());
-            db.pinned.remove(key.as_ref());
             db.editors.remove(key.as_ref());
             db.opened.remove(key.as_ref());
             db.tags.remove(key.as_ref());
@@ -187,7 +186,7 @@ fn best_match<'a>(query: &str, projects: &'a [Project]) -> Option<&'a Project> {
             &project.location(),
             project.search_boost(),
         );
-        // Strictly greater, so ties go to the earlier (pinned, recent) entry.
+        // Strictly greater, so ties go to the earlier (recent) entry.
         if let Some(m) = m.filter(|m| best.is_none_or(|(score, _)| m.score > score)) {
             best = Some((m.score, project));
         }
@@ -231,7 +230,7 @@ mod tests {
             "a missing one can't be opened"
         );
 
-        // Equal scores: the earlier entry (the list is sorted pinned/recent first) wins.
+        // Equal scores: the earlier entry (the list is sorted recent first) wins.
         projects.insert(0, project("api", "/other/api"));
         assert_eq!(
             best_match("api", &projects).unwrap().path,

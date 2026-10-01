@@ -28,10 +28,9 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-1 … 9, alt-1 … 9   | open the project in that place (hold ctrl or alt a moment to see the numbers) |
 | enter                   | open in editor                             |
 | ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
-| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, remove, and the ones below |
+| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: rename, tags, remove, and the ones below |
 | ctrl-r / alt-r          | its commands to run: package.json scripts and your own (see Commands) |
 | f2                      | rename                                     |
-| ctrl-shift-p / alt-p    | pin / unpin                                |
 | shift-delete            | remove from the list (the folder stays)    |
 | ctrl-z                  | put back the project just removed          |
 | ctrl-t / alt-t          | open a terminal there (Windows Terminal if installed) |
@@ -62,16 +61,15 @@ Esc or typing closes it.
 
 **ctrl-k** (or alt-k, handy right after alt+space; shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
 at the bottom right, with everything you can do with the highlighted project: open with,
-show in Explorer, terminal, run a command (the ctrl-r menu, see Commands), pin, rename,
+show in Explorer, terminal, run a command (the ctrl-r menu, see Commands), rename,
 tags, open the repository page, its pull requests or its CI runs, copy the clone URL, change
 what its git site runs, copy the path, start a new project from it, remove. Each shows its own key, if it has one. Type to filter it and press
 enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
-highlighted row, and any row under the mouse, also has a **⋯** icon (the same menu) and a
-pin. Pinned projects keep their pin showing.
+highlighted row, and any row under the mouse, also has a **⋯** icon that opens the same menu.
 
 With nothing typed, the projects with an editor window open come first: the one you were
-in when you pressed the shortcut, then the others, the one used last first. Then the pinned
-ones, then the rest, the one opened last first. Lines separate the three.
+in when you pressed the shortcut, then the others, the one used last first. Then the rest,
+the one opened last first, under a line.
 
 **f2** renames a project; renaming to an empty name goes back to the folder name.
 **shift-delete** removes it, only from the list, as the folder isn't touched. The footer
@@ -162,7 +160,7 @@ tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Co
 Esc clears the marks.
 
 The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
-history, pin and editor list, so next time you just search for it. Removing it (shift-delete or ctrl-k)
+history and editor list, so next time you just search for it. Removing it (shift-delete or ctrl-k)
 forgets the combination, not the projects. Folders are passed in the order you marked them.
 Rename it (f2 or ctrl-k) to give it a shorter name; search still finds it by its
 folder names too.

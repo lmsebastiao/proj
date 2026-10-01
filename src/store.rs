@@ -16,7 +16,7 @@ use crate::{
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
 ///
-/// `names`, `pinned`, `editors`, `opened`, `tags` and `commands` are keyed by
+/// `names`, `editors`, `opened`, `tags` and `commands` are keyed by
 /// [`Project::key`]: the folder path for a project, or all folder paths joined
 /// with `|` for a workspace.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -28,8 +28,6 @@ pub struct Db {
     pub workspaces: Vec<Vec<PathBuf>>,
     /// Entry -> name given with F2, shown instead of the folder name(s).
     pub names: BTreeMap<String, String>,
-    /// Always listed first.
-    pub pinned: BTreeSet<String>,
     /// Entry -> its own default editor. Missing = the global editor.
     ///
     /// Stored as a one-item list: older versions kept a list of editors here
@@ -54,7 +52,6 @@ pub struct Project {
     /// A workspace's other folders.
     pub extra: Vec<PathBuf>,
     pub branch: Option<String>,
-    pub pinned: bool,
     /// This entry's own default editor; `None` = the global one.
     pub editor: Option<String>,
     pub manual: bool,
@@ -90,9 +87,9 @@ impl Project {
             .join(" + ")
     }
 
-    /// Search bonus so pinned and recently used entries win ties.
+    /// Search bonus so entries opened before win ties.
     pub fn search_boost(&self) -> i32 {
-        (i32::from(self.pinned) + i32::from(self.last_opened > 0)) * 8
+        i32::from(self.last_opened > 0) * 8
     }
 
     /// Whether it has a tag starting with each of `prefixes` (lowercase).
@@ -159,7 +156,6 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         projects.push(Project {
             name,
             branch: (!missing).then(|| git::git_branch(&path)).flatten(),
-            pinned: db.pinned.contains(&key),
             editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
             last_opened: db.opened.get(&key).copied().unwrap_or(0),
             tags: db
@@ -210,7 +206,6 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     projects.sort_by(|a, b| {
         a.missing
             .cmp(&b.missing)
-            .then_with(|| b.pinned.cmp(&a.pinned))
             .then_with(|| b.last_opened.cmp(&a.last_opened))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -292,7 +287,6 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
         db.hidden.insert(project.path.clone());
     }
     db.names.remove(&key);
-    db.pinned.remove(&key);
     db.editors.remove(&key);
     db.opened.remove(&key);
     db.tags.remove(&key);
@@ -605,11 +599,10 @@ mod tests {
             ..Db::default()
         };
         let mut app = project("/a/app");
-        db.pinned.insert(app.key());
         db.opened.insert(app.key(), 5);
         forget_entry(&mut db, &app);
         assert_eq!(db.manual, [PathBuf::from("/a/web")]);
-        assert!(db.pinned.is_empty() && db.opened.is_empty());
+        assert!(db.opened.is_empty());
 
         // Scanned projects are hidden instead, so a rescan doesn't bring them back.
         app.manual = false;

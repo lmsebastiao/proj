@@ -12,7 +12,7 @@ use crate::{input, paths, store, templates::Template};
 
 use super::{
     Palette,
-    actions::{ActionEntry, MenuKind, ROW_ICONS, RowIcon},
+    actions::{ActionEntry, MenuKind},
     app_icon::{self, app_icon},
     items::*,
     keymap::*,
@@ -221,7 +221,6 @@ impl Palette {
             .map(|r| (r, highlight))
             .collect();
         let is_projects = self.list() == List::Projects;
-        let pinned = is_projects && self.projects[m.ix].pinned;
         // Projects with an editor window open (the switcher lists those).
         let open = is_projects && self.open_keys.contains(&self.projects[m.ix].key());
         // A switcher row's number, for the number keys while holding the
@@ -296,66 +295,51 @@ impl Palette {
                 })
                 .child(icons::CLOSE)
         });
-        // The actions menu and pin: shown on the highlighted row and on any
-        // row the mouse is over; a pinned project's pin always shows.
-        let icons = is_projects.then(|| {
+        // The actions menu: shown on the highlighted row and on any row the
+        // mouse is over.
+        let more = is_projects.then(|| {
             div()
-                .flex()
+                .id(("more", row))
                 .flex_none()
-                .gap_1()
-                .children(ROW_ICONS.map(|icon| {
-                    let (glyph, color) = match icon {
-                        RowIcon::Pin if pinned => (icons::PINNED, t.accent),
-                        RowIcon::Pin => (icons::PIN, t.muted),
-                        RowIcon::More => (icons::MORE, t.muted),
-                    };
-                    let m = secondary();
-                    let tip = match icon {
-                        RowIcon::Pin if pinned => {
-                            format!("Unpin: back into the recent order · {m}-shift-p")
-                        }
-                        RowIcon::Pin => format!("Pin: keep it at the top · {m}-shift-p"),
-                        RowIcon::More => format!("All actions · {m}-k or right-click"),
-                    };
-                    let always = icon == RowIcon::Pin && pinned;
-                    div()
-                        .id((icon.id(), row))
-                        .tooltip(tooltip(tip, t))
-                        .size(px(28.))
-                        .rounded_md()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
-                        .text_size(px(14.))
-                        .text_color(rgb(color))
-                        .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.text)))
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            // Not also a click on the row, which opens the project.
-                            cx.stop_propagation();
-                            this.click_row_icon(row, icon, cx);
-                        }))
-                        .when(!selected && !always, |d| {
-                            d.invisible().group_hover(ROW_GROUP, |s| s.visible())
-                        })
-                        .child(glyph)
+                .tooltip(tooltip(
+                    format!("All actions · {}-k or right-click", secondary()),
+                    t,
+                ))
+                .size(px(28.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                .text_size(px(14.))
+                .text_color(rgb(t.muted))
+                .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.text)))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not also a click on the row, which opens the project.
+                    cx.stop_propagation();
+                    this.actions_for_row(row, cx);
                 }))
+                .when(!selected, |d| {
+                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
+                })
+                .child(icons::MORE)
         });
 
-        // A line between the open projects, the pinned ones and the rest,
-        // while the list shows them all in order.
-        let after_pins = is_projects
+        // A line between the projects with a window open and the rest, while
+        // the list shows them all in order.
+        let after_open = is_projects
             && self.filter_query().is_empty()
             && row > 0
-            && self.project_group(m.ix) != self.project_group(self.matches[row - 1].ix);
+            && self.is_open(self.matches[row - 1].ix)
+            && !self.is_open(m.ix);
 
         // uniform_list lays each row out on its own, so both levels need an explicit width.
         div()
             .w_full()
             .px_2()
             .relative()
-            .when(after_pins, |d| {
+            .when(after_open, |d| {
                 d.child(
                     div()
                         .absolute()
@@ -395,7 +379,7 @@ impl Palette {
                         d.on_mouse_down(
                             MouseButton::Right,
                             cx.listener(move |this, _, _, cx| {
-                                this.click_row_icon(row, RowIcon::More, cx);
+                                this.actions_for_row(row, cx);
                             }),
                         )
                     })
@@ -489,7 +473,7 @@ impl Palette {
                                 .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
                         )
                     })
-                    .children(icons)
+                    .children(more)
                     .children(close),
             )
     }
@@ -500,7 +484,6 @@ impl Palette {
     /// `uniform_list`, as the headings make rows differ in height.
     fn render_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = self.theme;
-        let pinned = self.actions_project().is_some_and(|p| p.pinned);
         let highlight = HighlightStyle {
             color: Some(rgb(t.accent).into()),
             font_weight: Some(FontWeight::BOLD),
@@ -574,7 +557,7 @@ impl Palette {
                                 .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
                                 .text_size(px(14.))
                                 .text_color(rgb(icon_color))
-                                .child(action.icon(pinned)),
+                                .child(action.icon()),
                         )
                         .child(
                             div()
@@ -1367,12 +1350,6 @@ impl Render for Palette {
                 if this.list() == List::Projects {
                     this.close_menu(cx);
                     this.rename(cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &TogglePin, _, cx| {
-                if this.list() == List::Projects {
-                    this.close_menu(cx);
-                    this.toggle_pin(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenConfig, window, cx| {

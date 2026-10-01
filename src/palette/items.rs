@@ -68,7 +68,6 @@ pub(super) enum ProjectAction {
     /// Runs `Palette::tasks[i]` in a terminal in the project's folder.
     Run(usize),
     AddCommand,
-    TogglePin,
     Rename,
     Tags,
     CopyPath,
@@ -305,7 +304,6 @@ impl Palette {
 
     pub(super) fn action_text(&self, action: ProjectAction) -> (String, String) {
         let project = self.actions_project();
-        let pinned = project.is_some_and(|p| p.pinned);
         let (title, subtitle): (String, String) = match action {
             ProjectAction::OpenWith => (
                 "Open with…".into(),
@@ -346,10 +344,6 @@ impl Palette {
                 "Add a command…".into(),
                 "To run in a terminal there from this menu, e.g. npm run dev".into(),
             ),
-            ProjectAction::TogglePin if pinned => {
-                ("Unpin".into(), "Back into the recent order".into())
-            }
-            ProjectAction::TogglePin => ("Pin".into(), "Pinned projects stay on top".into()),
             ProjectAction::Rename => (
                 "Rename…".into(),
                 "A shorter name; search still finds it by its folder".into(),
@@ -622,7 +616,6 @@ impl Palette {
             ProjectAction::Commands => Some(format!("{m}-r")),
             ProjectAction::CopyPath => Some(format!("{m}-c")),
             ProjectAction::RepoPage => Some(format!("{m}-g")),
-            ProjectAction::TogglePin => Some(format!("{m}-shift-p")),
             ProjectAction::Rename => Some("f2".into()),
             ProjectAction::Remove => Some("shift-del".into()),
             ProjectAction::Tags => self

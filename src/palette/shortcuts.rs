@@ -120,7 +120,7 @@ impl Palette {
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(
                         &["mod-k", "shift-f10", "right-click"],
-                        "Actions: pin, rename, tags, commands to run, remove…",
+                        "Actions: rename, tags, open with, the repository's pages, remove…",
                     )
                     .or_alt()
                     .footer("Actions")
@@ -139,9 +139,6 @@ impl Palette {
                     s(&["→"], "Browse its files and folders"),
                     s(&["tab", "shift-tab"], "Mark to open several in one window").run(ToggleMark),
                     s(&["f2"], "Rename… (search still finds it by its folder)").run(RenameItem),
-                    s(&["mod-shift-p"], "Pin to the top, or unpin")
-                        .or_alt()
-                        .run(TogglePin),
                     s(&["shift-del"], "Remove from the list (the folder stays)").run(RemoveItem),
                     s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
                     s(&["mod-e"], reveal).or_alt().run(ShowInFileManager),

@@ -351,8 +351,8 @@ impl Palette {
 
     /// Puts the projects with an editor window open first: the one in view
     /// (its window was in front when the palette opened), then the others,
-    /// the one used last first. The rest keep their order: pinned, then
-    /// recently opened.
+    /// the one used last first. The rest keep their order: the one opened
+    /// last first.
     fn open_first(&mut self) {
         // Per project, its best window: in front first, then by recent use.
         let mut rank: HashMap<usize, (bool, usize)> = HashMap::new();
@@ -385,17 +385,10 @@ impl Palette {
         self.match_windows();
     }
 
-    /// The group a project is in while the list shows them all in order,
-    /// for the lines between groups: open, pinned, the rest.
-    fn project_group(&self, ix: usize) -> u8 {
-        let project = &self.projects[ix];
-        if self.open_keys.contains(&project.key()) {
-            0
-        } else if project.pinned {
-            1
-        } else {
-            2
-        }
+    /// Whether a project has an editor window open, for the line between
+    /// those and the rest while the list shows them all in order.
+    fn is_open(&self, ix: usize) -> bool {
+        self.open_keys.contains(&self.projects[ix].key())
     }
 
     /// Shows the last known `git status` of each repository straight away,
@@ -945,7 +938,7 @@ impl Palette {
         .detach();
     }
 
-    /// A passing message in the footer, e.g. "Pinned proj", gone after a few
+    /// A passing message in the footer, e.g. "Renamed to proj", gone after a few
     /// seconds (unless another message took its place).
     fn notice(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.show_status(text, false, false, Some(Duration::from_secs(4)), cx);

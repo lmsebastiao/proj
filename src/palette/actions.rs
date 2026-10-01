@@ -1,6 +1,5 @@
 //! A project's menus, which open over the list with a search box of their
-//! own: its actions (ctrl-k) and its commands to run (ctrl-r); and the icons
-//! on the highlighted row.
+//! own: its actions (ctrl-k) and its commands to run (ctrl-r).
 
 use gpui::{Context, Window};
 
@@ -18,29 +17,6 @@ use super::{
     keymap::{CopyPath, OpenRemote},
     theme::icons,
 };
-
-/// The icons on a project row. The rest (rename, remove…) are keys and menu
-/// entries: an icon there was one stray click from opening the project.
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum RowIcon {
-    Pin,
-    /// Opens the actions menu.
-    More,
-}
-
-/// Left to right. Rows that aren't highlighted still show a pinned
-/// project's pin.
-pub(super) const ROW_ICONS: [RowIcon; 2] = [RowIcon::More, RowIcon::Pin];
-
-impl RowIcon {
-    /// For the icon's element id, with the row number.
-    pub(super) fn id(self) -> &'static str {
-        match self {
-            Self::Pin => "pin",
-            Self::More => "more",
-        }
-    }
-}
 
 /// Which of a project's menus is open.
 #[derive(Clone, Copy, PartialEq)]
@@ -81,16 +57,14 @@ pub(super) enum ActionEntry {
 }
 
 impl ProjectAction {
-    /// Its glyph in the icon font. `pinned`: the project is.
-    pub(super) fn icon(self, pinned: bool) -> &'static str {
+    /// Its glyph in the icon font.
+    pub(super) fn icon(self) -> &'static str {
         match self {
             Self::OpenWith => icons::OPEN_WITH,
             Self::ShowInFileManager => icons::FOLDER,
             Self::Terminal => icons::TERMINAL,
             Self::Commands | Self::Run(_) => icons::RUN,
             Self::AddCommand => icons::ADD,
-            Self::TogglePin if pinned => icons::PINNED,
-            Self::TogglePin => icons::PIN,
             Self::Rename => icons::RENAME,
             Self::Tags => icons::TAG,
             Self::RepoPage => icons::GLOBE,
@@ -172,13 +146,13 @@ impl Palette {
         }
         self.tasks = Vec::new();
         if project.missing {
-            self.actions = vec![A::TogglePin, A::Rename, A::Tags, A::CopyPath, A::Remove];
+            self.actions = vec![A::Rename, A::Tags, A::CopyPath, A::Remove];
             return;
         }
         let remote = git::git_remote_url(&project.path).is_some();
         let web = git::git_web_url(&project.path).is_some();
         let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal, A::Commands];
-        actions.extend([A::TogglePin, A::Rename, A::Tags]);
+        actions.extend([A::Rename, A::Tags]);
         if web {
             actions.extend([A::RepoPage, A::PullRequests, A::Ci]);
         }
@@ -204,7 +178,7 @@ impl Palette {
             A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
             A::Run(_) => Section::Scripts,
             A::AddCommand => Section::AddNew,
-            A::TogglePin | A::Rename | A::Tags => Section::Organize,
+            A::Rename | A::Tags => Section::Organize,
             A::RepoPage | A::PullRequests | A::Ci | A::CopyCloneUrl | A::ChangeForge => {
                 Section::Repository
             }
@@ -393,7 +367,6 @@ impl Palette {
                 }
             }
             ProjectAction::AddCommand => self.edit_selected(Mode::AddCommand, cx),
-            ProjectAction::TogglePin => self.toggle_pin(cx),
             ProjectAction::Rename => self.rename(cx),
             ProjectAction::Tags => self.edit_selected(Mode::Tags, cx),
             ProjectAction::CopyPath => self.copy_path(&CopyPath, window, cx),
@@ -436,16 +409,13 @@ impl Palette {
         }
     }
 
-    /// A click on one of a project row's icons.
-    pub(super) fn click_row_icon(&mut self, row: usize, icon: RowIcon, cx: &mut Context<Self>) {
+    /// The ⋯ on a project row, or right-clicking it: that row's actions.
+    pub(super) fn actions_for_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if self.list() != List::Projects {
             return;
         }
         self.close_menu(cx);
         self.selected = row;
-        match icon {
-            RowIcon::Pin => self.toggle_pin(cx),
-            RowIcon::More => self.show_actions(cx),
-        }
+        self.show_actions(cx);
     }
 }

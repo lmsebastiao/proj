@@ -31,7 +31,6 @@ actions!(
         QuitApp,
         RemoveItem,
         RenameItem,
-        TogglePin,
         OpenConfig,
         CloseWindow,
         UndoRemove,
@@ -68,7 +67,7 @@ pub fn bind_keys(cx: &mut App) {
         // Mark projects to open together, then move down / up (other lists: just move).
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("shift-tab", ToggleMarkUp, ctx),
-        // Everything else for the project (pin, rename, remove…), also on the
+        // Everything else for the project (rename, tags, remove…), also on the
         // row's icons. Shift-F10 and the menu key open context menus elsewhere.
         KeyBinding::new("secondary-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),
@@ -88,7 +87,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-delete", RemoveItem, ctx),
         // As in Explorer.
         KeyBinding::new("f2", RenameItem, ctx),
-        KeyBinding::new("secondary-shift-p", TogglePin, ctx),
         KeyBinding::new("secondary-,", OpenConfig, ctx),
         // Put back what was just removed from the list.
         KeyBinding::new("secondary-z", UndoRemove, ctx),
@@ -116,7 +114,6 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("alt-e", ShowInFileManager, ctx),
             KeyBinding::new("alt-g", OpenRemote, ctx),
             KeyBinding::new("alt-c", CopyPath, ctx),
-            KeyBinding::new("alt-p", TogglePin, ctx),
         ]);
     }
     cx.on_action(|_: &QuitApp, cx| cx.quit());

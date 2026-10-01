@@ -88,8 +88,6 @@ pub(super) mod icons {
     #[cfg(windows)]
     mod glyphs {
         pub const FONT: &str = "Segoe MDL2 Assets";
-        pub const PIN: &str = "\u{E718}";
-        pub const PINNED: &str = "\u{E840}";
         pub const RENAME: &str = "\u{E8AC}";
         pub const REMOVE: &str = "\u{E74D}";
         pub const MORE: &str = "\u{E712}";
@@ -124,8 +122,6 @@ pub(super) mod icons {
     #[cfg(not(windows))]
     mod glyphs {
         pub const FONT: &str = "";
-        pub const PIN: &str = "☆";
-        pub const PINNED: &str = "★";
         pub const RENAME: &str = "✎";
         pub const REMOVE: &str = "✕";
         pub const MORE: &str = "⋯";

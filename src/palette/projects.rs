@@ -1,4 +1,4 @@
-//! Acting on projects: opening, marking, pinning, renaming, removing, adding and
+//! Acting on projects: opening, marking, renaming, removing, adding and
 //! cloning them, plus `>` commands.
 
 use std::{
@@ -181,26 +181,6 @@ impl Palette {
                 self.problem(format!("Failed to launch {program}: {err}"), cx);
             }
         }
-    }
-
-    pub(super) fn toggle_pin(&mut self, cx: &mut Context<Self>) {
-        let Some(project) = self.selected_project().cloned() else {
-            return;
-        };
-        let key = project.key();
-        let pinned = !project.pinned;
-        if pinned {
-            self.db.pinned.insert(key.clone());
-        } else {
-            self.db.pinned.remove(&key);
-        }
-        self.save(cx);
-        self.reload_projects();
-        self.refilter(cx);
-        // Keep the selection on the same entry after re-sorting.
-        self.select_where(|this, ix| this.projects[ix].key() == key);
-        let verb = if pinned { "Pinned" } else { "Unpinned" };
-        self.notice(format!("{verb} {}", project.name), cx);
     }
 
     /// Type a new name for the selected entry in the search box.
@@ -527,7 +507,7 @@ impl Palette {
     }
 
     /// Ctrl-Z after a remove: puts back what it took off the list, with its
-    /// name, pin, tags and history.
+    /// name, tags and history.
     pub(super) fn undo_remove(&mut self, _: &UndoRemove, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_last_remove(cx);
     }
