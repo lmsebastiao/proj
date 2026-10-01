@@ -73,7 +73,7 @@ impl Palette {
             }
             keys.extend([
                 s(&["↑ ↓"], "Move the selection"),
-                s(&["esc", "mod-k"], "Close the menu")
+                s(&["esc", "mod-k", "alt-k"], "Close the menu")
                     .footer("Close")
                     .run(Dismiss),
             ]);
@@ -96,7 +96,7 @@ impl Palette {
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(
-                        &["mod-k", "shift-f10", "right-click"],
+                        &["mod-k", "alt-k", "shift-f10", "right-click"],
                         "Actions: pin, rename, tags, commands to run, remove…",
                     )
                     .footer("Actions")

@@ -274,9 +274,6 @@ impl Palette {
             Mode::Projects
         };
         this.set_mode(mode, cx);
-        if mode == Mode::Projects {
-            this.skip_current_project();
-        }
         this.apply_theme(window, cx);
         this.status = cx
             .try_global::<ShortcutNotice>()
@@ -287,18 +284,6 @@ impl Palette {
                 undo: false,
             });
         this
-    }
-
-    /// With nothing typed, the first project tends to be the one whose window
-    /// you were just in: start on the next one instead, as the switcher does.
-    fn skip_current_project(&mut self) {
-        let front = self.windows.iter().position(EditorWindow::is_front);
-        let Some(project) = front.and_then(|w| self.window_projects[w]) else {
-            return;
-        };
-        if self.matches.len() > 1 && self.matches[0].ix == project {
-            self.selected = 1;
-        }
     }
 
     /// Closed without opening anything: keep the search for a while, in case

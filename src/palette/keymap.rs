@@ -67,6 +67,8 @@ pub fn bind_keys(cx: &mut App) {
         // Everything else for the project (pin, rename, remove…), also on the
         // row's icons. Shift-F10 and the menu key open context menus elsewhere.
         KeyBinding::new("secondary-k", ShowActions, ctx),
+        // Alt is still down right after alt+space: no reaching for ctrl.
+        KeyBinding::new("alt-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),
         KeyBinding::new("menu", ShowActions, ctx),
         // The search box copies its selected text instead, when there is some.

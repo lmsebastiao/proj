@@ -28,7 +28,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-1 … 9              | open the project in that place (hold ctrl a moment to see the numbers) |
 | enter                   | open in editor                             |
 | ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
-| ctrl-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
+| ctrl-k, alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
 | f2                      | rename                                     |
 | ctrl-shift-p            | pin / unpin                                |
 | shift-delete            | remove from the list (the folder stays)    |
@@ -54,12 +54,12 @@ type. **f1**, or the **?** button, opens a dropdown with every key. While it's o
 through it instead of the list and enter runs the highlighted key; clicking one runs it too.
 Esc or typing closes it.
 
-**ctrl-k** (or shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
+**ctrl-k** (or alt-k, handy right after alt+space; shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
 at the bottom right, with everything you can do with the highlighted project: open with,
 show in Explorer, terminal, its commands (see Commands), pin, rename, tags, copy the path,
 open the repository page, its pull requests or its CI runs, copy the clone URL, start a new
 project from it, remove. Each shows its own key, if it has one. Type to filter it and press
-enter; esc, ctrl-k again, backspace with nothing typed or clicking outside closes it. The
+enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
 highlighted row, and any row under the mouse, also has a **⋯** icon (the same menu) and a
 pin. Pinned projects stay on top and keep their pin showing.
 
@@ -75,8 +75,7 @@ a moment before the dialog closes.
 
 If the dialog closes without opening anything (esc, the shortcut again, or a click
 elsewhere), opening it again within 30 seconds brings back what you'd typed, selected so that
-typing replaces it. With nothing typed, the highlight starts on the second project when the
-first is the one whose editor window you were just in.
+typing replaces it.
 
 Type `>` to list commands: start on login, add projects, new project from a template, change
 the default editor, theme, open the config file, remove missing projects (when some are),
