@@ -35,6 +35,8 @@ pub(super) enum Mode {
     NewProject,
     /// The window switcher: open editor windows (`Palette::windows`).
     Switch,
+    /// Choosing what a self-hosted git site runs (`Palette::forge_pick`).
+    Forges,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -50,6 +52,8 @@ pub(super) enum List {
     /// The switcher's rows (`Palette::switch_rows`).
     Switch,
     Templates,
+    /// What a git site can run (`forges::CHOICES`).
+    Forges,
 }
 
 /// An entry in a project's actions menu (ctrl-k), as `Palette::actions` lists them.
@@ -216,6 +220,10 @@ impl Palette {
                 let template = &self.templates[ix];
                 (template.name(), template.source())
             }
+            List::Forges => {
+                let (label, _, what) = super::forges::CHOICES[ix];
+                (label.into(), what.into())
+            }
             List::Text => Default::default(),
         }
     }
@@ -378,10 +386,7 @@ impl Palette {
                     .and_then(git::url_host)
                     .map(str::to_string)
                     .unwrap_or_default();
-                format!(
-                    "proj doesn't know what {host} runs (GitLab, Gitea…): add it under \
-                     forges in the config file"
-                )
+                format!("↵ asks what {host} runs (GitLab, Gitea…), just the first time")
             }
         }
     }
@@ -581,7 +586,7 @@ impl Palette {
                 bottom: None,
                 tip: None,
             },
-            List::Commands | List::Text => Meta::NONE,
+            List::Commands | List::Text | List::Forges => Meta::NONE,
         }
     }
 
@@ -648,6 +653,7 @@ impl Palette {
             List::Commands => self.commands.len(),
             List::Switch => self.switch_rows.len(),
             List::Templates => self.templates.len(),
+            List::Forges => super::forges::CHOICES.len(),
             List::Text => 0,
         }
     }

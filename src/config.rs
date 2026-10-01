@@ -270,6 +270,51 @@ pub fn set_theme(theme: ThemeSetting) -> io::Result<()> {
     write_atomic(&path, &doc.to_string())
 }
 
+/// Adds `host = kind` to `forges` in config.toml, preserving the rest of the file.
+pub fn set_forge(host: &str, kind: &str) -> io::Result<()> {
+    let path = config_path();
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    write_atomic(&path, &with_forge(&text, host, kind)?)
+}
+
+fn with_forge(text: &str, host: &str, kind: &str) -> io::Result<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    match doc.get_mut("forges") {
+        // As the template shows it: forges = { "git.example.com" = "gitlab" }
+        Some(item) if item.is_inline_table() => {
+            if let Some(table) = item.as_inline_table_mut() {
+                table.insert(host, kind.into());
+            }
+        }
+        // Or a [forges] table.
+        Some(item) if item.is_table() => {
+            if let Some(table) = item.as_table_mut() {
+                table.insert(host, toml_edit::value(kind));
+            }
+        }
+        Some(_) => return Err(io::Error::other("forges in config.toml isn't a table")),
+        None => {
+            let mut table = toml_edit::InlineTable::new();
+            table.insert(host, kind.into());
+            // Under the template's commented-out example, where its docs are.
+            let mut line = toml_edit::DocumentMut::new();
+            line.insert("forges", toml_edit::value(table.clone()));
+            let example = text.find("\n# forges =").and_then(|at| {
+                let start = at + 1;
+                text[start..].find('\n').map(|end| start + end + 1)
+            });
+            if let Some(at) = example {
+                let with = format!("{}{}{}", &text[..at], line, &text[at..]);
+                if with.parse::<toml_edit::DocumentMut>().is_ok() {
+                    return Ok(with);
+                }
+            }
+            doc.insert("forges", toml_edit::value(table));
+        }
+    }
+    Ok(doc.to_string())
+}
+
 /// Sets `editor` in config.toml, preserving the rest of the file.
 pub fn set_editor(command: &str) -> io::Result<()> {
     let path = config_path();
@@ -327,6 +372,35 @@ mod tests {
         );
         let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
         assert_eq!(parse(&template), ThemeSetting::System);
+    }
+
+    #[test]
+    fn forges_are_added_to_the_file() {
+        let forges = |text: &str| toml::from_str::<Config>(text).unwrap().forges;
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
+        let added = with_forge(&template, "git.example.com", "gitlab").unwrap();
+        let line = "forges = { \"git.example.com\" = \"gitlab\" }\n";
+        let example = "# forges = { \"git.example.com\" = \"gitlab\" }\n";
+        assert!(
+            added.contains(&format!("{example}{line}")),
+            "under the example:\n{added}"
+        );
+        assert_eq!(
+            added.replacen(&format!("{example}{line}"), example, 1),
+            template,
+            "the rest stays as it was"
+        );
+        assert_eq!(forges(&added)["git.example.com"], "gitlab");
+
+        let both = with_forge(&added, "code.example.org", "gitea").unwrap();
+        let both = forges(&both);
+        assert_eq!(both.len(), 2);
+        assert_eq!(both["code.example.org"], "gitea");
+
+        let table = "[forges]\n\"a.example\" = \"gitlab\"\n";
+        let added = with_forge(table, "b.example", "forgejo").unwrap();
+        assert_eq!(forges(&added)["b.example"], "forgejo");
+        assert_eq!(forges(&added)["a.example"], "gitlab");
     }
 
     #[test]

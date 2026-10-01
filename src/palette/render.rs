@@ -192,6 +192,7 @@ impl Palette {
                 Template::Folder(_) => glyph(icons::FOLDER, t.muted).into_any_element(),
                 Template::Git(_) => glyph(icons::GLOBE, t.muted).into_any_element(),
             },
+            List::Forges => glyph(icons::GLOBE, t.muted).into_any_element(),
             List::Text => div().into_any_element(),
         };
         slot.child(content).into_any_element()
@@ -760,6 +761,17 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Forges => {
+                let pick = self.forge_pick.as_ref()?;
+                (
+                    None,
+                    vec![format!(
+                        "proj can't tell from its name. ↵ opens its {} and saves the choice \
+                         under forges in the config file, so it won't ask again.",
+                        pick.opens()
+                    )],
+                )
+            }
             Mode::Tags => (
                 None,
                 vec!["Words, separated by spaces or commas; then search for #tag to list just those projects.".into()],

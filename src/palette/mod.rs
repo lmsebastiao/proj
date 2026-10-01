@@ -6,6 +6,7 @@ mod actions;
 mod app_icon;
 mod browse;
 mod editor_choice;
+mod forges;
 mod items;
 mod keymap;
 mod projects;
@@ -113,6 +114,8 @@ pub struct Palette {
     templates: Vec<Template>,
     /// What `Mode::NewProject` makes the new project from.
     new_from: Option<Template>,
+    /// The git site `Mode::Forges` asks about.
+    forge_pick: Option<forges::ForgePick>,
     /// What `git status` said, by folder; filled in while the palette is open.
     git_status: HashMap<PathBuf, GitStatus>,
     /// Projects marked with tab, to open together as one workspace.
@@ -230,6 +233,7 @@ impl Palette {
             menu_selected: 0,
             templates: Vec::new(),
             new_from: None,
+            forge_pick: None,
             git_status: HashMap::new(),
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
@@ -403,6 +407,7 @@ impl Palette {
                 self.browse = None;
                 self.editing = None;
                 self.new_from = None;
+                self.forge_pick = None;
                 self.expanded = None;
                 self.arrange_rows();
             }
@@ -411,7 +416,8 @@ impl Palette {
             | Mode::Tags
             | Mode::AddCommand
             | Mode::NewProject
-            | Mode::Switch => {}
+            | Mode::Switch
+            | Mode::Forges => {}
             Mode::Templates => {
                 self.templates = self
                     .config
@@ -470,6 +476,10 @@ impl Palette {
             Mode::Tags => "Tags, e.g. work oss; leave empty for none".into(),
             Mode::AddCommand => "A command to run in the project's folder, e.g. npm run dev".into(),
             Mode::Templates => "New project from…".into(),
+            Mode::Forges => match &self.forge_pick {
+                Some(pick) => format!("What does {} run?", pick.host),
+                None => String::new(),
+            },
             Mode::NewProject => "Name of the new project's folder".into(),
             Mode::Switch => "Switch to…".into(),
         };
@@ -504,6 +514,7 @@ impl Palette {
             Mode::Browse => List::Browse,
             Mode::Rename | Mode::Tags | Mode::AddCommand | Mode::NewProject => List::Text,
             Mode::Templates => List::Templates,
+            Mode::Forges => List::Forges,
             Mode::Switch => List::Switch,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             // The switcher's list, searchable, without opening it by its shortcut.
@@ -712,6 +723,7 @@ impl Palette {
                 self.new_from = Some(self.templates[ix].clone());
                 self.set_mode(Mode::NewProject, cx);
             }
+            List::Forges => self.choose_forge(ix, window, cx),
             List::Browse => {
                 if let Some(browse) = &self.browse {
                     let editor = browse.project.default_editor(&self.config);
@@ -749,7 +761,7 @@ impl Palette {
             }
             List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Text | List::Templates => {
+            List::OpenWith | List::Text | List::Templates | List::Forges => {
                 self.back_to_projects(cx);
             }
             List::Projects if !self.marked.is_empty() => {
@@ -778,6 +790,7 @@ impl Palette {
             Mode::Tags => format!("Tags for {}", self.edited_project()?.name),
             Mode::AddCommand => format!("Command for {}", self.edited_project()?.name),
             Mode::Templates => "New project".into(),
+            Mode::Forges => format!("What runs {}", self.forge_pick.as_ref()?.host),
             Mode::NewProject => format!("New from {}", self.new_from.as_ref()?.name()),
             Mode::Editors if self.config.editor.is_some() => "Default editor".into(),
             Mode::Projects | Mode::Editors | Mode::Switch => return None,
@@ -806,7 +819,8 @@ impl Palette {
             .open_with
             .clone()
             .or_else(|| self.editing.clone())
-            .or_else(|| self.actions_for.clone());
+            .or_else(|| self.actions_for.clone())
+            .or_else(|| self.forge_pick.as_ref().map(|p| p.key.clone()));
         self.set_mode(Mode::Projects, cx);
         self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
     }

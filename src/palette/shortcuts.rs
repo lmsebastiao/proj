@@ -203,6 +203,15 @@ impl Palette {
                     .footer("Back")
                     .run(Dismiss),
             ],
+            List::Forges => vec![
+                s(&["↵"], "It runs this: open the page, and remember it")
+                    .footer("Use it")
+                    .run(Confirm),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "backspace"], "Back to the projects")
+                    .footer("Back")
+                    .run(Dismiss),
+            ],
             List::Commands => vec![
                 s(&["↵"], "Run").footer("Run").run(Confirm),
                 s(&["esc"], "Back to the projects")

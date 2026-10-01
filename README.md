@@ -208,8 +208,9 @@ stays open when it ends. **shift-delete** on an added command takes it out again
 ctrl-k → **Open the pull requests** and **Open the CI runs** go to those pages of the
 repository's site, from its `origin` remote: GitHub, GitLab, Gitea, Forgejo (Codeberg),
 Bitbucket and Azure DevOps, by their site names (`gitlab.example.com` counts too). For a
-self-hosted site with another name, say what it runs in config.toml:
-`forges = { "git.example.com" = "gitlab" }`. **Copy the clone URL** copies the remote's URL.
+self-hosted site with another name, proj asks what it runs the first time (GitLab, Gitea,
+Forgejo…), opens the page, and saves the answer in config.toml as
+`forges = { "git.example.com" = "gitlab" }`, where you can also set or change it. **Copy the clone URL** copies the remote's URL.
 
 ### New projects from templates
 

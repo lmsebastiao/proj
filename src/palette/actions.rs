@@ -13,6 +13,7 @@ use crate::{
 
 use super::{
     Palette,
+    forges::ForgePick,
     items::{List, Match, Mode, ProjectAction, Target},
     keymap::{CopyPath, OpenRemote},
     theme::icons,
@@ -337,15 +338,16 @@ impl Palette {
                 let Some(web) = web else {
                     return;
                 };
+                // A site proj can't tell from its name: ask what it runs.
                 let Some(forge) = forge else {
-                    let host = git::url_host(&web).unwrap_or_default();
-                    return self.problem(
-                        format!(
-                            "proj doesn't know what {host} runs. In the config file, add e.g. \
-                             forges = {{ \"{host}\" = \"gitlab\" }} (or \"gitea\", \"forgejo\")"
-                        ),
-                        cx,
-                    );
+                    let host = git::url_host(&web).unwrap_or_default().to_string();
+                    let pick = ForgePick {
+                        web,
+                        host,
+                        key,
+                        then: action,
+                    };
+                    return self.ask_forge(pick, cx);
                 };
                 let url = if action == ProjectAction::Ci {
                     forge.ci(&web)
