@@ -111,7 +111,7 @@ ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
-title. Projects with a window open get an **open** badge in the normal list, and **enter** on
+title. Projects with a window open get a green dot after their name in the normal list, and **enter** on
 one switches to its window instead of opening it again (**alt-↵** still opens it anew, in any
 editor).
 

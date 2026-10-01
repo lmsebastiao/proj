@@ -114,7 +114,7 @@ pub struct Palette {
     shortcuts_scroll: ScrollHandle,
     /// The actions menu, drawn as a plain list for its section headings.
     actions_scroll: ScrollHandle,
-    /// Open editor windows, for `Mode::Switch` and the "open" badges.
+    /// Open editor windows, for `Mode::Switch` and the dots of projects with one open.
     windows: Vec<EditorWindow>,
     /// The project each of `windows` shows, as an index into `projects`.
     window_projects: Vec<Option<usize>>,

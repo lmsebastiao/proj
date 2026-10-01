@@ -16,6 +16,8 @@ pub struct Theme {
     pub accent: u32,
     /// Warnings, e.g. the remove icon waiting for its second click.
     pub danger: u32,
+    /// The dot after a project with an editor window open.
+    pub open: u32,
 }
 
 pub const DARK: Theme = Theme {
@@ -28,6 +30,7 @@ pub const DARK: Theme = Theme {
     selected: 0x2c3038,
     accent: 0x74ade8,
     danger: 0xe5707a,
+    open: 0x6cc58a,
 };
 
 pub const LIGHT: Theme = Theme {
@@ -40,6 +43,7 @@ pub const LIGHT: Theme = Theme {
     selected: 0xe7eaf0,
     accent: 0x2468c4,
     danger: 0xc4314b,
+    open: 0x2e8b4f,
 };
 
 impl Theme {

@@ -285,7 +285,20 @@ impl Palette {
                                 .text_color(rgb(if missing { t.muted } else { t.text }))
                                 .overflow_hidden()
                                 .child(StyledText::new(title).with_highlights(title_hl))
-                                .when(open, |d| d.child(badge("open".into())))
+                                .when(open, |d| {
+                                    d.child(
+                                        div()
+                                            .id(("open", row))
+                                            .flex_none()
+                                            .size(px(8.))
+                                            .rounded_full()
+                                            .bg(rgb(t.open))
+                                            .tooltip(tooltip(
+                                                "An editor window is open · ↵ switches to it",
+                                                t,
+                                            )),
+                                    )
+                                })
                                 .children(tags.into_iter().map(badge)),
                         )
                         .child(
@@ -843,6 +856,17 @@ impl Render for Palette {
                 (None, List::Browse) => div().child(format!("{} items", self.item_count())),
                 (None, List::Switch) if self.hold.is_some() => div().child("let go to switch"),
                 (None, List::Switch) => div().child(format!("{} windows", self.windows.len())),
+                // What the highlighted action does, as its tooltip says for the mouse.
+                (None, List::Actions) => div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .children(
+                        self.matches
+                            .get(self.selected)
+                            .map(|m| self.item_text(m.ix).1),
+                    ),
                 (None, _) => div(),
             })
             .child(div().flex_1())
