@@ -26,6 +26,9 @@ impl Palette {
     /// Tab / shift-tab: mark/unmark the selected project for opening together,
     /// then move down (`delta` 1) or up (-1). Other lists just move.
     pub(super) fn toggle_mark(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.list() == List::Group {
+            return self.toggle_tick(delta, cx);
+        }
         if self.list() != List::Projects {
             return self.select(delta, cx);
         }
@@ -33,7 +36,7 @@ impl Palette {
             return;
         };
         if project.is_workspace() {
-            return self.problem("Workspaces can't be combined further", cx);
+            return self.problem("A group can't go in another group", cx);
         }
         match self.marked.iter().position(|p| p == &project.path) {
             Some(pos) => {
@@ -42,15 +45,6 @@ impl Palette {
             None => self.marked.push(project.path.clone()),
         }
         self.select(delta, cx);
-    }
-
-    /// Saves the marked projects as a workspace (reusing it if it exists) and returns it.
-    pub(super) fn marked_workspace(&mut self, cx: &mut Context<Self>) -> Option<Project> {
-        let paths = std::mem::take(&mut self.marked);
-        let key = store::remember_workspace(&mut self.db, paths);
-        self.save(cx);
-        self.reload_projects();
-        self.projects.iter().find(|p| p.key() == key).cloned()
     }
 
     /// Ctrl+1…9 in the project list: opens the project in that place, as
@@ -168,7 +162,17 @@ impl Palette {
     ) {
         match result {
             Ok(()) => {
-                self.db.opened.insert(project.key(), store::now());
+                let key = project.key();
+                if self.is_unsaved(&key) {
+                    // Not a group: each of its projects was opened.
+                    for path in project.paths() {
+                        self.db
+                            .opened
+                            .insert(store::entry_key(&[path]), store::now());
+                    }
+                } else {
+                    self.db.opened.insert(key, store::now());
+                }
                 self.save(cx);
                 window.remove_window();
             }

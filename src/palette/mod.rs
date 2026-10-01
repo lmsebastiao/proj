@@ -7,6 +7,7 @@ mod app_icon;
 mod browse;
 mod editor_choice;
 mod forges;
+mod groups;
 mod items;
 mod keymap;
 mod projects;
@@ -118,6 +119,11 @@ pub struct Palette {
     new_from: Option<Template>,
     /// The git site `Mode::Forges` asks about.
     forge_pick: Option<forges::ForgePick>,
+    /// The "Open together" page, or a group's "Folders…" (`Mode::Group`).
+    group_page: Option<groups::GroupPage>,
+    /// Projects being opened together without being saved as a group: in
+    /// `projects` too, until the list shows again.
+    unsaved: Option<Project>,
     /// What `git status` said, by folder; filled in while the palette is open.
     git_status: HashMap<PathBuf, GitStatus>,
     /// Projects marked with tab, to open together as one workspace.
@@ -237,6 +243,8 @@ impl Palette {
             templates: Vec::new(),
             new_from: None,
             forge_pick: None,
+            group_page: None,
+            unsaved: None,
             git_status: HashMap::new(),
             marked: Vec::new(),
             autostart: autostart::is_enabled(),
@@ -319,6 +327,12 @@ impl Palette {
 
     fn reload_projects(&mut self) {
         self.projects = store::collect(&self.config, &self.db);
+        // Not in the database, so not collected.
+        if let Some(group) = &self.unsaved
+            && !self.projects.iter().any(|p| p.key() == group.key())
+        {
+            self.projects.push(group.clone());
+        }
         let missing = self.projects.iter().any(|p| p.missing);
         self.commands = items::commands(update::is_installed(), missing);
         let detected = editors::detected_editors(false);
@@ -454,7 +468,14 @@ impl Palette {
                 self.editing = None;
                 self.new_from = None;
                 self.forge_pick = None;
+                self.group_page = None;
                 self.expanded = None;
+                // An unsaved group goes from the list again.
+                if let Some(group) = self.unsaved.take() {
+                    let key = group.key();
+                    self.projects.retain(|p| p.key() != key);
+                    self.match_windows();
+                }
                 self.arrange_rows();
             }
             Mode::Browse
@@ -463,7 +484,8 @@ impl Palette {
             | Mode::AddCommand
             | Mode::NewProject
             | Mode::Switch
-            | Mode::Forges => {}
+            | Mode::Forges
+            | Mode::Group => {}
             Mode::Templates => {
                 self.templates = self
                     .config
@@ -522,6 +544,7 @@ impl Palette {
             Mode::Tags => "Tags, e.g. work oss; leave empty for none".into(),
             Mode::AddCommand => "A command to run in the project's folder, e.g. npm run dev".into(),
             Mode::Templates => "New project from…".into(),
+            Mode::Group => "Search projects to tick… (#tag works too)".into(),
             Mode::Forges => match &self.forge_pick {
                 Some(pick) => format!("What does {} run?", pick.host),
                 None => String::new(),
@@ -561,6 +584,7 @@ impl Palette {
             Mode::Rename | Mode::Tags | Mode::AddCommand | Mode::NewProject => List::Text,
             Mode::Templates => List::Templates,
             Mode::Forges => List::Forges,
+            Mode::Group => List::Group,
             Mode::Switch => List::Switch,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             // The switcher's list, searchable, without opening it by its shortcut.
@@ -601,10 +625,15 @@ impl Palette {
         // Projects: `#tag` words keep the ones tagged with them, by the start of
         // the tag ("#wo" for "work"); the rest of the text is searched as usual.
         let (tags, text) = match list {
-            List::Projects => split_tags(&query),
+            List::Projects | List::Group => split_tags(&query),
             _ => (Vec::new(), query.clone()),
         };
         let candidates: Vec<usize> = (0..self.item_count())
+            // Groups don't go in groups, and a folder that's gone can't open.
+            .filter(|&ix| {
+                list != List::Group
+                    || !(self.projects[ix].is_workspace() || self.projects[ix].missing)
+            })
             .filter(|&ix| tags.is_empty() || self.projects[ix].has_tags(&tags))
             .collect();
         self.matches.clear();
@@ -756,6 +785,9 @@ impl Palette {
                 _ => self.finish_rename(cx),
             };
         }
+        if self.list() == List::Group {
+            return self.confirm_group(window, cx);
+        }
         let Some(ix) = self.matches.get(self.selected).map(|m| m.ix) else {
             return;
         };
@@ -778,7 +810,7 @@ impl Palette {
             }
             List::Projects => {
                 let entry = if self.marked.len() > 1 {
-                    self.marked_workspace(cx)
+                    self.marked_group()
                 } else {
                     self.selected_project().cloned()
                 };
@@ -786,7 +818,7 @@ impl Palette {
                     self.open_entry(entry, window, cx);
                 }
             }
-            List::Text => {}
+            List::Text | List::Group => {}
         }
     }
 
@@ -807,7 +839,7 @@ impl Palette {
             }
             List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Text | List::Templates | List::Forges => {
+            List::OpenWith | List::Text | List::Templates | List::Forges | List::Group => {
                 self.back_to_projects(cx);
             }
             List::Projects if !self.marked.is_empty() => {
@@ -837,6 +869,14 @@ impl Palette {
             Mode::AddCommand => format!("Command for {}", self.edited_project()?.name),
             Mode::Templates => "New project".into(),
             Mode::Forges => format!("What runs {}", self.forge_pick.as_ref()?.host),
+            Mode::Group => match &self.group_page.as_ref()?.editing {
+                Some(folders) => {
+                    let key = store::entry_key(folders);
+                    let group = self.projects.iter().find(|p| p.key() == key)?;
+                    format!("Folders of {}", group.name)
+                }
+                None => "Open together".into(),
+            },
             Mode::NewProject => format!("New from {}", self.new_from.as_ref()?.name()),
             Mode::Editors if self.config.editor.is_some() => "Default editor".into(),
             Mode::Projects | Mode::Editors | Mode::Switch => return None,
@@ -866,7 +906,8 @@ impl Palette {
             .clone()
             .or_else(|| self.editing.clone())
             .or_else(|| self.actions_for.clone())
-            .or_else(|| self.forge_pick.as_ref().map(|p| p.key.clone()));
+            .or_else(|| self.forge_pick.as_ref().map(|p| p.key.clone()))
+            .or_else(|| self.group_page.as_ref().map(|p| p.from.clone()));
         self.set_mode(Mode::Projects, cx);
         self.select_where(|this, ix| Some(this.projects[ix].key()) == key);
     }

@@ -64,6 +64,7 @@ impl ProjectAction {
             Self::ShowInFileManager => icons::FOLDER,
             Self::Terminal => icons::TERMINAL,
             Self::Commands | Self::Run(_) => icons::RUN,
+            Self::OpenTogether | Self::Folders => icons::GROUP,
             Self::AddCommand => icons::ADD,
             Self::Rename => icons::RENAME,
             Self::Tags => icons::TAG,
@@ -152,7 +153,12 @@ impl Palette {
         let remote = git::git_remote_url(&project.path).is_some();
         let web = git::git_web_url(&project.path).is_some();
         let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal, A::Commands];
-        actions.extend([A::Rename, A::Tags]);
+        if project.is_workspace() {
+            actions.extend([A::Rename, A::Folders, A::Tags]);
+        } else {
+            actions.insert(1, A::OpenTogether);
+            actions.extend([A::Rename, A::Tags]);
+        }
         if web {
             actions.extend([A::RepoPage, A::PullRequests, A::Ci]);
         }
@@ -174,11 +180,13 @@ impl Palette {
     fn action_section(&self, action: ProjectAction) -> Section {
         use ProjectAction as A;
         match action {
-            A::OpenWith | A::ShowInFileManager | A::Terminal | A::Commands => Section::Open,
+            A::OpenWith | A::OpenTogether | A::ShowInFileManager | A::Terminal | A::Commands => {
+                Section::Open
+            }
             A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
             A::Run(_) => Section::Scripts,
             A::AddCommand => Section::AddNew,
-            A::Rename | A::Tags => Section::Organize,
+            A::Rename | A::Folders | A::Tags => Section::Organize,
             A::RepoPage | A::PullRequests | A::Ci | A::CopyCloneUrl | A::ChangeForge => {
                 Section::Repository
             }
@@ -338,6 +346,8 @@ impl Palette {
         match action {
             ProjectAction::OpenWith => self.show_open_with(key, cx),
             ProjectAction::Commands => self.show_commands(cx),
+            ProjectAction::OpenTogether => self.open_together_page(&project, cx),
+            ProjectAction::Folders => self.edit_group_page(&project, cx),
             ProjectAction::ChangeForge => {
                 let Some(web) = web else {
                     return;

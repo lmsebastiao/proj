@@ -137,7 +137,11 @@ impl Palette {
                     )
                     .run(OpenWithMenu),
                     s(&["→"], "Browse its files and folders"),
-                    s(&["tab", "shift-tab"], "Mark to open several in one window").run(ToggleMark),
+                    s(
+                        &["tab", "shift-tab"],
+                        "Mark to open several in one window (not saved)",
+                    )
+                    .run(ToggleMark),
                     s(&["f2"], "Rename… (search still finds it by its folder)").run(RenameItem),
                     s(&["shift-del"], "Remove from the list (the folder stays)").run(RemoveItem),
                     s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
@@ -219,6 +223,40 @@ impl Palette {
                 s(&["esc", "backspace"], "Back to the projects")
                     .footer("Back")
                     .run(Dismiss),
+            ],
+            List::Group
+                if self
+                    .group_page
+                    .as_ref()
+                    .is_some_and(|p| p.editing.is_some()) =>
+            {
+                vec![
+                    s(&["↵"], "Save the group's folders")
+                        .footer("Save")
+                        .run(Confirm),
+                    s(&["tab", "space"], "Tick or untick a folder").run(ToggleMark),
+                    s(
+                        &["alt-↑", "alt-↓"],
+                        "Move it earlier or later in the order they open in",
+                    ),
+                    s(&["esc", "backspace"], "Back, changing nothing")
+                        .footer("Back")
+                        .run(Dismiss),
+                ]
+            }
+            List::Group => vec![
+                s(&["↵"], "Open the ticked projects in one editor window")
+                    .footer("Open together")
+                    .run(Confirm),
+                s(&["mod-↵"], "Save them as a group, to find in the list")
+                    .footer("Save as group")
+                    .run(ConfirmSecondary),
+                s(&["tab", "space"], "Tick or untick a project").run(ToggleMark),
+                s(
+                    &["alt-↑", "alt-↓"],
+                    "Move it earlier or later in the order they open in",
+                ),
+                s(&["esc", "backspace"], "Back to the projects").run(Dismiss),
             ],
             List::Commands => vec![
                 s(&["↵"], "Run").footer("Run").run(Confirm),

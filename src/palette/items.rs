@@ -37,6 +37,9 @@ pub(super) enum Mode {
     Switch,
     /// Choosing what a self-hosted git site runs (`Palette::forge_pick`).
     Forges,
+    /// Ticking projects to open together, or a group's folders
+    /// (`Palette::group_page`).
+    Group,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -54,6 +57,8 @@ pub(super) enum List {
     Templates,
     /// What a git site can run (`forges::CHOICES`).
     Forges,
+    /// The projects to tick (indexes into `Palette::projects`, groups left out).
+    Group,
 }
 
 /// An entry in a project's actions (ctrl-k) or commands (ctrl-r) menu, as
@@ -65,6 +70,10 @@ pub(super) enum ProjectAction {
     Terminal,
     /// Opens its commands menu (ctrl-r).
     Commands,
+    /// Ticks other projects to open in the same window (`Mode::Group`).
+    OpenTogether,
+    /// A group's folders, to add, take out or reorder.
+    Folders,
     /// Runs `Palette::tasks[i]` in a terminal in the project's folder.
     Run(usize),
     AddCommand,
@@ -164,9 +173,19 @@ impl Palette {
     /// Title and subtitle of an item in the current list.
     pub(super) fn item_text(&self, ix: usize) -> (String, String) {
         match self.list() {
-            List::Projects => {
+            List::Projects | List::Group => {
                 let project = &self.projects[ix];
-                (project.name.clone(), project.location())
+                // A group: its folders' names, drawn with their open dots.
+                let subtitle = if project.is_workspace() {
+                    self.members(project)
+                        .into_iter()
+                        .map(|(path, listed)| member_name(&path, listed))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                } else {
+                    project.location()
+                };
+                (project.name.clone(), subtitle)
             }
             List::Browse => match &self.browse {
                 Some(browse) => {
@@ -326,6 +345,14 @@ impl Palette {
                 };
                 (task.command.clone(), from.into())
             }
+            ProjectAction::OpenTogether => (
+                "Open together with…".into(),
+                "Tick other projects to open in the same editor window".into(),
+            ),
+            ProjectAction::Folders => (
+                "Folders…".into(),
+                "Add, take out or reorder the group's folders".into(),
+            ),
             ProjectAction::Commands => (
                 "Run a command…".into(),
                 "Its package.json scripts and the commands you add".into(),
@@ -452,6 +479,43 @@ impl Palette {
         Some(format!("{branch}{status}"))
     }
 
+    /// A project's branch, or a group's: its folders' branches, each once.
+    fn entry_branch_label(&self, project: &Project) -> Option<String> {
+        if !project.is_workspace() {
+            return self.branch_label(project);
+        }
+        let mut labels: Vec<String> = Vec::new();
+        for (_, listed) in self.members(project) {
+            if let Some(label) = listed.and_then(|m| self.branch_label(m))
+                && !labels.contains(&label)
+            {
+                labels.push(label);
+            }
+        }
+        (!labels.is_empty()).then(|| labels.join(", "))
+    }
+
+    /// What `entry_branch_label` means: for a group, each folder's branch.
+    fn entry_branch_tip(&self, project: &Project) -> Option<String> {
+        if !project.is_workspace() {
+            return self.branch_tip(project);
+        }
+        let lines: Vec<String> = self
+            .members(project)
+            .into_iter()
+            .filter_map(|(_, listed)| {
+                let member = listed?;
+                let branch = self.branch_label(member)?;
+                let marks = self
+                    .branch_tip(member)
+                    .map(|tip| format!(" ({tip})"))
+                    .unwrap_or_default();
+                Some(format!("{}: {branch}{marks}", member.name))
+            })
+            .collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+
     /// What the marks after a branch mean, when it has any.
     fn branch_tip(&self, project: &Project) -> Option<String> {
         let status = self.git_status.get(&project.path)?;
@@ -507,14 +571,19 @@ impl Palette {
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now));
                 let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
                 Meta {
-                    top: self.branch_label(project).map(|b| (b, self.theme.branch)),
+                    top: self
+                        .entry_branch_label(project)
+                        .map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
                     // The marks after the branch, and when exactly "3d ago" was.
                     tip: {
                         let opened = (project.last_opened > 0)
                             .then(|| format!("Opened {}", store::date_of(project.last_opened)));
-                        let lines: Vec<String> =
-                            self.branch_tip(project).into_iter().chain(opened).collect();
+                        let lines: Vec<String> = self
+                            .entry_branch_tip(project)
+                            .into_iter()
+                            .chain(opened)
+                            .collect();
                         (!lines.is_empty()).then(|| lines.join("\n"))
                     },
                 }
@@ -601,6 +670,14 @@ impl Palette {
                 bottom: None,
                 tip: None,
             },
+            // Its branch, as in the project list.
+            List::Group => Meta {
+                top: self
+                    .branch_label(&self.projects[ix])
+                    .map(|b| (b, self.theme.branch)),
+                bottom: None,
+                tip: None,
+            },
             List::Commands | List::Text | List::Forges => Meta::NONE,
         }
     }
@@ -669,8 +746,21 @@ impl Palette {
             List::Switch => self.switch_rows.len(),
             List::Templates => self.templates.len(),
             List::Forges => super::forges::CHOICES.len(),
+            List::Group => self.projects.len(),
             List::Text => 0,
         }
+    }
+}
+
+/// A group's folder: as listed (with its parent if names clash), else its
+/// folder name.
+pub(super) fn member_name(path: &std::path::Path, listed: Option<&Project>) -> String {
+    match listed {
+        Some(project) => project.name.clone(),
+        None => path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     }
 }
 

@@ -14,6 +14,8 @@ actions!(
     [
         SelectNext,
         SelectPrev,
+        MoveDown,
+        MoveUp,
         Confirm,
         ConfirmSecondary,
         ShowInFileManager,
@@ -94,8 +96,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-w", CloseWindow, ctx),
         // The window switcher is used with alt held down.
         KeyBinding::new("alt-escape", Dismiss, ctx),
-        KeyBinding::new("alt-down", SelectNext, ctx),
-        KeyBinding::new("alt-up", SelectPrev, ctx),
+        // Also move a group's ticked folder in the order they open in.
+        KeyBinding::new("alt-down", MoveDown, ctx),
+        KeyBinding::new("alt-up", MoveUp, ctx),
         // Into a project's windows, and back out.
         KeyBinding::new("alt-right", input::Right, ctx),
         KeyBinding::new("alt-left", input::Left, ctx),

@@ -92,6 +92,56 @@ fn program_icon(program: Option<PathBuf>, fallback: &'static str, t: Theme) -> A
     }
 }
 
+/// A check box, numbered with its place in the order when ticked (`position`).
+fn check_box(position: Option<usize>, t: Theme) -> AnyElement {
+    div()
+        .size(px(18.))
+        .rounded_sm()
+        .border_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(SMALL_FONT_SIZE))
+        .map(|d| match position {
+            Some(i) => d
+                .bg(rgb(t.accent))
+                .border_color(rgb(t.accent))
+                .text_color(rgb(t.bg))
+                .child((i + 1).to_string()),
+            None => d.border_color(rgb(t.muted)),
+        })
+        .into_any_element()
+}
+
+/// A group's icon: folders, with how many on a badge.
+fn group_icon(count: usize, t: Theme) -> AnyElement {
+    div()
+        .relative()
+        .size(px(ICON_SLOT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(glyph(icons::GROUP, t.muted))
+        .child(
+            div()
+                .absolute()
+                .right(px(-3.))
+                .bottom(px(-2.))
+                .min_w(px(13.))
+                .h(px(13.))
+                .px(px(2.))
+                .rounded_full()
+                .bg(rgb(t.accent))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(9.))
+                .text_color(rgb(t.bg))
+                .child(count.to_string()),
+        )
+        .into_any_element()
+}
+
 /// The accent bar at the start of the highlighted row.
 fn selection_bar(t: Theme, height: f32) -> Div {
     div()
@@ -133,32 +183,26 @@ impl Palette {
             .items_center()
             .justify_center();
         let content: AnyElement = match self.list() {
+            List::Group => {
+                let path = &self.projects[ix].path;
+                let position = self
+                    .group_page
+                    .as_ref()
+                    .and_then(|page| page.ticked.iter().position(|p| p == path));
+                check_box(position, t)
+            }
             List::Projects => {
                 let project = &self.projects[ix];
                 if !self.marked.is_empty() && !project.is_workspace() {
-                    // Numbered in the order marked, the folder order in the workspace.
+                    // Numbered in the order marked, the folder order in the group.
                     let position = self.marked.iter().position(|p| p == &project.path);
-                    div()
-                        .size(px(18.))
-                        .rounded_sm()
-                        .border_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(SMALL_FONT_SIZE))
-                        .map(|d| match position {
-                            Some(i) => d
-                                .bg(rgb(t.accent))
-                                .border_color(rgb(t.accent))
-                                .text_color(rgb(t.bg))
-                                .child((i + 1).to_string()),
-                            None => d.border_color(rgb(t.muted)),
-                        })
-                        .into_any_element()
+                    check_box(position, t)
                 } else if self.numbers_shown && row < 9 {
                     keycaps(&(row + 1).to_string(), t).into_any_element()
                 } else if project.missing {
                     glyph(icons::MISSING, t.danger).into_any_element()
+                } else if project.is_workspace() {
+                    group_icon(project.paths().len(), t)
                 } else {
                     let command = project
                         .editor
@@ -326,6 +370,41 @@ impl Palette {
                 .child(icons::MORE)
         });
 
+        // A group's folders by name, each with a dot when its own window is open.
+        let members_line = project.filter(|p| p.is_workspace()).map(|group| {
+            let mut parts: Vec<AnyElement> = Vec::new();
+            for (i, (path, listed)) in self.members(group).into_iter().enumerate() {
+                if i > 0 {
+                    parts.push(div().flex_none().child("·").into_any_element());
+                }
+                parts.push(
+                    div()
+                        .flex_none()
+                        .child(member_name(&path, listed))
+                        .into_any_element(),
+                );
+                if listed.is_some_and(|m| self.open_keys.contains(&m.key())) {
+                    parts.push(
+                        div()
+                            .flex_none()
+                            .size(px(6.))
+                            .rounded_full()
+                            .bg(rgb(t.open))
+                            .into_any_element(),
+                    );
+                }
+            }
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .children(parts)
+        });
         // A line between the projects with a window open and the rest, while
         // the list shows them all in order.
         let after_open = is_projects
@@ -439,15 +518,16 @@ impl Palette {
                                     })
                                     .children(tags),
                             )
-                            .child(
-                                div()
+                            .child(match members_line {
+                                Some(line) => line,
+                                None => div()
                                     .text_size(px(SMALL_FONT_SIZE))
                                     .text_color(rgb(t.muted))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
-                            ),
+                            }),
                     )
                     .when(meta.top.is_some() || meta.bottom.is_some(), |d| {
                         let line = |text: String, color: u32| {
@@ -746,6 +826,17 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Group if self.group_page.as_ref()?.editing.is_some() => (
+                None,
+                vec!["Tick or untick folders (tab or space); alt-↑/↓ moves the highlighted one in the order they open in. ↵ saves.".into()],
+            ),
+            Mode::Group => (
+                None,
+                vec![format!(
+                    "Tick projects (tab or space) to open in one editor window, in that order. ↵ opens them once; {}-↵ saves them as a group.",
+                    secondary()
+                )],
+            ),
             Mode::Forges => {
                 let pick = self.forge_pick.as_ref()?;
                 let line = match pick.opens() {
@@ -943,6 +1034,7 @@ impl Palette {
     /// What the footer says on the left when there's no message.
     fn footer_context(&self) -> Option<String> {
         Some(match self.list() {
+            List::Group => return self.ticked_names(),
             List::Projects if !self.marked.is_empty() => {
                 let names: Vec<String> = self
                     .marked
@@ -1261,6 +1353,15 @@ impl Render for Palette {
                 if this.menu_open() {
                     return;
                 }
+                // Space ticks on the group page (no spaces in project names to type).
+                if this.list() == List::Group
+                    && event.keystroke.key == "space"
+                    && !event.keystroke.modifiers.modified()
+                {
+                    this.toggle_tick(0, cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.switch_to_number(&event.keystroke.key, window, cx)
                     || this.open_number(&event.keystroke, window, cx)
                     || this.type_in_switcher(&event.keystroke, window, cx)
@@ -1359,12 +1460,27 @@ impl Render for Palette {
             .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
+            .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                if this.list() == List::Group {
+                    this.move_tick(1, cx);
+                } else {
+                    this.select(1, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                if this.list() == List::Group {
+                    this.move_tick(-1, cx);
+                } else {
+                    this.select(-1, cx);
+                }
+            }))
             .on_action(cx.listener(Self::confirm))
             // The row's second action: in the Open-with list, make the editor
             // the project's default; on a project, open with…
             .on_action(
                 cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
                     List::OpenWith => this.toggle_project_default(window, cx),
+                    List::Group => this.save_ticked(cx),
                     List::Projects if !this.menu_open() => this.open_with_selected(cx),
                     _ => {}
                 }),
@@ -1437,7 +1553,7 @@ impl Palette {
     /// Alt-enter or ctrl-enter on a project, or the marked ones: the Open-with list.
     fn open_with_selected(&mut self, cx: &mut Context<Self>) {
         let entry = if self.marked.len() > 1 {
-            self.marked_workspace(cx)
+            self.marked_group()
         } else {
             self.selected_project().cloned()
         };

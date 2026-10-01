@@ -36,7 +36,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-t / alt-t          | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
 | backspace               | with nothing typed: back a page (out of a folder, the Open-with list…) |
-| tab / shift-tab         | mark projects to open together, moving down / up |
+| tab / shift-tab         | mark projects to open together once, moving down / up (see Groups) |
 | `#tag`                  | only the projects with that tag (see Tags) |
 | ctrl-e / alt-e          | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-g / alt-g          | open the repository page (from the git `origin` remote) |
@@ -152,18 +152,29 @@ switcher off. Windows and macOS; on macOS proj needs to be allowed under System 
 Privacy & Security › Accessibility (it asks the first time), and lists the apps with windows
 on screen, so not ones with only minimized windows or windows on other Spaces.
 
-### Opening projects together
+### Groups: opening projects together
 
-Press **tab** on a project to mark it; marks stay while you change the search. Then press
-**enter** to open all the marked projects in one editor window. For example: type `inter`,
-tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Code works the same way.
-Esc clears the marks.
+Several projects can open in one editor window: `zed interactive-v2 shared-sdk`, and the
+same for VS Code. Folders are passed in the order they were ticked.
 
-The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
-history and editor list, so next time you just search for it. Removing it (shift-delete or ctrl-k)
-forgets the combination, not the projects. Folders are passed in the order you marked them.
-Rename it (f2 or ctrl-k) to give it a shorter name; search still finds it by its
-folder names too.
+**Once:** press **tab** on a project to mark it (marks stay while you change the search), and
+**enter** opens all the marked ones together. For example: type `inter`, tab, type `shared`,
+tab, enter. Nothing is saved. Esc clears the marks.
+
+**To keep:** ctrl-k on a project → **Open together with…** opens a page listing your projects
+with that one ticked. **tab** or **space** ticks or unticks the highlighted project, and
+**alt-↑/↓** moves it earlier or later in the order (its number shows it). **enter** opens the
+ticked ones together once; **ctrl-enter** saves them as a group, a row of its own in the list,
+with its own history, editor, tags and commands, so next time you just search for it.
+Ticking the same projects in another order finds the same group.
+
+A group's row has a folder icon with how many folders it has, and its folders' names under
+its name, each with a green dot when that project has a window of its own open. Its branches
+show on the right; hovering them lists each folder's branch and changes. ctrl-k on a group →
+**Folders…** opens the same page with its folders ticked, to add, take out or reorder them;
+enter saves, keeping its name, tags and history. Rename it (f2) to give it a shorter name;
+search still finds it by its folders' names. Removing it (shift-delete) forgets the group, not
+the projects.
 
 ### Per-project editors
 

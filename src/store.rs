@@ -146,33 +146,11 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     let mut seen = HashSet::new();
     let mut projects = Vec::new();
     let mut push = |paths: Vec<PathBuf>, name: String, manual: bool| {
-        let key = entry_key(&paths);
-        if !seen.insert(key.clone()) {
+        // By the set of folders: a group is the same in any order.
+        if !seen.insert(set_key(&paths)) {
             return;
         }
-        let missing = !paths.iter().all(|p| p.is_dir());
-        let mut paths = paths.into_iter();
-        let path = paths.next().expect("at least one folder");
-        projects.push(Project {
-            name,
-            branch: (!missing).then(|| git::git_branch(&path)).flatten(),
-            editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
-            last_opened: db.opened.get(&key).copied().unwrap_or(0),
-            tags: db
-                .tags
-                .get(&key)
-                .map(|tags| tags.iter().cloned().collect())
-                .unwrap_or_default(),
-            path,
-            extra: paths.collect(),
-            manual,
-            missing,
-        });
-    };
-    let folder_name = |path: &Path| {
-        path.file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string_lossy().into_owned())
+        projects.push(entry(paths, name, manual, db));
     };
 
     let mut folders: Vec<(PathBuf, bool)> = db.manual.iter().map(|p| (p.clone(), true)).collect();
@@ -186,14 +164,9 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
             push(vec![path.clone()], folder_name(&path), manual);
         }
     }
-    for workspace in &db.workspaces {
-        if workspace.len() > 1 {
-            let name = workspace
-                .iter()
-                .map(|p| folder_name(p))
-                .collect::<Vec<_>>()
-                .join(" + ");
-            push(workspace.clone(), name, true);
+    for group in &db.workspaces {
+        if group.len() > 1 {
+            push(group.clone(), group_name(group), true);
         }
     }
 
@@ -234,6 +207,65 @@ fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A list entry for `paths` (one folder, or a group's), with what `db` knows
+/// about it.
+fn entry(paths: Vec<PathBuf>, name: String, manual: bool, db: &Db) -> Project {
+    let key = entry_key(&paths);
+    let missing = !paths.iter().all(|p| p.is_dir());
+    let mut paths = paths.into_iter();
+    let path = paths.next().expect("at least one folder");
+    Project {
+        name,
+        branch: (!missing).then(|| git::git_branch(&path)).flatten(),
+        editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
+        last_opened: db.opened.get(&key).copied().unwrap_or(0),
+        tags: db
+            .tags
+            .get(&key)
+            .map(|tags| tags.iter().cloned().collect())
+            .unwrap_or_default(),
+        path,
+        extra: paths.collect(),
+        manual,
+        missing,
+    }
+}
+
+fn folder_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+/// A group's name until it's renamed: "app + shared-sdk".
+fn group_name(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| folder_name(p))
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+/// The folders' key whatever their order, to tell groups apart.
+fn set_key(paths: &[PathBuf]) -> String {
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    entry_key(&sorted)
+}
+
+/// A group of `paths` that isn't saved, to open them together once.
+pub fn unsaved_group(paths: Vec<PathBuf>, db: &Db) -> Project {
+    let name = group_name(&paths);
+    entry(paths, name, true, db)
+}
+
+/// The saved group with these folders, in any order, as its folders in
+/// their saved order.
+pub fn saved_group<'a>(db: &'a Db, paths: &[PathBuf]) -> Option<&'a Vec<PathBuf>> {
+    let key = set_key(paths);
+    db.workspaces.iter().find(|group| set_key(group) == key)
+}
+
 /// Appends the parent folder to names shared by several projects: "app (client)".
 fn disambiguate(projects: &mut [Project]) {
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -267,16 +299,48 @@ pub fn rename(db: &mut Db, key: &str, name: &str) {
     }
 }
 
-/// Saves a set of folders opened together as a workspace, returning its key.
-pub fn remember_workspace(db: &mut Db, paths: Vec<PathBuf>) -> String {
-    let key = entry_key(&paths);
-    if !db.workspaces.contains(&paths) {
-        db.workspaces.push(paths);
+/// Saves `paths` as a group, returning its key. A saved group with the same
+/// folders in another order is kept as it is.
+pub fn save_group(db: &mut Db, paths: Vec<PathBuf>) -> String {
+    if let Some(saved) = saved_group(db, &paths) {
+        return entry_key(saved);
     }
+    let key = entry_key(&paths);
+    db.workspaces.push(paths);
     key
 }
 
-/// Forgets a workspace and everything keyed by it.
+/// Changes a saved group's folders (or their order), keeping its name, tags,
+/// editor, commands and history. Returns its new key.
+pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
+    let (old_key, new_key) = (entry_key(old), entry_key(&new));
+    // Another saved group already has these folders: this one becomes that.
+    if let Some(other) = saved_group(db, &new).filter(|g| entry_key(g) != old_key) {
+        let other = entry_key(other);
+        db.workspaces.retain(|g| entry_key(g) != old_key);
+        return other;
+    }
+    match db.workspaces.iter_mut().find(|g| entry_key(g) == old_key) {
+        Some(group) => *group = new,
+        None => db.workspaces.push(new),
+    }
+    if old_key != new_key {
+        fn rekey<V>(map: &mut BTreeMap<String, V>, old: &str, new: &str) {
+            if let Some(value) = map.remove(old) {
+                map.insert(new.to_string(), value);
+            }
+        }
+        rekey(&mut db.names, &old_key, &new_key);
+        rekey(&mut db.editors, &old_key, &new_key);
+        rekey(&mut db.opened, &old_key, &new_key);
+        rekey(&mut db.tags, &old_key, &new_key);
+        rekey(&mut db.commands, &old_key, &new_key);
+    }
+    new_key
+}
+
+/// Forgets an entry (a group, or a project, which gets hidden if scanned)
+/// and everything keyed by it.
 pub fn forget_entry(db: &mut Db, project: &Project) {
     let key = project.key();
     if project.is_workspace() {
@@ -429,7 +493,7 @@ mod tests {
             ..Db::default()
         };
         db.opened.insert(entry_key(std::slice::from_ref(&gone)), 99);
-        remember_workspace(&mut db, vec![app.clone(), gone.clone()]);
+        save_group(&mut db, vec![app.clone(), gone.clone()]);
         let projects = collect(&Config::default(), &db);
         let listed: Vec<(&Path, bool, bool)> = projects
             .iter()
@@ -531,11 +595,8 @@ mod tests {
             ..Db::default()
         };
 
-        let key = remember_workspace(&mut db, vec![app.clone(), sdk.clone()]);
-        assert_eq!(
-            remember_workspace(&mut db, vec![app.clone(), sdk.clone()]),
-            key
-        );
+        let key = save_group(&mut db, vec![app.clone(), sdk.clone()]);
+        assert_eq!(save_group(&mut db, vec![app.clone(), sdk.clone()]), key);
         assert_eq!(
             db.workspaces.len(),
             1,
@@ -590,6 +651,43 @@ mod tests {
         forget_entry(&mut db, renamed);
         assert!(db.names.is_empty(), "removing forgets the name");
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn groups_are_the_same_in_any_order() {
+        let (a, b, c) = (
+            PathBuf::from("/r/a"),
+            PathBuf::from("/r/b"),
+            PathBuf::from("/r/c"),
+        );
+        let mut db = Db::default();
+        let key = save_group(&mut db, vec![a.clone(), b.clone()]);
+        assert_eq!(key, entry_key(&[a.clone(), b.clone()]));
+        // Ticked the other way round: still that group.
+        assert_eq!(save_group(&mut db, vec![b.clone(), a.clone()]), key);
+        assert_eq!(db.workspaces.len(), 1);
+        assert_eq!(
+            saved_group(&db, &[b.clone(), a.clone()]),
+            Some(&vec![a.clone(), b.clone()])
+        );
+
+        // Changing its folders keeps what's keyed by it.
+        db.names.insert(key.clone(), "web".into());
+        db.opened.insert(key.clone(), 5);
+        let new = change_group(&mut db, &[a.clone(), b.clone()], vec![b.clone(), c.clone()]);
+        assert_eq!(new, entry_key(&[b.clone(), c.clone()]));
+        assert_eq!(db.workspaces, vec![vec![b.clone(), c.clone()]]);
+        assert_eq!(db.names.get(&new).map(String::as_str), Some("web"));
+        assert_eq!(db.opened.get(&new), Some(&5));
+        assert!(!db.names.contains_key(&key));
+
+        // Changed into another saved group's folders: it becomes that one.
+        let other = save_group(&mut db, vec![a.clone(), c.clone()]);
+        assert_eq!(
+            change_group(&mut db, &[b.clone(), c.clone()], vec![c, a]),
+            other
+        );
+        assert_eq!(db.workspaces.len(), 1);
     }
 
     #[test]

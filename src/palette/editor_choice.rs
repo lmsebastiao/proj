@@ -86,6 +86,8 @@ impl Palette {
         editor: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        // Projects opened together get an editor of their own as a group.
+        self.keep_unsaved(&project.key());
         store::set_editor(&mut self.db, &project.key(), editor.clone());
         self.undo = None;
         if let Err(err) = store::save_db(&self.db) {

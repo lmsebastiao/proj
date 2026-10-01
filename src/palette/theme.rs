@@ -95,6 +95,7 @@ pub(super) mod icons {
         // The actions menu.
         pub const OPEN_WITH: &str = "\u{E8A7}";
         pub const FOLDER: &str = "\u{E8B7}";
+        pub const GROUP: &str = "\u{E8F1}";
         pub const TERMINAL: &str = "\u{E756}";
         pub const RUN: &str = "\u{E768}";
         pub const ADD: &str = "\u{E710}";
@@ -128,6 +129,7 @@ pub(super) mod icons {
         pub const CLOSE: &str = "✕";
         pub const OPEN_WITH: &str = "↗";
         pub const FOLDER: &str = "▤";
+        pub const GROUP: &str = "▦";
         pub const TERMINAL: &str = "›";
         pub const RUN: &str = "▶";
         pub const ADD: &str = "+";
