@@ -100,10 +100,21 @@ impl Palette {
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
                     s(&["mod-c"], "Copy the path").run(CopyPath),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
+                    s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
+                    s(
+                        &["mod-1…9"],
+                        "Open the project in that place (numbered while mod is held)",
+                    ),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["@"], "Open editor windows, to search and switch to"),
                     s(&["#tag"], "Just the projects with that tag (set in mod-k)"),
+                    s(
+                        &["paste"],
+                        "A folder path to add it, or a git URL to clone it",
+                    ),
                     s(&["↑ ↓"], "Move the selection"),
+                    s(&["pgup", "pgdn"], "Move a page at a time").run(SelectPageDown),
+                    s(&["home", "end"], "The first or last, with nothing typed"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
                 ]

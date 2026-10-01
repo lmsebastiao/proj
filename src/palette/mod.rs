@@ -18,6 +18,7 @@ mod tooltip;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
+    time::Duration,
 };
 
 use git::GitStatus;
@@ -130,7 +131,16 @@ pub struct Palette {
     open_keys: HashSet<String>,
     /// The switcher's modifiers while they're held; letting go switches.
     hold: Option<Modifiers>,
+    /// The footer's message: problems stay until the next key; `notice`s go
+    /// by themselves.
     status: Option<SharedString>,
+    /// The database before the last remove, and what was removed, for ctrl-z.
+    /// Any other change to the database drops it.
+    undo: Option<(Db, String)>,
+    /// Ctrl (cmd on macOS) alone is down, and has been for a moment: the first
+    /// nine projects show their number.
+    ctrl_down: bool,
+    numbers_shown: bool,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -206,6 +216,9 @@ impl Palette {
             open_keys: HashSet::new(),
             hold: None,
             status: None,
+            undo: None,
+            ctrl_down: false,
+            numbers_shown: false,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         };
@@ -369,11 +382,9 @@ impl Palette {
             }
         }
         let placeholder = match mode {
+            // The rest (pasting a path or git URL…) is under F1.
             Mode::Projects => {
-                format!(
-                    "Search projects, > for commands, {SWITCH_PREFIX} for open windows, \
-                     or paste a folder path or git URL…"
-                )
+                format!("Search projects…   > commands · {SWITCH_PREFIX} windows · # tags")
             }
             Mode::Editors if self.config.editor.is_none() => {
                 "Choose the editor to open projects with…".into()
@@ -538,7 +549,30 @@ impl Palette {
         if len == 0 {
             return;
         }
-        self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
+        let row = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
+        self.select_row(row, cx);
+    }
+
+    /// Page down (`delta` 1) or up (-1): a list's height of rows at a time,
+    /// stopping at the ends rather than going round.
+    fn select_page(&mut self, delta: isize, cx: &mut Context<Self>) {
+        // About as many rows as the list shows.
+        const PAGE: usize = 6;
+        let row = if delta < 0 {
+            self.selected.saturating_sub(PAGE)
+        } else {
+            self.selected + PAGE
+        };
+        self.select_row(row, cx);
+    }
+
+    /// Highlights `row` (or the last one) and scrolls to it.
+    fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
+        let len = self.matches.len();
+        if len == 0 {
+            return;
+        }
+        self.selected = row.min(len - 1);
         self.confirm_remove = None;
         if self.list() == List::Actions {
             let entry = self
@@ -702,10 +736,66 @@ impl Palette {
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
+        // A change after a remove: undoing it now would lose this one.
+        self.undo = None;
         if let Err(err) = store::save_db(&self.db) {
             self.status = Some(format!("Could not save: {err}").into());
             cx.notify();
         }
+    }
+
+    /// Ctrl went down (`down`) or up. The numbers show once it has been held
+    /// for a moment, so ctrl shortcuts like ctrl-k don't flash them.
+    fn ctrl_held(&mut self, down: bool, cx: &mut Context<Self>) {
+        self.ctrl_down = down;
+        if !down {
+            if self.numbers_shown {
+                self.numbers_shown = false;
+                cx.notify();
+            }
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(400))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.ctrl_down && !this.numbers_shown {
+                    this.numbers_shown = true;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A passing message in the footer, e.g. "Pinned proj", gone after a few
+    /// seconds (unless another message took its place).
+    fn notice(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.notice_for(text, Duration::from_secs(4), cx);
+    }
+
+    fn notice_for(
+        &mut self,
+        text: impl Into<SharedString>,
+        shown: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let text = text.into();
+        self.status = Some(text.clone());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(shown).await;
+            this.update(cx, |this, cx| {
+                if this.status.as_ref() == Some(&text) {
+                    this.status = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 

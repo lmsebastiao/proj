@@ -3,8 +3,8 @@
 use std::{cmp::Ordering, ops::Range};
 
 use gpui::{
-    AnyElement, Context, FontWeight, HighlightStyle, KeyDownEvent, StyledText, Window, div,
-    prelude::*, px, rgb, uniform_list,
+    AnyElement, Context, FontWeight, HighlightStyle, KeyDownEvent, ModifiersChangedEvent,
+    StyledText, Window, div, prelude::*, px, rgb, rgba, uniform_list,
 };
 
 use crate::{input, paths, store};
@@ -79,18 +79,26 @@ impl Palette {
                     None => d.border_color(rgb(t.muted)),
                 })
         });
-        // A window's number, for the number keys while holding the switcher and
-        // the switch-by-number shortcuts (alt+shift+1…9); the ones past 9 keep
-        // the space so the titles line up.
-        let number = (self.list() == List::Switch
-            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some()))
-        .then(|| {
+        // A switcher row's number, for the number keys while holding the
+        // switcher and the switch-by-number shortcuts (alt+shift+1…9); and
+        // while ctrl is held, a project's place for ctrl+1…9. The ones past 9
+        // keep the space so the titles line up.
+        let number = if self.list() == List::Switch
+            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some())
+        {
+            Some(m.ix)
+        } else if self.list() == List::Projects && self.numbers_shown {
+            Some(row)
+        } else {
+            None
+        }
+        .map(|n| {
             div()
                 .flex_none()
                 .w(px(12.))
                 .text_size(px(SMALL_FONT_SIZE))
                 .text_color(rgb(t.muted))
-                .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
+                .when(n < 9, |d| d.child((n + 1).to_string()))
         });
         // Switcher rows can be dragged to another place in the list (it shows
         // every row in order then, so `row` is also the row's index).
@@ -120,20 +128,25 @@ impl Palette {
         // A project whose folder is gone is dimmed; tags show after the name.
         let project = (self.list() == List::Projects).then(|| &self.projects[m.ix]);
         let missing = project.is_some_and(|p| p.missing);
-        let tags: Vec<String> = project
-            .map(|p| p.tags.iter().map(|tag| format!("#{tag}")).collect())
-            .unwrap_or_default();
-        let badge = |text: String| {
-            div()
-                .flex_none()
-                .px_1()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(t.border))
-                .text_size(px(SMALL_FONT_SIZE))
-                .text_color(rgb(t.muted))
-                .child(text)
-        };
+        // Each tag in its own colour, so the same tag looks the same everywhere.
+        let tags: Vec<_> = project
+            .map(|p| p.tags.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tag| {
+                let color = t.tag_color(&tag);
+                div()
+                    .flex_none()
+                    .px_1()
+                    .rounded_sm()
+                    .border_1()
+                    // The colour, faded.
+                    .border_color(rgba((color << 8) | 0x66))
+                    .text_size(px(SMALL_FONT_SIZE))
+                    .text_color(rgb(color))
+                    .child(format!("#{tag}"))
+            })
+            .collect();
         // A switcher row's close button, like ctrl-w: shown on the highlighted
         // row, and on any row the mouse is over.
         let close = (self.list() == List::Switch).then(|| {
@@ -231,128 +244,151 @@ impl Palette {
                 })
         });
 
+        // A line between the pinned projects and the rest, while the list
+        // shows them all in order.
+        let after_pins = self.list() == List::Projects
+            && self.filter_query().is_empty()
+            && row > 0
+            && !pinned
+            && self.projects[self.matches[row - 1].ix].pinned;
+
         // uniform_list lays each row out on its own, so both levels need an explicit width.
-        div().w_full().px_2().child(
-            div()
-                .id(row)
-                .group(ROW_GROUP)
-                .w_full()
-                .h(px(ROW_HEIGHT))
-                .px_3()
-                .rounded_md()
-                .flex()
-                .items_center()
-                .gap_3()
-                .when(row == self.selected, |d| d.bg(rgb(t.selected)))
-                .hover(|d| d.bg(rgb(t.selected)))
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.selected = row;
-                    this.confirm(&Confirm, window, cx);
-                }))
-                .when_some(dragged, |d, dragged| {
-                    d.on_drag(dragged, |dragged, _, window, cx| {
-                        let width = window.viewport_size().width - px(18.);
-                        cx.new(|_| DraggedWindow {
-                            width,
-                            ..dragged.clone()
-                        })
-                    })
-                    // A line where it would land: above this row when coming
-                    // from below, under it when coming from above.
-                    .drag_over::<DraggedWindow>(move |style, dragged, _, _| {
-                        match dragged.ix.cmp(&row) {
-                            Ordering::Greater => style.border_t_2().border_color(rgb(t.accent)),
-                            Ordering::Less => style.border_b_2().border_color(rgb(t.accent)),
-                            Ordering::Equal => style,
-                        }
-                    })
-                    .on_drop(cx.listener(
-                        move |this, dragged: &DraggedWindow, _, cx| {
-                            this.move_window(dragged.ix, row, cx);
-                        },
-                    ))
-                })
-                .children(number)
-                .children(mark)
-                .children(program)
-                .child(
+        div()
+            .w_full()
+            .px_2()
+            .relative()
+            .when(after_pins, |d| {
+                d.child(
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .text_size(px(FONT_SIZE))
-                                .text_color(rgb(if missing { t.muted } else { t.text }))
-                                .overflow_hidden()
-                                .child(StyledText::new(title).with_highlights(title_hl))
-                                .when(open, |d| {
-                                    d.child(
-                                        div()
-                                            .id(("open", row))
-                                            .flex_none()
-                                            .size(px(8.))
-                                            .rounded_full()
-                                            .bg(rgb(t.open))
-                                            .tooltip(tooltip(
-                                                "An editor window is open · ↵ switches to it",
-                                                t,
-                                            )),
-                                    )
-                                })
-                                .children(tags.into_iter().map(badge)),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(SMALL_FONT_SIZE))
-                                .text_color(rgb(t.muted))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
-                        ),
+                        .absolute()
+                        .top_0()
+                        .left(px(20.))
+                        .right(px(20.))
+                        .h(px(1.))
+                        .bg(rgb(t.border)),
                 )
-                .children(icons)
-                .when(meta.top.is_some() || meta.bottom.is_some(), |d| {
-                    let line = |text: String, color: u32| {
+            })
+            .child(
+                div()
+                    .id(row)
+                    .group(ROW_GROUP)
+                    .w_full()
+                    .h(px(ROW_HEIGHT))
+                    .px_3()
+                    .rounded_md()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .when(row == self.selected, |d| d.bg(rgb(t.selected)))
+                    .hover(|d| d.bg(rgb(t.selected)))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.selected = row;
+                        this.confirm(&Confirm, window, cx);
+                    }))
+                    .when_some(dragged, |d, dragged| {
+                        d.on_drag(dragged, |dragged, _, window, cx| {
+                            let width = window.viewport_size().width - px(18.);
+                            cx.new(|_| DraggedWindow {
+                                width,
+                                ..dragged.clone()
+                            })
+                        })
+                        // A line where it would land: above this row when coming
+                        // from below, under it when coming from above.
+                        .drag_over::<DraggedWindow>(move |style, dragged, _, _| {
+                            match dragged.ix.cmp(&row) {
+                                Ordering::Greater => style.border_t_2().border_color(rgb(t.accent)),
+                                Ordering::Less => style.border_b_2().border_color(rgb(t.accent)),
+                                Ordering::Equal => style,
+                            }
+                        })
+                        .on_drop(cx.listener(
+                            move |this, dragged: &DraggedWindow, _, cx| {
+                                this.move_window(dragged.ix, row, cx);
+                            },
+                        ))
+                    })
+                    .children(number)
+                    .children(mark)
+                    .children(program)
+                    .child(
                         div()
-                            .text_color(rgb(color))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(text)
-                    };
-                    d.child(
-                        div()
-                            .id(("meta", row))
-                            .flex_none()
-                            .max_w(px(280.))
+                            .flex_1()
+                            .min_w_0()
                             .flex()
                             .flex_col()
-                            .items_end()
-                            .text_size(px(SMALL_FONT_SIZE))
-                            .children(meta.top.map(|(text, color)| line(text, color)))
-                            .children(meta.bottom.map(|text| {
+                            .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_1()
-                                    .children(own_editor.map(|program| {
-                                        app_icon(Some(program), app_icon::SMALL_SIZE)
-                                    }))
-                                    .child(line(text, t.muted))
-                            }))
-                            // What the branch's marks, "missing" or "· →" mean.
-                            .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
+                                    .gap_2()
+                                    .text_size(px(FONT_SIZE))
+                                    .text_color(rgb(if missing { t.muted } else { t.text }))
+                                    .overflow_hidden()
+                                    .child(StyledText::new(title).with_highlights(title_hl))
+                                    .when(open, |d| {
+                                        d.child(
+                                            div()
+                                                .id(("open", row))
+                                                .flex_none()
+                                                .size(px(8.))
+                                                .rounded_full()
+                                                .bg(rgb(t.open))
+                                                .tooltip(tooltip(
+                                                    "An editor window is open · ↵ switches to it",
+                                                    t,
+                                                )),
+                                        )
+                                    })
+                                    .children(tags),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(SMALL_FONT_SIZE))
+                                    .text_color(rgb(t.muted))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
+                            ),
                     )
-                })
-                .children(close),
-        )
+                    .children(icons)
+                    .when(meta.top.is_some() || meta.bottom.is_some(), |d| {
+                        let line = |text: String, color: u32| {
+                            div()
+                                .text_color(rgb(color))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .child(text)
+                        };
+                        d.child(
+                            div()
+                                .id(("meta", row))
+                                .flex_none()
+                                .max_w(px(280.))
+                                .flex()
+                                .flex_col()
+                                .items_end()
+                                .text_size(px(SMALL_FONT_SIZE))
+                                .children(meta.top.map(|(text, color)| line(text, color)))
+                                .children(meta.bottom.map(|text| {
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .children(own_editor.map(|program| {
+                                            app_icon(Some(program), app_icon::SMALL_SIZE)
+                                        }))
+                                        .child(line(text, t.muted))
+                                }))
+                                // What the branch's marks, "missing" or "· →" mean.
+                                .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
+                        )
+                    })
+                    .children(close),
+            )
     }
 
     /// The actions menu: one-line rows with an icon, under section headings,
@@ -867,6 +903,11 @@ impl Render for Palette {
                         .text_color(rgb(t.accent))
                         .child(names.join(" + "))
                 }
+                (None, List::Projects) if !self.filter_query().is_empty() => div().child(format!(
+                    "{} of {} projects",
+                    self.matches.len(),
+                    self.projects.len()
+                )),
                 (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
                 (None, List::Browse) => div().child(format!("{} items", self.item_count())),
                 (None, List::Switch) if self.hold.is_some() => div().child("let go to switch"),
@@ -893,11 +934,33 @@ impl Render for Palette {
             // and other keys start a search.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.switch_to_number(&event.keystroke.key, window, cx)
+                    || this.open_number(&event.keystroke, window, cx)
                     || this.type_in_switcher(&event.keystroke, window, cx)
                 {
                     cx.stop_propagation();
                 }
             }))
+            // Ctrl (cmd) alone held: the projects show the numbers ctrl+1…9 open.
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                let m = event.modifiers;
+                this.ctrl_held(m.secondary() && !m.alt && !m.shift, cx);
+            }))
+            // Home/end move the text cursor; with nothing typed, the selection.
+            .capture_action(cx.listener(|this, _: &input::Home, _, cx| {
+                if this.query.is_empty() && !this.matches.is_empty() {
+                    this.select_row(0, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &input::End, _, cx| {
+                if this.query.is_empty() && !this.matches.is_empty() {
+                    this.select_row(usize::MAX, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SelectPageDown, _, cx| this.select_page(1, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageUp, _, cx| this.select_page(-1, cx)))
+            .on_action(cx.listener(Self::undo_remove))
             // →/← browse into projects and folders, but only at the ends of the
             // search text, so they still move the cursor while editing it.
             .capture_action(cx.listener(|this, _: &input::Right, _, cx| {

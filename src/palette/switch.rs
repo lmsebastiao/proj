@@ -350,7 +350,7 @@ impl Palette {
         let selected = self.selected;
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));
-        self.status = Some(format!("Closing {}", closed.title).into());
+        self.notice(format!("Closing {}", closed.title), cx);
     }
 
     /// The open window showing `project`, preferring one of `editor`'s and then

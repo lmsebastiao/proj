@@ -33,6 +33,8 @@ image = { version = "0.25", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 # package.json scripts, listed in the file's order.
 serde_json = { version = "1", features = ["preserve_order"] }
+# The date a project was last opened, in local time.
+time = { version = "0.3", features = ["local-offset"] }
 toml = "1.1.6"
 toml_edit = "0.25"
 ureq = { version = "3.4.2", features = ["json"] }

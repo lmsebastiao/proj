@@ -24,6 +24,9 @@ then opens a folder picker where you can select one or more projects at once.
 | ----------------------- | ------------------------------------------ |
 | type                    | fuzzy filter by name, then by path         |
 | ↑ / ↓                   | move selection                             |
+| pgup / pgdn, home / end | a page at a time; the first / last (with nothing typed) |
+| ctrl-1 … 9              | open the project in that place (hold ctrl a moment to see the numbers) |
+| ctrl-z                  | put back the project just removed          |
 | enter                   | open in editor                             |
 | ctrl-t                  | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |

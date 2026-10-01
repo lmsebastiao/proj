@@ -28,7 +28,10 @@ actions!(
         Dismiss,
         QuitApp,
         RemoveItem,
-        CloseWindow
+        CloseWindow,
+        UndoRemove,
+        SelectPageDown,
+        SelectPageUp
     ]
 );
 
@@ -39,6 +42,10 @@ pub fn bind_keys(cx: &mut App) {
         // Moving
         KeyBinding::new("down", SelectNext, ctx),
         KeyBinding::new("up", SelectPrev, ctx),
+        KeyBinding::new("pagedown", SelectPageDown, ctx),
+        KeyBinding::new("pageup", SelectPageUp, ctx),
+        // Home and end move the text cursor, and with an empty search, the
+        // selection (see `render`).
         // Opening
         KeyBinding::new("enter", Confirm, ctx),
         // Open with another editor, or set the project's default editor.
@@ -65,6 +72,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-q", QuitApp, ctx),
         // A command added to a project's actions menu: take it out again.
         KeyBinding::new("shift-delete", RemoveItem, ctx),
+        // Put back what was just removed from the list.
+        KeyBinding::new("secondary-z", UndoRemove, ctx),
         // The window switcher: close the highlighted window.
         KeyBinding::new("secondary-w", CloseWindow, ctx),
         // The window switcher is used with alt held down.

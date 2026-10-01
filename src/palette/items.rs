@@ -423,9 +423,11 @@ impl Palette {
         Forge::for_url(&self.actions_web_url()?, &self.config.forges)
     }
 
-    /// The branch, with what `git status` said about it: "main ● ↑2".
+    /// The branch, with what `git status` said about it: "main ● ↑2". A long
+    /// name loses its middle, where branch names tend to be alike
+    /// ("feature/…-login-fix").
     pub(super) fn branch_label(&self, project: &Project) -> Option<String> {
-        let branch = project.branch.as_ref()?;
+        let branch = middle_ellipsis(project.branch.as_ref()?, 32);
         let status = self
             .git_status
             .get(&project.path)
@@ -491,7 +493,14 @@ impl Palette {
                 Meta {
                     top: self.branch_label(project).map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
-                    tip: self.branch_tip(project),
+                    // The marks after the branch, and when exactly "3d ago" was.
+                    tip: {
+                        let opened = (project.last_opened > 0)
+                            .then(|| format!("Opened {}", store::date_of(project.last_opened)));
+                        let lines: Vec<String> =
+                            self.branch_tip(project).into_iter().chain(opened).collect();
+                        (!lines.is_empty()).then(|| lines.join("\n"))
+                    },
                 }
             }
             List::OpenWith => {
@@ -648,5 +657,32 @@ impl Palette {
             List::Templates => self.templates.len(),
             List::Text => 0,
         }
+    }
+}
+
+/// `text` cut to `max` characters by taking out its middle: "feature/…-login-fix".
+fn middle_ellipsis(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max {
+        return text.to_string();
+    }
+    // More of the end, where the part that tells branches apart usually is.
+    let head = (max - 1) * 2 / 5;
+    let tail = max - 1 - head;
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{start}…{end}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_names_lose_their_middle() {
+        assert_eq!(middle_ellipsis("main", 32), "main");
+        let cut = middle_ellipsis("feature/PROJ-1234-rework-the-login-page-fix", 32);
+        assert_eq!(cut.chars().count(), 32);
+        assert_eq!(cut, "feature/PROJ…-the-login-page-fix");
     }
 }

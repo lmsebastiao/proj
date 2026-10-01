@@ -175,7 +175,7 @@ impl Palette {
         self.load_actions(&project);
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));
-        self.status = Some(format!("Removed \"{}\"", task.command).into());
+        self.notice(format!("Removed \"{}\"", task.command), cx);
     }
 
     /// The menu's rows under their section headings; while searching, just

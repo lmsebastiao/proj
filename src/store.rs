@@ -19,7 +19,7 @@ use crate::{
 /// `names`, `pinned`, `editors`, `opened`, `tags` and `commands` are keyed by
 /// [`Project::key`]: the folder path for a project, or all folder paths joined
 /// with `|` for a workspace.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Db {
     pub manual: Vec<PathBuf>,
@@ -343,6 +343,41 @@ pub fn set_editor(db: &mut Db, key: &str, editor: Option<String>) {
     };
 }
 
+/// "Tue 29 Sep, 14:12" (with the year when it isn't this one), in local time
+/// where the system says what that is, else UTC.
+pub fn date_of(then: u64) -> String {
+    use time::{OffsetDateTime, UtcOffset};
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let local = |secs: u64| {
+        let secs = i64::try_from(secs).ok()?;
+        Some(
+            OffsetDateTime::from_unix_timestamp(secs)
+                .ok()?
+                .to_offset(offset),
+        )
+    };
+    let (Some(date), Some(today)) = (local(then), local(now())) else {
+        return String::new();
+    };
+    format_date(date, today.year())
+}
+
+fn format_date(date: time::OffsetDateTime, this_year: i32) -> String {
+    let weekday = &format!("{}", date.weekday())[..3];
+    let month = &format!("{}", date.month())[..3];
+    let year = if date.year() == this_year {
+        String::new()
+    } else {
+        format!(" {}", date.year())
+    };
+    format!(
+        "{weekday} {} {month}{year}, {:02}:{:02}",
+        date.day(),
+        date.hour(),
+        date.minute()
+    )
+}
+
 /// "just now", "5m ago", "3h ago", "2d ago", "3w ago", "4mo ago", "1y ago".
 pub fn ago(then: u64, now: u64) -> String {
     let secs = now.saturating_sub(then);
@@ -361,6 +396,14 @@ pub fn ago(then: u64, now: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dates() {
+        // 2026-09-29 14:12 UTC, a Tuesday.
+        let date = time::OffsetDateTime::from_unix_timestamp(1_790_691_120).unwrap();
+        assert_eq!(format_date(date, 2026), "Tue 29 Sep, 14:12");
+        assert_eq!(format_date(date, 2027), "Tue 29 Sep 2026, 14:12");
+    }
 
     #[test]
     fn relative_time() {

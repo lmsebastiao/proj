@@ -87,6 +87,7 @@ impl Palette {
         cx: &mut Context<Self>,
     ) {
         store::set_editor(&mut self.db, &project.key(), editor.clone());
+        self.undo = None;
         if let Err(err) = store::save_db(&self.db) {
             self.status = Some(format!("Could not save: {err}").into());
             cx.notify();
@@ -130,8 +131,7 @@ impl Palette {
         self.select_where(|this, ix| {
             matches!(&this.editors[ix], EditorOption::Detected(e) if e.command == command)
         });
-        self.status = Some(status.into());
-        cx.notify();
+        self.notice(status, cx);
     }
 
     pub(super) fn choose_editor(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -173,11 +173,12 @@ impl Palette {
         let label = self.name_of(&command);
         self.back_to_projects(cx);
         let own = self.projects.iter().filter(|p| p.editor.is_some()).count();
-        self.status = Some(match own {
-            0 => format!("All projects now open in {label}").into(),
-            1 => format!("Projects now open in {label}, except 1 with its own editor").into(),
-            n => format!("Projects now open in {label}, except {n} with their own editor").into(),
-        });
+        let status = match own {
+            0 => format!("All projects now open in {label}"),
+            1 => format!("Projects now open in {label}, except 1 with its own editor"),
+            n => format!("Projects now open in {label}, except {n} with their own editor"),
+        };
+        self.notice(status, cx);
         // First run: go straight on to picking projects.
         if self.projects.is_empty() {
             self.add_projects(&AddProjects, window, cx);

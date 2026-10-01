@@ -4,9 +4,10 @@
 use std::{
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
-use gpui::{ClipboardItem, Context, Focusable, PathPromptOptions, Window};
+use gpui::{ClipboardItem, Context, Focusable, Keystroke, PathPromptOptions, Window};
 
 use crate::{
     autostart, config, git,
@@ -18,7 +19,7 @@ use crate::{
 use super::{
     Palette,
     items::{CloneTarget, List, Mode, PaletteCommand, Target},
-    keymap::{AddProjects, CopyPath, OpenRemote},
+    keymap::{AddProjects, CopyPath, OpenRemote, UndoRemove},
 };
 
 impl Palette {
@@ -52,6 +53,33 @@ impl Palette {
         self.save(cx);
         self.reload_projects();
         self.projects.iter().find(|p| p.key() == key).cloned()
+    }
+
+    /// Ctrl+1…9 in the project list: opens the project in that place, as
+    /// numbered while ctrl is held. Returns whether the key was one of those.
+    pub(super) fn open_number(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mods = keystroke.modifiers;
+        if self.list() != List::Projects || !mods.secondary() || mods.alt || mods.shift {
+            return false;
+        }
+        let Some(n) = keystroke
+            .key
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (1..=9).contains(n))
+        else {
+            return false;
+        };
+        if let Some(project) = self.matches.get(n - 1).map(|m| self.projects[m.ix].clone()) {
+            self.numbers_shown = false;
+            self.open_entry(project, window, cx);
+        }
+        true
     }
 
     /// Enter on an entry: to its editor window if one is open, else open it in
@@ -174,7 +202,7 @@ impl Palette {
         // Keep the selection on the same entry after re-sorting.
         self.select_where(|this, ix| this.projects[ix].key() == key);
         let verb = if pinned { "Pinned" } else { "Unpinned" };
-        self.status = Some(format!("{verb} {}", project.name).into());
+        self.notice(format!("{verb} {}", project.name), cx);
     }
 
     /// Type a new name for the selected entry in the search box.
@@ -199,7 +227,7 @@ impl Palette {
         self.set_mode(Mode::Projects, cx);
         self.select_where(|this, ix| this.projects[ix].key() == key);
         if let Some(status) = status {
-            self.status = Some(status.into());
+            self.notice(status, cx);
         }
     }
 
@@ -258,8 +286,10 @@ impl Palette {
             .projects
             .iter()
             .find(|p| p.key() == key)
-            .map(|p| &p.name);
-        self.status = name.map(|name| format!("{verb} {name}").into());
+            .map(|p| p.name.clone());
+        if let Some(name) = name {
+            self.notice(format!("{verb} {name}"), cx);
+        }
     }
 
     /// Enter on a pasted git URL: clone it into the first scan folder (or one
@@ -459,14 +489,41 @@ impl Palette {
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
+        let before = self.db.clone();
         store::forget_entry(&mut self.db, &project);
         self.save(cx);
+        self.undo = Some((before, project.name.clone()));
         let key = project.key();
         self.projects.retain(|p| p.key() != key);
         let selected = self.selected;
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));
-        self.status = Some(format!("Removed {}", project.name).into());
+        self.say_removed(&project.name, cx);
+    }
+
+    /// "Removed proj · ctrl-z undoes it", up for longer than other notices.
+    fn say_removed(&mut self, what: &str, cx: &mut Context<Self>) {
+        let undo = format!("{}-z", super::secondary());
+        self.notice_for(
+            format!("Removed {what} · {undo} undoes it"),
+            Duration::from_secs(8),
+            cx,
+        );
+    }
+
+    /// Ctrl-Z after a remove: puts back what it took off the list, with its
+    /// name, pin, tags and history.
+    pub(super) fn undo_remove(&mut self, _: &UndoRemove, _: &mut Window, cx: &mut Context<Self>) {
+        let Some((db, what)) = self.undo.take() else {
+            return;
+        };
+        self.db = db;
+        self.save(cx);
+        self.reload_projects();
+        if self.mode == Mode::Projects {
+            self.refilter(cx);
+        }
+        self.notice(format!("Put back {what}"), cx);
     }
 
     pub(super) fn run_command(
@@ -480,8 +537,7 @@ impl Palette {
                 Ok(()) => {
                     self.autostart = !self.autostart;
                     let state = if self.autostart { "on" } else { "off" };
-                    self.status = Some(format!("Start on login turned {state}").into());
-                    cx.notify();
+                    self.notice(format!("Start on login turned {state}"), cx);
                 }
                 Err(err) => {
                     self.status = Some(format!("Could not change start on login: {err}").into());
@@ -500,18 +556,21 @@ impl Palette {
                     .filter(|p| p.missing)
                     .cloned()
                     .collect();
+                let before = self.db.clone();
                 for project in &missing {
                     store::forget_entry(&mut self.db, project);
                 }
                 self.save(cx);
-                self.reload_projects();
-                self.set_query("", cx);
                 let projects = if missing.len() == 1 {
                     "project"
                 } else {
                     "projects"
                 };
-                self.status = Some(format!("Removed {} missing {projects}", missing.len()).into());
+                let what = format!("{} missing {projects}", missing.len());
+                self.undo = Some((before, what.clone()));
+                self.reload_projects();
+                self.set_query("", cx);
+                self.say_removed(&what, cx);
             }
             PaletteCommand::ChangeEditor => self.choose_default_editor(cx),
             // Saved to config.toml and applied right away; the palette stays open
@@ -586,10 +645,11 @@ impl Palette {
         // Put the newly added projects first so they can be opened right away.
         self.projects.sort_by_key(|p| !added.contains(&p.path));
         self.refilter(cx);
-        self.status = Some(match added.as_slice() {
-            [one] => format!("Added {}", paths::display_path(one)).into(),
-            many => format!("Added {} projects", many.len()).into(),
-        });
+        let added = match added.as_slice() {
+            [one] => format!("Added {}", paths::display_path(one)),
+            many => format!("Added {} projects", many.len()),
+        };
+        self.notice(added, cx);
     }
 
     /// Shows a native file dialog, keeping the palette open while it's up.
