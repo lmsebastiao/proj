@@ -12,7 +12,7 @@ use crate::{
     update,
 };
 
-use super::{Palette, secondary};
+use super::{Palette, actions::Section, secondary};
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Mode {
@@ -313,7 +313,7 @@ impl Palette {
                 } else {
                     "A package.json script, run in a terminal there"
                 };
-                (format!("Run {}", task.command), from.into())
+                (task.command.clone(), from.into())
             }
             ProjectAction::AddCommand => (
                 "Add a command…".into(),
@@ -327,26 +327,23 @@ impl Palette {
                 "Rename…".into(),
                 "A shorter name; search still finds it by its folder".into(),
             ),
-            ProjectAction::Tags => {
-                let tags = project.map(|p| p.tags.as_slice()).unwrap_or_default();
-                let subtitle = if tags.is_empty() {
-                    "Group projects, then search for them with #tag".to_string()
-                } else {
-                    tags.iter()
-                        .map(|t| format!("#{t}"))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                };
-                ("Tags…".into(), subtitle)
-            }
+            // Its tags show on the right (see `item_meta`).
+            ProjectAction::Tags => (
+                "Tags…".into(),
+                "Group projects, then search for them with #tag".into(),
+            ),
             ProjectAction::CopyPath => ("Copy the path".into(), "To the clipboard".into()),
             ProjectAction::RepoPage => (
                 "Open the repository page".into(),
                 "From the git origin remote (GitHub, GitLab…)".into(),
             ),
+            ProjectAction::PullRequests if self.actions_forge() == Some(Forge::GitLab) => (
+                "Open the merge requests".into(),
+                self.forge_hint("Its merge requests on GitLab"),
+            ),
             ProjectAction::PullRequests => (
                 "Open the pull requests".into(),
-                self.forge_hint("Merge requests on GitLab"),
+                self.forge_hint("Its pull requests on the repository's site"),
             ),
             ProjectAction::Ci => (
                 "Open the CI runs".into(),
@@ -382,9 +379,36 @@ impl Palette {
                     .and_then(git::url_host)
                     .map(str::to_string)
                     .unwrap_or_default();
-                format!("Name the software {host} runs under forges in the config file")
+                format!(
+                    "proj doesn't know what {host} runs (GitLab, Gitea…): add it under \
+                     forges in the config file"
+                )
             }
         }
+    }
+
+    /// The heading over a section of the actions menu; none over `Danger`,
+    /// which gets a line instead.
+    pub(super) fn section_label(&self, section: Section) -> Option<String> {
+        Some(match section {
+            Section::Open => "Open".into(),
+            Section::Run => "Run".into(),
+            Section::Organize => "Organize".into(),
+            Section::Repository => {
+                let host = self
+                    .actions_web_url()
+                    .as_deref()
+                    .and_then(git::url_host)
+                    .map(str::to_string);
+                let site = self.actions_forge().map_or("Repository", Forge::name);
+                match host {
+                    Some(host) => format!("{site} · {host}"),
+                    None => site.into(),
+                }
+            }
+            Section::More => "More".into(),
+            Section::Danger => return None,
+        })
     }
 
     /// The web page of the actions menu's project, and the kind of site it's on.
@@ -496,6 +520,15 @@ impl Palette {
                     ProjectAction::Terminal => Some(format!("{m}-t")),
                     ProjectAction::CopyPath => Some(format!("{m}-c")),
                     ProjectAction::RepoPage => Some(format!("{m}-g")),
+                    // Its tags, rather than a key.
+                    ProjectAction::Tags => self
+                        .actions_project()
+                        .filter(|p| !p.tags.is_empty())
+                        .map(|p| {
+                            let tags: Vec<String> =
+                                p.tags.iter().map(|t| format!("#{t}")).collect();
+                            tags.join(" ")
+                        }),
                     _ => None,
                 };
                 Meta {

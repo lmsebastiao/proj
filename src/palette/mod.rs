@@ -43,6 +43,7 @@ use crate::{
     update,
 };
 
+use actions::ActionEntry;
 use items::{CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, ProjectAction, Target};
 use keymap::{Confirm, Dismiss};
 use theme::Theme;
@@ -110,6 +111,8 @@ pub struct Palette {
     /// The dropdown's highlighted row, which the arrows move while it's open.
     shortcut_selected: usize,
     shortcuts_scroll: ScrollHandle,
+    /// The actions menu, drawn as a plain list for its section headings.
+    actions_scroll: ScrollHandle,
     /// Open editor windows, for `Mode::Switch` and the "open" badges.
     windows: Vec<EditorWindow>,
     /// The project each of `windows` shows, as an index into `projects`.
@@ -191,6 +194,7 @@ impl Palette {
             show_shortcuts: false,
             shortcut_selected: 0,
             shortcuts_scroll: ScrollHandle::new(),
+            actions_scroll: ScrollHandle::new(),
             windows: Vec::new(),
             window_projects: Vec::new(),
             switch_rows: Vec::new(),
@@ -520,8 +524,16 @@ impl Palette {
         }
         self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
         self.confirm_remove = None;
-        self.scroll
-            .scroll_to_item(self.selected, ScrollStrategy::Center);
+        if self.list() == List::Actions {
+            let entry = self
+                .action_entries()
+                .iter()
+                .position(|e| *e == ActionEntry::Row(self.selected));
+            self.actions_scroll.scroll_to_item(entry.unwrap_or(0));
+        } else {
+            self.scroll
+                .scroll_to_item(self.selected, ScrollStrategy::Center);
+        }
         cx.notify();
     }
 

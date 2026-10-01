@@ -14,6 +14,7 @@ use super::{
     Palette,
     items::{List, Mode, ProjectAction, Target},
     keymap::{CopyPath, OpenRemote, RemoveItem},
+    theme::icons,
 };
 
 /// The icons on a project row.
@@ -47,6 +48,66 @@ impl RowIcon {
     }
 }
 
+/// The actions menu's groups, in their order; each but `Danger` under a heading.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Section {
+    Open,
+    Run,
+    Organize,
+    /// Named after the repository's site, e.g. "GitLab · git.example.com".
+    Repository,
+    More,
+    /// Remove, on its own under a line.
+    Danger,
+}
+
+/// What the actions menu draws, top to bottom.
+#[derive(Clone, PartialEq)]
+pub(super) enum ActionEntry {
+    Heading(String),
+    /// Over the `Danger` section.
+    Line,
+    /// The match at this position in `Palette::matches`.
+    Row(usize),
+}
+
+impl ProjectAction {
+    pub(super) fn section(self) -> Section {
+        match self {
+            Self::OpenWith | Self::ShowInFileManager | Self::Terminal => Section::Open,
+            Self::Run(_) | Self::AddCommand => Section::Run,
+            Self::TogglePin | Self::Rename | Self::Tags => Section::Organize,
+            Self::RepoPage | Self::PullRequests | Self::Ci | Self::CopyCloneUrl => {
+                Section::Repository
+            }
+            Self::CopyPath | Self::NewFromThis => Section::More,
+            Self::Remove => Section::Danger,
+        }
+    }
+
+    /// Its glyph in the icon font. `pinned`: the project is.
+    pub(super) fn icon(self, pinned: bool) -> &'static str {
+        match self {
+            Self::OpenWith => icons::OPEN_WITH,
+            Self::ShowInFileManager => icons::FOLDER,
+            Self::Terminal => icons::TERMINAL,
+            Self::Run(_) => icons::RUN,
+            Self::AddCommand => icons::ADD,
+            Self::TogglePin if pinned => icons::PINNED,
+            Self::TogglePin => icons::PIN,
+            Self::Rename => icons::RENAME,
+            Self::Tags => icons::TAG,
+            Self::RepoPage => icons::GLOBE,
+            Self::PullRequests => icons::PULL_REQUESTS,
+            Self::Ci => icons::CI,
+            Self::CopyCloneUrl => icons::LINK,
+            Self::CopyPath => icons::COPY,
+            Self::NewFromThis => icons::NEW_PROJECT,
+            Self::Remove => icons::REMOVE,
+        }
+    }
+}
+
 impl Palette {
     /// Ctrl-K: the actions menu for the selected project.
     pub(super) fn show_actions(&mut self, cx: &mut Context<Self>) {
@@ -58,8 +119,8 @@ impl Palette {
         self.set_mode(Mode::Actions, cx);
     }
 
-    /// The menu's entries for `project`. One whose folder is gone gets the ones
-    /// that don't need it.
+    /// The menu's entries for `project`, section by section (see `Section`).
+    /// One whose folder is gone gets the ones that don't need it.
     fn load_actions(&mut self, project: &Project) {
         use ProjectAction as A;
         if project.missing {
@@ -72,13 +133,14 @@ impl Palette {
         let web = git::git_web_url(&project.path).is_some();
         let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal];
         actions.extend((0..self.tasks.len()).map(A::Run));
-        actions.extend([A::AddCommand, A::TogglePin, A::Rename, A::Tags, A::CopyPath]);
+        actions.extend([A::AddCommand, A::TogglePin, A::Rename, A::Tags]);
         if web {
             actions.extend([A::RepoPage, A::PullRequests, A::Ci]);
         }
         if remote {
             actions.push(A::CopyCloneUrl);
         }
+        actions.push(A::CopyPath);
         if !project.is_workspace() {
             actions.push(A::NewFromThis);
         }
@@ -114,6 +176,28 @@ impl Palette {
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));
         self.status = Some(format!("Removed \"{}\"", task.command).into());
+    }
+
+    /// The menu's rows under their section headings; while searching, just
+    /// the matches, best first.
+    pub(super) fn action_entries(&self) -> Vec<ActionEntry> {
+        if !self.filter_query().is_empty() {
+            return (0..self.matches.len()).map(ActionEntry::Row).collect();
+        }
+        let mut entries = Vec::new();
+        let mut section = None;
+        for (row, m) in self.matches.iter().enumerate() {
+            let this = self.actions[m.ix].section();
+            if section != Some(this) {
+                entries.push(match self.section_label(this) {
+                    Some(label) => ActionEntry::Heading(label),
+                    None => ActionEntry::Line,
+                });
+                section = Some(this);
+            }
+            entries.push(ActionEntry::Row(row));
+        }
+        entries
     }
 
     pub(super) fn actions_project(&self) -> Option<&Project> {
@@ -171,8 +255,8 @@ impl Palette {
                     let host = git::url_host(&web).unwrap_or_default();
                     self.status = Some(
                         format!(
-                            "Which software runs {host}? Set it under forges in the config \
-                             file, e.g. \"{host}\" = \"gitlab\""
+                            "proj doesn't know what {host} runs. In the config file, add e.g. \
+                             forges = {{ \"{host}\" = \"gitlab\" }} (or \"gitea\", \"forgejo\")"
                         )
                         .into(),
                     );

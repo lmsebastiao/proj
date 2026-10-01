@@ -73,6 +73,19 @@ pub(super) mod icons {
         pub const REMOVE: &str = "\u{E74D}";
         pub const MORE: &str = "\u{E712}";
         pub const CLOSE: &str = "\u{E8BB}";
+        // The actions menu.
+        pub const OPEN_WITH: &str = "\u{E8A7}";
+        pub const FOLDER: &str = "\u{E8B7}";
+        pub const TERMINAL: &str = "\u{E756}";
+        pub const RUN: &str = "\u{E768}";
+        pub const ADD: &str = "\u{E710}";
+        pub const TAG: &str = "\u{E8EC}";
+        pub const COPY: &str = "\u{E8C8}";
+        pub const GLOBE: &str = "\u{E774}";
+        pub const PULL_REQUESTS: &str = "\u{E8AB}";
+        pub const CI: &str = "\u{E73E}";
+        pub const LINK: &str = "\u{E71B}";
+        pub const NEW_PROJECT: &str = "\u{E8F4}";
     }
     #[cfg(not(windows))]
     mod glyphs {
@@ -83,6 +96,18 @@ pub(super) mod icons {
         pub const REMOVE: &str = "✕";
         pub const MORE: &str = "⋯";
         pub const CLOSE: &str = "✕";
+        pub const OPEN_WITH: &str = "↗";
+        pub const FOLDER: &str = "▤";
+        pub const TERMINAL: &str = "›";
+        pub const RUN: &str = "▶";
+        pub const ADD: &str = "+";
+        pub const TAG: &str = "#";
+        pub const COPY: &str = "⧉";
+        pub const GLOBE: &str = "◍";
+        pub const PULL_REQUESTS: &str = "⇄";
+        pub const CI: &str = "✓";
+        pub const LINK: &str = "⛓";
+        pub const NEW_PROJECT: &str = "✚";
     }
     pub use glyphs::*;
 }

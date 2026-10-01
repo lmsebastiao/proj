@@ -11,7 +11,7 @@ use crate::{input, paths, store};
 
 use super::{
     Palette,
-    actions::{ROW_ICONS, RowIcon},
+    actions::{ActionEntry, ROW_ICONS, RowIcon},
     app_icon::app_icon,
     items::*,
     keymap::*,
@@ -313,6 +313,139 @@ impl Palette {
         )
     }
 
+    /// The actions menu: one-line rows with an icon, under section headings,
+    /// and the highlighted row's explanation under it. A plain list rather
+    /// than a `uniform_list`, as the headings make rows differ in height.
+    fn render_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = self.theme;
+        let pinned = self.actions_project().is_some_and(|p| p.pinned);
+        let highlight = HighlightStyle {
+            color: Some(rgb(t.accent).into()),
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        };
+        let entries: Vec<AnyElement> = self
+            .action_entries()
+            .into_iter()
+            .map(|entry| match entry {
+                ActionEntry::Heading(label) => div()
+                    .px_5()
+                    .pt_2()
+                    .pb_1()
+                    .text_size(px(11.))
+                    .text_color(rgb(t.muted))
+                    .child(label.to_uppercase())
+                    .into_any_element(),
+                ActionEntry::Line => div()
+                    .mx_4()
+                    .my_2()
+                    .h(px(1.))
+                    .bg(rgb(t.border))
+                    .into_any_element(),
+                ActionEntry::Row(row) => {
+                    let m = &self.matches[row];
+                    let action = self.actions[m.ix];
+                    let (title, subtitle) = self.item_text(m.ix);
+                    let meta = self.item_meta(m.ix, 0);
+                    let selected = row == self.selected;
+                    // Remove is in the warning colour, icon and all.
+                    let danger = action == ProjectAction::Remove;
+                    let (color, icon_color) = if danger {
+                        (t.danger, t.danger)
+                    } else {
+                        (t.text, t.muted)
+                    };
+                    let title_hl: Vec<_> = ranges(&title, &m.title_hl)
+                        .map(|r| (r, highlight))
+                        .collect();
+                    let subtitle_hl: Vec<_> = ranges(&subtitle, &m.subtitle_hl)
+                        .map(|r| (r, highlight))
+                        .collect();
+                    div()
+                        .id(("action", row))
+                        .mx_2()
+                        .px_3()
+                        .rounded_md()
+                        .flex()
+                        .flex_col()
+                        .when(selected, |d| d.bg(rgb(t.selected)).pb_1())
+                        .hover(|d| d.bg(rgb(t.selected)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.selected = row;
+                            this.confirm(&Confirm, window, cx);
+                        }))
+                        .child(
+                            div()
+                                .h(px(30.))
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(18.))
+                                        .flex()
+                                        .justify_center()
+                                        .when(!icons::FONT.is_empty(), |d| {
+                                            d.font_family(icons::FONT)
+                                        })
+                                        .text_size(px(14.))
+                                        .text_color(rgb(icon_color))
+                                        .child(action.icon(pinned)),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_size(px(FONT_SIZE - 1.))
+                                        .text_color(rgb(color))
+                                        .child(StyledText::new(title).with_highlights(title_hl)),
+                                )
+                                .children(meta.top.map(|(text, color)| {
+                                    div()
+                                        .flex_none()
+                                        .max_w(px(260.))
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_size(px(SMALL_FONT_SIZE))
+                                        .text_color(rgb(color))
+                                        .child(text)
+                                })),
+                        )
+                        // Under the icon's column: 18px and the gap.
+                        .when(selected && !subtitle.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .pl(px(30.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(SMALL_FONT_SIZE))
+                                    .text_color(rgb(t.muted))
+                                    .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
+                            )
+                        })
+                        .into_any_element()
+                }
+            })
+            .collect();
+        div()
+            .id("actions")
+            .flex_1()
+            .overflow_y_scroll()
+            .track_scroll(&self.actions_scroll)
+            .py_1()
+            .flex()
+            .flex_col()
+            .children(entries)
+            .into_any_element()
+    }
+
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = self.theme;
         if self.add_candidate.is_some()
@@ -571,7 +704,9 @@ fn ranges<'a>(text: &'a str, offsets: &'a [usize]) -> impl Iterator<Item = Range
 impl Render for Palette {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.theme;
-        let list = if !self.matches.is_empty() {
+        let list = if self.list() == List::Actions && !self.matches.is_empty() {
+            self.render_actions(cx)
+        } else if !self.matches.is_empty() {
             let now = store::now();
             uniform_list(
                 "items",

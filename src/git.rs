@@ -201,6 +201,17 @@ impl Forge {
         }
     }
 
+    /// For display: "GitLab".
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+            Self::GitLab => "GitLab",
+            Self::Gitea => "Gitea",
+            Self::Bitbucket => "Bitbucket",
+            Self::AzureDevOps => "Azure DevOps",
+        }
+    }
+
     /// The repository's pull (merge) requests.
     pub fn pull_requests(self, web_url: &str) -> String {
         match self {
