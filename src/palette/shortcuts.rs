@@ -38,10 +38,27 @@ impl Shortcut {
         self
     }
 
+    /// Also lists the alt form of its ctrl key ("ctrl-e", then "alt-e"),
+    /// for the project actions that have one.
+    fn or_alt(mut self) -> Self {
+        let ctrl = format!("{}-", secondary());
+        if ALT_ACTIONS && let Some(at) = self.keys.iter().position(|k| k.starts_with(&ctrl)) {
+            let alt = alt_form(&self.keys[at]);
+            self.keys.insert(at + 1, alt);
+        }
+        self
+    }
+
     fn run(mut self, action: impl Action) -> Self {
         self.run = Some(Box::new(action));
         self
     }
+}
+
+/// "ctrl-e" as "alt-e", "ctrl-shift-p" as "alt-p".
+fn alt_form(key: &str) -> String {
+    let rest = key.rsplit('-').next().unwrap_or(key);
+    format!("alt-{rest}")
 }
 
 /// "Show in Explorer" and the footer's short name for it.
@@ -73,7 +90,8 @@ impl Palette {
             }
             keys.extend([
                 s(&["↑ ↓"], "Move the selection"),
-                s(&["esc", "mod-k", "alt-k"], "Close the menu")
+                s(&["esc", "mod-k"], "Close the menu")
+                    .or_alt()
                     .footer("Close")
                     .run(Dismiss),
             ]);
@@ -96,9 +114,10 @@ impl Palette {
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(
-                        &["mod-k", "alt-k", "shift-f10", "right-click"],
+                        &["mod-k", "shift-f10", "right-click"],
                         "Actions: pin, rename, tags, commands to run, remove…",
                     )
+                    .or_alt()
                     .footer("Actions")
                     .run(ShowActions),
                     s(
@@ -109,18 +128,25 @@ impl Palette {
                     s(&["→"], "Browse its files and folders"),
                     s(&["tab", "shift-tab"], "Mark to open several in one window").run(ToggleMark),
                     s(&["f2"], "Rename… (search still finds it by its folder)").run(RenameItem),
-                    s(&["mod-shift-p"], "Pin to the top, or unpin").run(TogglePin),
+                    s(&["mod-shift-p"], "Pin to the top, or unpin")
+                        .or_alt()
+                        .run(TogglePin),
                     s(&["shift-del"], "Remove from the list (the folder stays)").run(RemoveItem),
                     s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
-                    s(&["mod-e"], reveal).run(ShowInFileManager),
-                    s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
-                    s(&["mod-g"], "Open the repository web page").run(OpenRemote),
-                    s(&["mod-c"], "Copy the path").run(CopyPath),
+                    s(&["mod-e"], reveal).or_alt().run(ShowInFileManager),
+                    s(&["mod-t"], "Open a terminal there")
+                        .or_alt()
+                        .run(OpenTerminal),
+                    s(&["mod-g"], "Open the repository web page")
+                        .or_alt()
+                        .run(OpenRemote),
+                    s(&["mod-c"], "Copy the path").or_alt().run(CopyPath),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
                     s(
                         &["mod-1…9"],
                         "Open the project in that place (numbered while mod is held)",
-                    ),
+                    )
+                    .or_alt(),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["@"], "Open editor windows, to search and switch to"),
                     s(&["#tag"], "Just the projects with that tag (set in mod-k)"),
@@ -263,5 +289,17 @@ impl Palette {
                 ]
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alt_forms() {
+        assert_eq!(alt_form("ctrl-e"), "alt-e");
+        assert_eq!(alt_form("ctrl-shift-p"), "alt-p");
+        assert_eq!(alt_form("ctrl-1…9"), "alt-1…9");
     }
 }

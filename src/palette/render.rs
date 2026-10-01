@@ -1257,10 +1257,13 @@ impl Render for Palette {
                     cx.stop_propagation();
                 }
             }))
-            // Ctrl (cmd) alone held: the projects show the numbers ctrl+1…9 open.
+            // Ctrl (cmd) or alt alone held: the projects show the numbers
+            // ctrl+1…9 and alt+1…9 open.
             .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
                 let m = event.modifiers;
-                this.ctrl_held(m.secondary() && !m.alt && !m.shift, cx);
+                let ctrl = m.secondary() && !m.alt;
+                let alt = ALT_ACTIONS && m.alt && !m.secondary();
+                this.ctrl_held((ctrl || alt) && !m.shift, cx);
             }))
             // Home/end move the text cursor; with nothing typed, the selection.
             .capture_action(cx.listener(|this, _: &input::Home, _, cx| {

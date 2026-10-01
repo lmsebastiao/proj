@@ -25,27 +25,32 @@ then opens a folder picker where you can select one or more projects at once.
 | type                    | fuzzy filter by name, then by path         |
 | ↑ / ↓                   | move selection                             |
 | pgup / pgdn, home / end | a page at a time; the first / last (with nothing typed) |
-| ctrl-1 … 9              | open the project in that place (hold ctrl a moment to see the numbers) |
+| ctrl-1 … 9, alt-1 … 9   | open the project in that place (hold ctrl or alt a moment to see the numbers) |
 | enter                   | open in editor                             |
 | ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
-| ctrl-k, alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
+| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
 | f2                      | rename                                     |
-| ctrl-shift-p            | pin / unpin                                |
+| ctrl-shift-p / alt-p    | pin / unpin                                |
 | shift-delete            | remove from the list (the folder stays)    |
 | ctrl-z                  | put back the project just removed          |
-| ctrl-t                  | open a terminal there (Windows Terminal if installed) |
+| ctrl-t / alt-t          | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
 | backspace               | with nothing typed: back a page (out of a folder, the Open-with list…) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
 | `#tag`                  | only the projects with that tag (see Tags) |
-| ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
-| ctrl-g                  | open the repository page (from the git `origin` remote) |
-| ctrl-c                  | copy the project path (text, if some is selected) |
+| ctrl-e / alt-e          | show in Explorer (Finder on macOS, the file manager on Linux) |
+| ctrl-g / alt-g          | open the repository page (from the git `origin` remote) |
+| ctrl-c / alt-c          | copy the project path (ctrl-c: the text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
 | ctrl-,                  | open the config file                       |
 | f1                      | list every shortcut (↑/↓ and enter, or click one, to run it) |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
+
+The keys for the highlighted project's actions work with **alt** as well as ctrl (not on
+macOS, where option types characters). Alt is still down right after alt+space, so
+alt+space then alt-k, without letting go, opens the actions menu. Ctrl-z, ctrl-o, ctrl-q and
+ctrl-, stay on ctrl only: they mean the same everywhere.
 
 The footer has buttons for the current list's main two keys, like PowerToys' Command
 Palette: **Open ↵** and **Actions ctrl k** on the projects. Its left side says how many

@@ -39,6 +39,9 @@ actions!(
     ]
 );
 
+/// The project actions' ctrl keys also work with alt (see `bind_keys`).
+pub(super) const ALT_ACTIONS: bool = !cfg!(target_os = "macos");
+
 pub fn bind_keys(cx: &mut App) {
     input::bind_keys(cx);
     let ctx = Some("Palette");
@@ -67,8 +70,6 @@ pub fn bind_keys(cx: &mut App) {
         // Everything else for the project (pin, rename, remove…), also on the
         // row's icons. Shift-F10 and the menu key open context menus elsewhere.
         KeyBinding::new("secondary-k", ShowActions, ctx),
-        // Alt is still down right after alt+space: no reaching for ctrl.
-        KeyBinding::new("alt-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),
         KeyBinding::new("menu", ShowActions, ctx),
         // The search box copies its selected text instead, when there is some.
@@ -99,5 +100,20 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-left", input::Left, ctx),
         KeyBinding::new("alt-secondary-w", CloseWindow, ctx),
     ]);
+    // The highlighted project's actions also come with alt, which is still
+    // down right after alt+space: no reaching over for ctrl. (Alt+1…9 too,
+    // in `open_number`.) The rest stay on ctrl only: ctrl-z, ctrl-o, ctrl-q
+    // and ctrl-, mean what they mean everywhere. Not on macOS, where
+    // option+letter types a character.
+    if ALT_ACTIONS {
+        cx.bind_keys([
+            KeyBinding::new("alt-k", ShowActions, ctx),
+            KeyBinding::new("alt-t", OpenTerminal, ctx),
+            KeyBinding::new("alt-e", ShowInFileManager, ctx),
+            KeyBinding::new("alt-g", OpenRemote, ctx),
+            KeyBinding::new("alt-c", CopyPath, ctx),
+            KeyBinding::new("alt-p", TogglePin, ctx),
+        ]);
+    }
     cx.on_action(|_: &QuitApp, cx| cx.quit());
 }

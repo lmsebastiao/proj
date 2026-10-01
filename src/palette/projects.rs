@@ -62,7 +62,10 @@ impl Palette {
         cx: &mut Context<Self>,
     ) -> bool {
         let mods = keystroke.modifiers;
-        if self.list() != List::Projects || !mods.secondary() || mods.alt || mods.shift {
+        // Ctrl or alt alone, not both: that's AltGr on Windows.
+        let one = (mods.secondary() && !mods.alt)
+            || (super::keymap::ALT_ACTIONS && mods.alt && !mods.secondary());
+        if self.list() != List::Projects || !one || mods.shift {
             return false;
         }
         let Some(n) = keystroke
