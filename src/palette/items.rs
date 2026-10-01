@@ -35,8 +35,6 @@ pub(super) enum Mode {
     NewProject,
     /// The window switcher: open editor windows (`Palette::windows`).
     Switch,
-    /// Ctrl-K: what can be done with one project (`Palette::actions_for`).
-    Actions,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -51,7 +49,6 @@ pub(super) enum List {
     Text,
     /// The switcher's rows (`Palette::switch_rows`).
     Switch,
-    Actions,
     Templates,
 }
 
@@ -215,7 +212,6 @@ impl Palette {
                     None => (window.title.clone(), window.editor.clone()),
                 }
             }
-            List::Actions => self.action_text(self.actions[ix]),
             List::Templates => {
                 let template = &self.templates[ix];
                 (template.name(), template.source())
@@ -293,7 +289,7 @@ impl Palette {
         }
     }
 
-    fn action_text(&self, action: ProjectAction) -> (String, String) {
+    pub(super) fn action_text(&self, action: ProjectAction) -> (String, String) {
         let project = self.actions_project();
         let pinned = project.is_some_and(|p| p.pinned);
         let (title, subtitle): (String, String) = match action {
@@ -574,32 +570,6 @@ impl Palette {
                     },
                 }
             }
-            // The action's own shortcut, where it has one.
-            List::Actions => {
-                let m = secondary();
-                let key = match self.actions[ix] {
-                    ProjectAction::OpenWith => Some("alt-↵".to_string()),
-                    ProjectAction::ShowInFileManager => Some(format!("{m}-e")),
-                    ProjectAction::Terminal => Some(format!("{m}-t")),
-                    ProjectAction::CopyPath => Some(format!("{m}-c")),
-                    ProjectAction::RepoPage => Some(format!("{m}-g")),
-                    // Its tags, rather than a key.
-                    ProjectAction::Tags => self
-                        .actions_project()
-                        .filter(|p| !p.tags.is_empty())
-                        .map(|p| {
-                            let tags: Vec<String> =
-                                p.tags.iter().map(|t| format!("#{t}")).collect();
-                            tags.join(" ")
-                        }),
-                    _ => None,
-                };
-                Meta {
-                    top: key.map(|k| (k, self.theme.muted)),
-                    bottom: None,
-                    tip: None,
-                }
-            }
             List::Templates => Meta {
                 top: Some((
                     match self.templates[ix] {
@@ -612,6 +582,30 @@ impl Palette {
                 tip: None,
             },
             List::Commands | List::Text => Meta::NONE,
+        }
+    }
+
+    /// What shows on the right of an action in the menu: its own shortcut,
+    /// where it has one, or the project's tags.
+    pub(super) fn action_detail(&self, action: ProjectAction) -> Option<String> {
+        let m = secondary();
+        match action {
+            ProjectAction::OpenWith => Some(format!("{m}-↵")),
+            ProjectAction::ShowInFileManager => Some(format!("{m}-e")),
+            ProjectAction::Terminal => Some(format!("{m}-t")),
+            ProjectAction::CopyPath => Some(format!("{m}-c")),
+            ProjectAction::RepoPage => Some(format!("{m}-g")),
+            ProjectAction::TogglePin => Some(format!("{m}-shift-p")),
+            ProjectAction::Rename => Some("f2".into()),
+            ProjectAction::Remove => Some("shift-del".into()),
+            ProjectAction::Tags => self
+                .actions_project()
+                .filter(|p| !p.tags.is_empty())
+                .map(|p| {
+                    let tags: Vec<String> = p.tags.iter().map(|t| format!("#{t}")).collect();
+                    tags.join(" ")
+                }),
+            _ => None,
         }
     }
 
@@ -653,7 +647,6 @@ impl Palette {
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => self.commands.len(),
             List::Switch => self.switch_rows.len(),
-            List::Actions => self.actions.len(),
             List::Templates => self.templates.len(),
             List::Text => 0,
         }

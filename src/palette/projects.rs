@@ -33,9 +33,7 @@ impl Palette {
             return;
         };
         if project.is_workspace() {
-            self.status = Some("Workspaces can't be combined further".into());
-            cx.notify();
-            return;
+            return self.problem("Workspaces can't be combined further", cx);
         }
         match self.marked.iter().position(|p| p == &project.path) {
             Some(pos) => {
@@ -110,15 +108,13 @@ impl Palette {
             .into_iter()
             .find(|p| !p.is_dir())
             .unwrap_or_else(|| project.path.clone());
-        self.status = Some(
+        self.problem(
             format!(
-                "{} isn't there anymore. Reconnect its drive, or remove it with {}-k",
+                "{} isn't there anymore. Reconnect its drive, or remove it with shift-del",
                 paths::display_path(&gone),
-                super::secondary()
-            )
-            .into(),
+            ),
+            cx,
         );
-        cx.notify();
         true
     }
 
@@ -179,8 +175,7 @@ impl Palette {
                     Target::FileManager => "the file manager".into(),
                     Target::Terminal => "a terminal".into(),
                 };
-                self.status = Some(format!("Failed to launch {program}: {err}").into());
-                cx.notify();
+                self.problem(format!("Failed to launch {program}: {err}"), cx);
             }
         }
     }
@@ -345,9 +340,7 @@ impl Palette {
         };
         let name = self.query.trim().to_string();
         if let Err(problem) = check_folder_name(&name) {
-            self.status = Some(problem.into());
-            cx.notify();
-            return;
+            return self.problem(problem, cx);
         }
         let job = move |dest: &Path| template.create(dest);
         match self.config.scan_dirs.first().cloned() {
@@ -386,13 +379,13 @@ impl Palette {
             return;
         }
         if dest.exists() {
-            self.status = Some(format!("{} already exists", paths::display_path(&dest)).into());
-            cx.notify();
-            return;
+            return self.problem(format!("{} already exists", paths::display_path(&dest)), cx);
         }
         self.cloning = true;
-        self.status = Some(format!("{} {}…", making.doing(), paths::display_path(&dest)).into());
-        cx.notify();
+        self.say(
+            format!("{} {}…", making.doing(), paths::display_path(&dest)),
+            cx,
+        );
         let work = cx.background_executor().spawn({
             let dest = dest.clone();
             async move { job(&dest) }
@@ -424,9 +417,7 @@ impl Palette {
     ) {
         self.cloning = false;
         if let Err(err) = result {
-            self.status = Some(format!("{}: {err}", making.failed()).into());
-            cx.notify();
-            return;
+            return self.problem(format!("{}: {err}", making.failed()), cx);
         }
         list_clone(&mut self.db, dest.clone(), scanned);
         self.save(cx);
@@ -440,8 +431,10 @@ impl Palette {
             Some(project) => self.open_entry(project, window, cx),
             None => {
                 self.set_mode(Mode::Projects, cx);
-                self.status =
-                    Some(format!("{} {}", making.done(), paths::display_path(&dest)).into());
+                self.say(
+                    format!("{} {}", making.done(), paths::display_path(&dest)),
+                    cx,
+                );
             }
         }
     }
@@ -458,16 +451,11 @@ impl Palette {
         };
         // For a workspace, the first folder's repository.
         let Some(url) = git::git_web_url(&project.path) else {
-            self.status = Some(format!("{} has no git remote", project.name).into());
-            cx.notify();
-            return;
+            return self.problem(format!("{} has no git remote", project.name), cx);
         };
         match open::open_url(&url) {
             Ok(()) => window.remove_window(),
-            Err(err) => {
-                self.status = Some(format!("Could not open {url}: {err}").into());
-                cx.notify();
-            }
+            Err(err) => self.problem(format!("Could not open {url}: {err}"), cx),
         }
     }
 
@@ -481,8 +469,35 @@ impl Palette {
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
-        cx.write_to_clipboard(ClipboardItem::new_string(text.join("\n")));
-        window.remove_window();
+        let what = if text.len() == 1 {
+            "the path"
+        } else {
+            "the paths"
+        };
+        self.copy_and_close(text.join("\n"), what, window, cx);
+    }
+
+    /// Copies `text`, says so for a moment, then closes, so the copy is
+    /// seen to have happened.
+    pub(super) fn copy_and_close(
+        &mut self,
+        text: String,
+        what: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.close_menu(cx);
+        self.closing = true;
+        self.say(format!("Copied {what}"), cx);
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(600))
+                .await;
+            this.update_in(cx, |_, window, _| window.remove_window())
+                .ok();
+        })
+        .detach();
     }
 
     pub(super) fn remove(&mut self, cx: &mut Context<Self>) {
@@ -501,19 +516,21 @@ impl Palette {
         self.say_removed(&project.name, cx);
     }
 
-    /// "Removed proj · ctrl-z undoes it", up for longer than other notices.
+    /// "Removed proj", with an Undo button (and ctrl-z), up for longer than
+    /// other notices.
     fn say_removed(&mut self, what: &str, cx: &mut Context<Self>) {
-        let undo = format!("{}-z", super::secondary());
-        self.notice_for(
-            format!("Removed {what} · {undo} undoes it"),
-            Duration::from_secs(8),
-            cx,
-        );
+        let text = format!("Removed {what}");
+        self.show_status(text, false, true, Some(Duration::from_secs(8)), cx);
     }
 
     /// Ctrl-Z after a remove: puts back what it took off the list, with its
     /// name, pin, tags and history.
     pub(super) fn undo_remove(&mut self, _: &UndoRemove, _: &mut Window, cx: &mut Context<Self>) {
+        self.undo_last_remove(cx);
+    }
+
+    /// Ctrl-z, or the Undo button after a remove.
+    pub(super) fn undo_last_remove(&mut self, cx: &mut Context<Self>) {
         let Some((db, what)) = self.undo.take() else {
             return;
         };
@@ -539,10 +556,7 @@ impl Palette {
                     let state = if self.autostart { "on" } else { "off" };
                     self.notice(format!("Start on login turned {state}"), cx);
                 }
-                Err(err) => {
-                    self.status = Some(format!("Could not change start on login: {err}").into());
-                    cx.notify();
-                }
+                Err(err) => self.problem(format!("Could not change start on login: {err}"), cx),
             },
             PaletteCommand::AddProjects => {
                 self.set_query("", cx);
@@ -578,9 +592,7 @@ impl Palette {
             PaletteCommand::Theme => {
                 let theme = self.config.theme.next();
                 if let Err(err) = config::set_theme(theme) {
-                    self.status = Some(format!("Could not save config: {err}").into());
-                    cx.notify();
-                    return;
+                    return self.problem(format!("Could not save config: {err}"), cx);
                 }
                 self.config.theme = theme;
                 self.apply_theme(window, cx);
@@ -588,10 +600,7 @@ impl Palette {
             PaletteCommand::OpenConfig => {
                 match open::open_project(&self.config, &config::config_path()) {
                     Ok(()) => window.remove_window(),
-                    Err(err) => {
-                        self.status = Some(format!("Could not open config: {err}").into());
-                        cx.notify();
-                    }
+                    Err(err) => self.problem(format!("Could not open config: {err}"), cx),
                 }
             }
             // The palette stays open and the row follows along; installing

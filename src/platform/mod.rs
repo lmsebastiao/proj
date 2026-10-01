@@ -9,13 +9,24 @@ use std::rc::Rc;
 
 use gpui::{App, PlatformDisplay, Window};
 
-/// Where to show the launcher: the display under the mouse cursor where
-/// supported, else the primary display.
-pub fn launcher_display(cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
+use crate::config::MonitorSetting;
+
+/// Where to show the launcher: the display `monitor` asks for where that's
+/// supported (Windows), else the primary display.
+pub fn launcher_display(monitor: MonitorSetting, cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
     #[cfg(windows)]
-    if let Some(display) = windows::display_under_cursor(cx) {
-        return Some(display);
+    {
+        let display = match monitor {
+            MonitorSetting::Cursor => windows::display_under_cursor(cx),
+            MonitorSetting::Focused => windows::display_of_foreground(cx),
+            MonitorSetting::Primary => None,
+        };
+        if let Some(display) = display {
+            return Some(display);
+        }
     }
+    #[cfg(not(windows))]
+    let _ = monitor;
     cx.primary_display()
 }
 

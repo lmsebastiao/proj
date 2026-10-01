@@ -1,5 +1,6 @@
-//! Every shortcut of the current list. The footer shows the common ones; F1 (or
-//! clicking "all keys") lists them all in a dropdown, where clicking one runs it.
+//! Every shortcut of the current list. The footer has buttons for the main
+//! two; F1 (or the footer's ? button) lists them all in a dropdown, where
+//! clicking one runs it.
 
 use gpui::Action;
 
@@ -15,7 +16,7 @@ pub(super) struct Shortcut {
     pub(super) keys: Vec<String>,
     /// What it does, in the dropdown.
     pub(super) action: &'static str,
-    /// Its short label when the footer shows it too.
+    /// Its button's label when the footer has a button for it.
     pub(super) footer: Option<&'static str>,
     /// Run when its row is clicked. `None` for keys like → that only make sense typed.
     pub(super) run: Option<Box<dyn Action>>,
@@ -37,10 +38,6 @@ impl Shortcut {
         self
     }
 
-    fn footer_if(self, show: bool, label: &'static str) -> Self {
-        if show { self.footer(label) } else { self }
-    }
-
     fn run(mut self, action: impl Action) -> Self {
         self.run = Some(Box::new(action));
         self
@@ -50,18 +47,38 @@ impl Shortcut {
 /// "Show in Explorer" and the footer's short name for it.
 pub(super) fn file_manager() -> (&'static str, &'static str) {
     if cfg!(windows) {
-        ("Show in Explorer", "explorer")
+        ("Show in Explorer", "Explorer")
     } else if cfg!(target_os = "macos") {
-        ("Show in Finder", "finder")
+        ("Show in Finder", "Finder")
     } else {
-        ("Show in the file manager", "folder")
+        ("Show in the file manager", "Folder")
     }
 }
 
 impl Palette {
+    /// The current list's keys. At most two have a `footer` label: those are
+    /// the footer's buttons, the same two whatever is highlighted, so they
+    /// don't move about.
     pub(super) fn shortcuts(&self) -> Vec<Shortcut> {
         let s = Shortcut::new;
         let (reveal, reveal_short) = file_manager();
+        if self.menu_open() {
+            let added = match self.selected_action() {
+                Some(ProjectAction::Run(i)) => self.tasks.get(i).is_some_and(|t| t.added),
+                _ => false,
+            };
+            let mut keys = vec![s(&["↵"], "Run it").footer("Run").run(Confirm)];
+            if added {
+                keys.push(s(&["shift-del"], "Remove the added command").run(RemoveItem));
+            }
+            keys.extend([
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "mod-k"], "Close the menu")
+                    .footer("Close")
+                    .run(Dismiss),
+            ]);
+            return keys;
+        }
         match self.list() {
             List::Projects => {
                 let marking = !self.marked.is_empty();
@@ -69,38 +86,37 @@ impl Palette {
                     .selected_project()
                     .is_some_and(|p| self.open_keys.contains(&p.key()));
                 let (open, open_short) = if self.marked.len() > 1 {
-                    ("Open the marked projects in one window", "open together")
+                    ("Open the marked projects in one window", "Open together")
                 } else if has_window {
-                    ("Switch to its open editor window", "switch")
+                    ("Switch to its open editor window", "Switch")
                 } else {
-                    ("Open in the editor", "open")
+                    ("Open in the editor", "Open")
                 };
-                let (esc, esc_short) = if marking {
-                    ("Clear the marks", "clear")
-                } else {
-                    ("Close", "close")
-                };
+                let esc = if marking { "Clear the marks" } else { "Close" };
                 vec![
                     s(&["↵"], open).footer(open_short).run(Confirm),
-                    s(&["→"], "Browse its files and folders").footer_if(!marking, "files"),
-                    s(&["alt-↵"], "Open with another editor, or set its default…")
-                        .footer("open with…")
-                        .run(OpenWithMenu),
-                    s(&["tab", "shift-tab"], "Mark to open several in one window")
-                        .footer(if marking { "mark" } else { "combine" })
-                        .run(ToggleMark),
                     s(
-                        &["mod-k", "shift-f10"],
+                        &["mod-k", "shift-f10", "right-click"],
                         "Actions: pin, rename, tags, commands to run, remove…",
                     )
-                    .footer_if(!marking, "actions")
+                    .footer("Actions")
                     .run(ShowActions),
+                    s(
+                        &["mod-↵", "alt-↵"],
+                        "Open with another editor, or set its default…",
+                    )
+                    .run(OpenWithMenu),
+                    s(&["→"], "Browse its files and folders"),
+                    s(&["tab", "shift-tab"], "Mark to open several in one window").run(ToggleMark),
+                    s(&["f2"], "Rename… (search still finds it by its folder)").run(RenameItem),
+                    s(&["mod-shift-p"], "Pin to the top, or unpin").run(TogglePin),
+                    s(&["shift-del"], "Remove from the list (the folder stays)").run(RemoveItem),
+                    s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
                     s(&["mod-e"], reveal).run(ShowInFileManager),
                     s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
                     s(&["mod-g"], "Open the repository web page").run(OpenRemote),
                     s(&["mod-c"], "Copy the path").run(CopyPath),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
-                    s(&["mod-z"], "Put back the project just removed").run(UndoRemove),
                     s(
                         &["mod-1…9"],
                         "Open the project in that place (numbered while mod is held)",
@@ -115,22 +131,21 @@ impl Palette {
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["pgup", "pgdn"], "Move a page at a time").run(SelectPageDown),
                     s(&["home", "end"], "The first or last, with nothing typed"),
-                    s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
+                    s(&["mod-,"], "Open the config file").run(OpenConfig),
+                    s(&["esc"], esc).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
                 ]
             }
             List::Browse => vec![
                 s(&["↵"], "Open (files open in the project's window)")
-                    .footer("open")
+                    .footer("Open")
                     .run(Confirm),
-                s(&["→"], "Go into the folder").footer("enter"),
-                s(&["←"], "Back up a folder").footer("back"),
                 s(&["mod-e"], reveal)
                     .footer(reveal_short)
                     .run(ShowInFileManager),
-                s(&["mod-t"], "Open a terminal there")
-                    .footer("terminal")
-                    .run(OpenTerminal),
+                s(&["→"], "Go into the folder"),
+                s(&["←", "backspace"], "Back up a folder"),
+                s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
                 s(&["mod-c"], "Copy the path").run(CopyPath),
                 s(&["↑ ↓"], "Move the selection"),
                 s(&["esc"], "Back to the projects").run(Dismiss),
@@ -139,65 +154,50 @@ impl Palette {
                 let own = self.open_with_project().and_then(|p| p.editor.as_ref());
                 let selected = self.selected_editor().map(|e| &e.command);
                 let (default, default_short) = if selected.is_some() && own == selected {
-                    ("Go back to the default for all projects", "undo default")
+                    ("Go back to the default for all projects", "Undo default")
                 } else {
-                    ("Make it this project's default", "make default")
+                    ("Make it this project's default", "Make default")
                 };
                 vec![
                     s(&["↵"], "Open with it just this once")
-                        .footer("open once")
+                        .footer("Open once")
                         .run(Confirm),
                     s(&["mod-↵"], default)
                         .footer(default_short)
-                        .run(ToggleProjectDefault),
-                    s(&["esc"], "Back").footer("back").run(Dismiss),
-                ]
-            }
-            List::Actions => {
-                // On a command added to the menu: it can be taken out again.
-                let added = match self.matches.get(self.selected).map(|m| self.actions[m.ix]) {
-                    Some(ProjectAction::Run(i)) => self.tasks.get(i).is_some_and(|t| t.added),
-                    _ => false,
-                };
-                vec![
-                    s(&["↵"], "Run it").footer("run").run(Confirm),
-                    s(&["shift-del"], "Remove the added command")
-                        .footer_if(added, "remove")
-                        .run(RemoveItem),
-                    s(&["↑ ↓"], "Move the selection"),
-                    s(&["esc"], "Back to the projects")
-                        .footer("back")
-                        .run(Dismiss),
+                        .run(ConfirmSecondary),
+                    s(&["esc", "backspace"], "Back").run(Dismiss),
                 ]
             }
             List::Templates => vec![
                 s(&["↵"], "Make a new project from it")
-                    .footer("pick")
+                    .footer("Pick")
                     .run(Confirm),
                 s(&["↑ ↓"], "Move the selection"),
-                s(&["esc"], "Back to the projects")
-                    .footer("back")
+                s(&["esc", "backspace"], "Back to the projects")
+                    .footer("Back")
                     .run(Dismiss),
             ],
             List::Commands => vec![
-                s(&["↵"], "Run").footer("run").run(Confirm),
-                s(&["esc"], "Back").footer("back").run(Dismiss),
+                s(&["↵"], "Run").footer("Run").run(Confirm),
+                s(&["esc"], "Back to the projects")
+                    .footer("Back")
+                    .run(Dismiss),
             ],
             List::Editors => {
-                let esc = if self.config.editor.is_some() {
-                    "back"
+                let (esc, esc_short) = if self.config.editor.is_some() {
+                    ("Back", "Back")
                 } else {
-                    "close"
+                    ("Close", "Close")
                 };
                 vec![
                     s(&["↵"], "Use it for all projects")
                         .footer(if self.config.editor.is_some() {
-                            "set default"
+                            "Set default"
                         } else {
-                            "select"
+                            "Select"
                         })
                         .run(Confirm),
-                    s(&["esc"], "Back").footer(esc).run(Dismiss),
+                    s(&["esc"], esc).footer(esc_short).run(Dismiss),
                 ]
             }
             // While the modifier is held these keys come with alt.
@@ -207,33 +207,32 @@ impl Palette {
                 s(
                     &["alt-→", "alt-←"],
                     "A project's windows one by one, and back",
-                )
-                .footer_if(self.selected_row_is_group(), "windows"),
-                s(&["alt-mod-w"], "Close the window").run(CloseWindow),
+                ),
+                s(&["alt-mod-w"], "Close the window")
+                    .footer("Close window")
+                    .run(CloseWindow),
                 s(&["type"], "Search the windows; the list stays open"),
-                s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
+                s(&["alt-esc"], "Cancel").footer("Cancel").run(Dismiss),
             ],
             List::Switch => {
                 // Typed `@` in the project search: esc goes back to it.
-                let (esc, esc_short) = if self.mode == Mode::Projects {
-                    ("Back to the projects", "back")
+                let esc = if self.expanded.is_some() {
+                    "Back to every project's windows"
+                } else if self.mode == Mode::Projects {
+                    "Back to the projects"
                 } else {
-                    ("Close", "close")
+                    "Close"
                 };
                 let numbers = self
                     .config
                     .switch_number_modifiers()
                     .map(|mods| crate::switcher::shortcut_label(&format!("{mods}+1…9")));
-                let (esc, esc_short) = if self.expanded.is_some() {
-                    ("Back to every project's windows", "back")
-                } else {
-                    (esc, esc_short)
-                };
                 let mut keys = vec![
-                    s(&["↵"], "Switch to it").footer("switch").run(Confirm),
-                    s(&["→", "←"], "A project's windows one by one, and back")
-                        .footer_if(self.selected_row_is_group(), "windows"),
-                    s(&["mod-w"], "Close the window").run(CloseWindow),
+                    s(&["↵"], "Switch to it").footer("Switch").run(Confirm),
+                    s(&["mod-w"], "Close the window")
+                        .footer("Close window")
+                        .run(CloseWindow),
+                    s(&["→", "←"], "A project's windows one by one, and back"),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["drag"], "Move a row to another place in the list"),
                 ];
@@ -243,7 +242,7 @@ impl Palette {
                         "Switch straight to the row with that number, from anywhere",
                     ));
                 }
-                keys.push(s(&["esc"], esc).footer(esc_short).run(Dismiss));
+                keys.push(s(&["esc"], esc).run(Dismiss));
                 keys
             }
             List::Text => {
@@ -253,26 +252,16 @@ impl Palette {
                     Mode::NewProject => "Make the project and open it",
                     _ => "Save the name",
                 };
-                let short = if self.mode == Mode::NewProject {
-                    "make"
-                } else {
-                    "save"
+                let short = match self.mode {
+                    Mode::NewProject => "Make",
+                    Mode::AddCommand => "Add",
+                    _ => "Save",
                 };
                 vec![
                     s(&["↵"], save).footer(short).run(Confirm),
-                    s(&["esc"], "Cancel").footer("cancel").run(Dismiss),
+                    s(&["esc"], "Cancel").footer("Cancel").run(Dismiss),
                 ]
             }
         }
-    }
-
-    /// The highlighted switcher row has several of a project's windows.
-    fn selected_row_is_group(&self) -> bool {
-        self.expanded.is_none()
-            && self
-                .matches
-                .get(self.selected)
-                .and_then(|m| self.switch_rows.get(m.ix))
-                .is_some_and(|row| row.len() > 1)
     }
 }

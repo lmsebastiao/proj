@@ -34,6 +34,11 @@ impl EditorWindow {
     pub fn rank(&self) -> (bool, usize) {
         (self.front, self.z)
     }
+
+    /// It was the window in front when the list was made.
+    pub fn is_front(&self) -> bool {
+        self.front
+    }
 }
 
 /// The switcher's rows, as indexes into `windows` (in the switcher's order):

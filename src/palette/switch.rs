@@ -79,11 +79,10 @@ impl Palette {
             .unwrap_or(0)
             .min(this.matches.len().saturating_sub(1));
         this.set_switch_placeholder(cx);
-        this.status = this.windows.is_empty().then(|| {
-            platform::window_access_hint()
-                .unwrap_or("No editor windows are open")
-                .into()
-        });
+        if this.windows.is_empty() {
+            let hint = platform::window_access_hint().unwrap_or("No editor windows are open");
+            this.say(hint, cx);
+        }
         this.wait_for_release(window, cx);
         this
     }

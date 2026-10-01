@@ -26,36 +26,57 @@ then opens a folder picker where you can select one or more projects at once.
 | ↑ / ↓                   | move selection                             |
 | pgup / pgdn, home / end | a page at a time; the first / last (with nothing typed) |
 | ctrl-1 … 9              | open the project in that place (hold ctrl a moment to see the numbers) |
-| ctrl-z                  | put back the project just removed          |
 | enter                   | open in editor                             |
+| ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
+| ctrl-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
+| f2                      | rename                                     |
+| ctrl-shift-p            | pin / unpin                                |
+| shift-delete            | remove from the list (the folder stays)    |
+| ctrl-z                  | put back the project just removed          |
 | ctrl-t                  | open a terminal there (Windows Terminal if installed) |
 | → / ←                   | browse into a project / back up (see below) |
-| alt-enter               | open with… (another editor once, or set the project's default) |
+| backspace               | with nothing typed: back a page (out of a folder, the Open-with list…) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
-| ctrl-k, shift-f10, menu key | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
 | `#tag`                  | only the projects with that tag (see Tags) |
 | ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
 | ctrl-o                  | add projects (multi-select folder picker)  |
+| ctrl-,                  | open the config file                       |
 | f1                      | list every shortcut (↑/↓ and enter, or click one, to run it) |
 | esc, clicking elsewhere | close                                      |
 | ctrl-q                  | quit the launcher                          |
 
-The footer shows the most common keys for the current list. **f1**, or clicking **all keys**
-in the footer, opens a dropdown with all of them. While it's open, ↑/↓ move through it
-instead of the list and enter runs the highlighted key; clicking one runs it too. Esc or
-typing closes it.
+The footer has buttons for the current list's main two keys, like PowerToys' Command
+Palette: **Open ↵** and **Actions ctrl k** on the projects. Its left side says how many
+projects there are, or what just happened. Problems show above it in full, in red, until you
+type. **f1**, or the **?** button, opens a dropdown with every key. While it's open, ↑/↓ move
+through it instead of the list and enter runs the highlighted key; clicking one runs it too.
+Esc or typing closes it.
 
-**ctrl-k** (or shift-f10, or the menu key) lists everything you can do with the highlighted
-project: open with, show in Explorer, terminal, its commands (see Commands), pin, rename,
-tags, copy the path, open the repository page, its pull requests or its CI runs, copy the
-clone URL, start a new project from it, remove. Type to filter it and press enter; the
-project's name and folder show above the list. The highlighted
-row, and any row under the mouse, also has icons for rename, remove, **⋯** (the same list)
-and pin. The remove icon asks for a second click. Pinned projects stay on top and keep their
-pin icon showing. Renaming to an empty name goes back to the folder name.
-Removing only takes a project off the list; the folder isn't touched.
+**ctrl-k** (or shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
+at the bottom right, with everything you can do with the highlighted project: open with,
+show in Explorer, terminal, its commands (see Commands), pin, rename, tags, copy the path,
+open the repository page, its pull requests or its CI runs, copy the clone URL, start a new
+project from it, remove. Each shows its own key, if it has one. Type to filter it and press
+enter; esc, ctrl-k again, backspace with nothing typed or clicking outside closes it. The
+highlighted row, and any row under the mouse, also has a **⋯** icon (the same menu) and a
+pin. Pinned projects stay on top and keep their pin showing.
+
+**f2** renames a project; renaming to an empty name goes back to the folder name.
+**shift-delete** removes it, only from the list, as the folder isn't touched. The footer
+then offers **Undo** (or ctrl-z) for a few seconds.
+
+Every row starts with an icon: the editor the project opens in, a folder or file while
+browsing, the program in the editor and window lists. On the pages you reach from the project
+list (Open with, browsing, rename, tags…), the search bar starts with a back button and the
+page's name; backspace with nothing typed goes back too. Copying a path says **Copied** for
+a moment before the dialog closes.
+
+If the dialog closes without opening anything (esc, the shortcut again, or a click
+elsewhere), opening it again within 30 seconds brings back what you'd typed, selected so that
+typing replaces it. With nothing typed, the highlight starts on the second project when the
+first is the one whose editor window you were just in.
 
 Type `>` to list commands: start on login, add projects, new project from a template, change
 the default editor, theme, open the config file, remove missing projects (when some are),
@@ -69,7 +90,8 @@ The dialog follows Windows' light/dark app setting, switching live when Windows 
 ### Browsing inside a project
 
 Press **→** on a project to list its files and folders; **→** on a folder goes deeper,
-**←** goes back up (and back to the project list from the top), **esc** returns to the list.
+**←** (or backspace, with nothing typed) goes back up (and back to the project list from the
+top), **esc** returns to the list.
 Typing filters the current folder. **Enter** opens a file in the project's editor, inside the
 project's window (`zed <project> <file>`), or opens a subfolder as its own workspace.
 **ctrl-e** shows it in the file manager, **ctrl-t** opens a terminal there, and **ctrl-c**
@@ -131,9 +153,9 @@ tab, type `shared`, tab, enter. That runs `zed interactive-v2 shared-sdk`; VS Co
 Esc clears the marks.
 
 The combination is remembered as its own entry, **interactive-v2 + shared-sdk**, with its own
-history, pin and editor list, so next time you just search for it. Removing it (ctrl-k or the bin icon)
+history, pin and editor list, so next time you just search for it. Removing it (shift-delete or ctrl-k)
 forgets the combination, not the projects. Folders are passed in the order you marked them.
-Rename it (ctrl-k or the pencil icon) to give it a shorter name; search still finds it by its
+Rename it (f2 or ctrl-k) to give it a shorter name; search still finds it by its
 folder names too.
 
 ### Per-project editors
@@ -141,9 +163,9 @@ folder names too.
 Enter opens a project in its own default editor if it has one, and otherwise in the default
 editor for all projects. Rows of projects with their own default show its name.
 
-- **Just this once:** press **alt-enter** on a project, pick an editor, press **enter**.
+- **Just this once:** press **ctrl-enter** (or alt-enter) on a project, pick an editor, press **enter**.
   Nothing is saved, so next time enter uses the usual editor again.
-- **This project's default:** in the same alt-enter list, press **ctrl-enter** on an editor
+- **This project's default:** in the same list, press **ctrl-enter** on an editor
   (on **Other…**, it asks for a program first). Press ctrl-enter on it again to go back to
   the default for all projects.
 - **All projects:** type `>` and pick **Change the default editor**. Projects with their own
@@ -161,7 +183,7 @@ Projects that share a folder name get their parent folder added, e.g. `app (clie
 
 A project you added whose folder is gone (moved, deleted, or on a drive that isn't
 connected) stays listed at the end, dimmed and marked **missing**, instead of vanishing. Type
-`>` and pick **Remove missing projects** to forget them all, or remove one with ctrl-k.
+`>` and pick **Remove missing projects** to forget them all, or remove one with shift-delete.
 
 ### Tags
 
@@ -231,6 +253,7 @@ scan_dirs = []          # optional: list every sub-folder of these folders as pr
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
 theme = "system"        # or "light" / "dark"; also set with > Theme
+monitor = "cursor"      # the screen it opens on: "cursor", "focused" (the window in front) or "primary"
 editor = "zed"          # set from the launcher; "" = file manager
 editor_args = []        # e.g. ["--new-window"]
 ```

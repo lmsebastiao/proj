@@ -1,7 +1,8 @@
 //! Palette actions and their key bindings.
 //!
 //! Enter and its variants open things; other actions are ctrl (cmd on macOS)
-//! plus a letter named after them. The labels in `shortcuts` and the banners
+//! plus a letter named after them, or the key Windows uses for them (F2,
+//! shift-delete). The labels in `shortcuts` and the banners
 //! in `render` name these keys, so change them together.
 
 use gpui::{App, KeyBinding, actions};
@@ -14,7 +15,7 @@ actions!(
         SelectNext,
         SelectPrev,
         Confirm,
-        ToggleProjectDefault,
+        ConfirmSecondary,
         ShowInFileManager,
         OpenTerminal,
         OpenWithMenu,
@@ -28,6 +29,9 @@ actions!(
         Dismiss,
         QuitApp,
         RemoveItem,
+        RenameItem,
+        TogglePin,
+        OpenConfig,
         CloseWindow,
         UndoRemove,
         SelectPageDown,
@@ -50,8 +54,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", Confirm, ctx),
         // Open with another editor, or set the project's default editor.
         KeyBinding::new("alt-enter", OpenWithMenu, ctx),
-        // In the Open-with list: make the highlighted editor the project's default.
-        KeyBinding::new("secondary-enter", ToggleProjectDefault, ctx),
+        // The second thing a row does, as in PowerToys' Command Palette: on a
+        // project, open with…; in the Open-with list, make the highlighted
+        // editor the project's default.
+        KeyBinding::new("secondary-enter", ConfirmSecondary, ctx),
         KeyBinding::new("secondary-t", OpenTerminal, ctx),
         KeyBinding::new("secondary-e", ShowInFileManager, ctx),
         KeyBinding::new("secondary-g", OpenRemote, ctx),
@@ -70,8 +76,14 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f1", ToggleShortcuts, ctx),
         KeyBinding::new("escape", Dismiss, ctx),
         KeyBinding::new("secondary-q", QuitApp, ctx),
-        // A command added to a project's actions menu: take it out again.
+        // Take the project off the list (ctrl-z puts it back), or a command
+        // added to its actions menu out of it. Shift-delete, as in browsers'
+        // address bar suggestions.
         KeyBinding::new("shift-delete", RemoveItem, ctx),
+        // As in Explorer.
+        KeyBinding::new("f2", RenameItem, ctx),
+        KeyBinding::new("secondary-shift-p", TogglePin, ctx),
+        KeyBinding::new("secondary-,", OpenConfig, ctx),
         // Put back what was just removed from the list.
         KeyBinding::new("secondary-z", UndoRemove, ctx),
         // The window switcher: close the highlighted window.

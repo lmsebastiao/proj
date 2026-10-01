@@ -3,11 +3,12 @@
 use std::{cmp::Ordering, ops::Range};
 
 use gpui::{
-    AnyElement, Context, FontWeight, HighlightStyle, KeyDownEvent, ModifiersChangedEvent,
-    StyledText, Window, div, prelude::*, px, rgb, rgba, uniform_list,
+    AnyElement, Context, Div, Focusable, FontWeight, HighlightStyle, KeyDownEvent,
+    ModifiersChangedEvent, MouseButton, StyledText, Window, div, prelude::*, px, rgb, rgba,
+    uniform_list,
 };
 
-use crate::{input, paths, store};
+use crate::{input, paths, store, templates::Template};
 
 use super::{
     Palette,
@@ -25,7 +26,165 @@ use super::{
 /// The group of a list row, so its icons can show while the mouse is over it.
 const ROW_GROUP: &str = "row";
 
+/// A key as key caps: "ctrl-k" as [ctrl] [k], "↑ ↓" as [↑] [↓]. Words that
+/// aren't modifiers ("right-click", "#tag") stay in one cap.
+pub(super) fn keycaps(keys: &str, t: Theme) -> Div {
+    const MODIFIERS: [&str; 4] = ["ctrl", "alt", "shift", "cmd"];
+    let caps: Vec<String> = keys
+        .split_whitespace()
+        .flat_map(|key| {
+            let parts: Vec<&str> = key.split('-').collect();
+            let chord = parts.len() > 1
+                && parts.iter().all(|p| !p.is_empty())
+                && parts[..parts.len() - 1]
+                    .iter()
+                    .all(|p| MODIFIERS.contains(p));
+            if chord {
+                parts.into_iter().map(str::to_string).collect()
+            } else {
+                vec![key.to_string()]
+            }
+        })
+        .collect();
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(3.))
+        .children(caps.into_iter().map(move |cap| {
+            div()
+                .h(px(20.))
+                .min_w(px(20.))
+                .px(px(5.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(t.border))
+                .bg(rgb(t.hover))
+                .text_size(px(12.))
+                .text_color(rgb(t.muted))
+                .child(cap)
+        }))
+}
+
+/// A glyph of the icon font, centred in the row's icon slot.
+fn glyph(icon: &'static str, color: u32) -> Div {
+    div()
+        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+        .text_size(px(16.))
+        .text_color(rgb(color))
+        .child(icon)
+}
+
+/// The accent bar at the start of the highlighted row.
+fn selection_bar(t: Theme, height: f32) -> Div {
+    div()
+        .absolute()
+        .left(px(1.))
+        .top(px((height - 18.) / 2.))
+        .w(px(3.))
+        .h(px(18.))
+        .rounded_full()
+        .bg(rgb(t.accent))
+}
+
+impl PaletteCommand {
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Autostart => icons::POWER,
+            Self::AddProjects => icons::ADD,
+            Self::NewFromTemplate => icons::NEW_PROJECT,
+            Self::ChangeEditor => icons::EDIT,
+            Self::Theme => icons::THEME,
+            Self::OpenConfig => icons::SETTINGS,
+            Self::RemoveMissing => icons::REMOVE,
+            Self::Update => icons::UPDATE,
+            Self::Quit => icons::QUIT,
+        }
+    }
+}
+
 impl Palette {
+    /// What goes at the start of a row, the same width in every list: the
+    /// editor's or window's program icon, or a glyph; while marking, a
+    /// project's check box; while ctrl is held, its number.
+    fn row_icon(&self, row: usize, ix: usize) -> AnyElement {
+        let t = self.theme;
+        let slot = div()
+            .flex_none()
+            .size(px(ICON_SLOT))
+            .flex()
+            .items_center()
+            .justify_center();
+        let content: AnyElement = match self.list() {
+            List::Projects => {
+                let project = &self.projects[ix];
+                if !self.marked.is_empty() && !project.is_workspace() {
+                    // Numbered in the order marked, the folder order in the workspace.
+                    let position = self.marked.iter().position(|p| p == &project.path);
+                    div()
+                        .size(px(18.))
+                        .rounded_sm()
+                        .border_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .map(|d| match position {
+                            Some(i) => d
+                                .bg(rgb(t.accent))
+                                .border_color(rgb(t.accent))
+                                .text_color(rgb(t.bg))
+                                .child((i + 1).to_string()),
+                            None => d.border_color(rgb(t.muted)),
+                        })
+                        .into_any_element()
+                } else if self.numbers_shown && row < 9 {
+                    keycaps(&(row + 1).to_string(), t).into_any_element()
+                } else if project.missing {
+                    glyph(icons::MISSING, t.danger).into_any_element()
+                } else {
+                    let command = project
+                        .editor
+                        .as_ref()
+                        .or(self.config.editor.as_ref())
+                        .filter(|c| !c.trim().is_empty());
+                    match command.and_then(|c| self.apps.get(c).cloned().flatten()) {
+                        Some(program) => {
+                            app_icon(Some(program), app_icon::ROW_SIZE).into_any_element()
+                        }
+                        None => glyph(icons::FOLDER, t.muted).into_any_element(),
+                    }
+                }
+            }
+            List::Browse => {
+                let is_dir = self.browse.as_ref().is_some_and(|b| b.entries[ix].is_dir);
+                glyph(if is_dir { icons::FOLDER } else { icons::FILE }, t.muted).into_any_element()
+            }
+            List::Editors | List::OpenWith => match &self.editors[ix] {
+                EditorOption::Detected(editor) => {
+                    app_icon(editor.app.clone(), app_icon::ROW_SIZE).into_any_element()
+                }
+                EditorOption::Browse => glyph(icons::PROGRAM, t.muted).into_any_element(),
+                EditorOption::FileManager => glyph(icons::FOLDER, t.muted).into_any_element(),
+            },
+            List::Switch => app_icon(
+                Some(self.windows[self.switch_rows[ix][0]].exe.clone()),
+                app_icon::ROW_SIZE,
+            )
+            .into_any_element(),
+            List::Commands => glyph(self.commands[ix].icon(), t.muted).into_any_element(),
+            List::Templates => match self.templates[ix] {
+                Template::Folder(_) => glyph(icons::FOLDER, t.muted).into_any_element(),
+                Template::Git(_) => glyph(icons::GLOBE, t.muted).into_any_element(),
+            },
+            List::Text => div().into_any_element(),
+        };
+        slot.child(content).into_any_element()
+    }
+
     pub(super) fn render_row(
         &self,
         row: usize,
@@ -34,6 +193,7 @@ impl Palette {
     ) -> impl IntoElement + use<> {
         let t = self.theme;
         let m = &self.matches[row];
+        let selected = row == self.selected;
         let (title, subtitle) = self.item_text(m.ix);
         let meta = self.item_meta(m.ix, now);
         let highlight = HighlightStyle {
@@ -47,58 +207,23 @@ impl Palette {
         let subtitle_hl: Vec<_> = ranges(&subtitle, &m.subtitle_hl)
             .map(|r| (r, highlight))
             .collect();
-        let pinned = self.list() == List::Projects && self.projects[m.ix].pinned;
+        let is_projects = self.list() == List::Projects;
+        let pinned = is_projects && self.projects[m.ix].pinned;
         // Projects with an editor window open (the switcher lists those).
-        let open =
-            self.list() == List::Projects && self.open_keys.contains(&self.projects[m.ix].key());
-        // While marking, single projects get a numbered check box (the order is the
-        // folder order in the workspace).
-        let mark = (self.list() == List::Projects
-            && !self.marked.is_empty()
-            && !self.projects[m.ix].is_workspace())
-        .then(|| {
-            let position = self
-                .marked
-                .iter()
-                .position(|p| p == &self.projects[m.ix].path);
-            div()
-                .flex_none()
-                .size(px(18.))
-                .rounded_sm()
-                .border_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(SMALL_FONT_SIZE))
-                .map(|d| match position {
-                    Some(i) => d
-                        .bg(rgb(t.accent))
-                        .border_color(rgb(t.accent))
-                        .text_color(rgb(t.bg))
-                        .child((i + 1).to_string()),
-                    None => d.border_color(rgb(t.muted)),
-                })
-        });
+        let open = is_projects && self.open_keys.contains(&self.projects[m.ix].key());
         // A switcher row's number, for the number keys while holding the
-        // switcher and the switch-by-number shortcuts (alt+shift+1…9); and
-        // while ctrl is held, a project's place for ctrl+1…9. The ones past 9
-        // keep the space so the titles line up.
-        let number = if self.list() == List::Switch
-            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some())
-        {
-            Some(m.ix)
-        } else if self.list() == List::Projects && self.numbers_shown {
-            Some(row)
-        } else {
-            None
-        }
-        .map(|n| {
+        // switcher and the switch-by-number shortcuts (alt+shift+1…9). The ones
+        // past 9 keep the space so the titles line up. (The project list's
+        // ctrl+1…9 numbers take the icon's place instead, so nothing moves.)
+        let number = (self.list() == List::Switch
+            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some()))
+        .then(|| {
             div()
                 .flex_none()
                 .w(px(12.))
                 .text_size(px(SMALL_FONT_SIZE))
                 .text_color(rgb(t.muted))
-                .when(n < 9, |d| d.child((n + 1).to_string()))
+                .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
         });
         // Switcher rows can be dragged to another place in the list (it shows
         // every row in order then, so `row` is also the row's index).
@@ -108,25 +233,9 @@ impl Palette {
             width: px(0.),
             theme: t,
         });
-        // The editor's or window's program icon. "Other…" and "No editor" get
-        // none, but keep the space.
-        let program = match self.list() {
-            List::Editors | List::OpenWith => Some(match &self.editors[m.ix] {
-                EditorOption::Detected(editor) => editor.app.clone(),
-                EditorOption::Browse | EditorOption::FileManager => None,
-            }),
-            List::Switch => Some(Some(self.windows[self.switch_rows[m.ix][0]].exe.clone())),
-            _ => None,
-        }
-        .map(|program| app_icon(program, app_icon::ROW_SIZE));
-        // A project with its own editor: that editor's icon, before its name
-        // on the right.
-        let own_editor = (self.list() == List::Projects && !self.projects[m.ix].missing)
-            .then(|| self.projects[m.ix].editor.as_ref())
-            .flatten()
-            .and_then(|command| self.apps.get(command).cloned().flatten());
+        let icon = self.row_icon(row, m.ix);
         // A project whose folder is gone is dimmed; tags show after the name.
-        let project = (self.list() == List::Projects).then(|| &self.projects[m.ix]);
+        let project = is_projects.then(|| &self.projects[m.ix]);
         let missing = project.is_some_and(|p| p.missing);
         // Each tag in its own colour, so the same tag looks the same everywhere.
         let tags: Vec<_> = project
@@ -169,37 +278,33 @@ impl Palette {
                     cx.stop_propagation();
                     this.close_row(row, cx);
                 }))
-                .when(row != self.selected, |d| {
+                .when(!selected, |d| {
                     d.invisible().group_hover(ROW_GROUP, |s| s.visible())
                 })
                 .child(icons::CLOSE)
         });
-        // Pin, rename, remove and the actions menu: shown on the highlighted row,
-        // and on any row the mouse is over.
-        let icons = (self.list() == List::Projects).then(|| {
-            let project = &self.projects[m.ix];
-            let armed = self.confirm_remove.as_ref() == Some(&project.key());
+        // The actions menu and pin: shown on the highlighted row and on any
+        // row the mouse is over; a pinned project's pin always shows.
+        let icons = is_projects.then(|| {
             div()
                 .flex()
                 .flex_none()
                 .gap_1()
-                .relative()
                 .children(ROW_ICONS.map(|icon| {
                     let (glyph, color) = match icon {
                         RowIcon::Pin if pinned => (icons::PINNED, t.accent),
                         RowIcon::Pin => (icons::PIN, t.muted),
-                        RowIcon::Rename => (icons::RENAME, t.muted),
-                        RowIcon::Remove => (icons::REMOVE, if armed { t.danger } else { t.muted }),
                         RowIcon::More => (icons::MORE, t.muted),
                     };
+                    let m = secondary();
                     let tip = match icon {
-                        RowIcon::Pin if pinned => "Unpin: back into the recent order".to_string(),
-                        RowIcon::Pin => "Pin: keep it at the top".into(),
-                        RowIcon::Rename => "Rename… (search still finds it by its folder)".into(),
-                        RowIcon::Remove if armed => "Click again to remove it".into(),
-                        RowIcon::Remove => "Remove from the list (the folder stays)".into(),
-                        RowIcon::More => format!("All actions · {}-k", secondary()),
+                        RowIcon::Pin if pinned => {
+                            format!("Unpin: back into the recent order · {m}-shift-p")
+                        }
+                        RowIcon::Pin => format!("Pin: keep it at the top · {m}-shift-p"),
+                        RowIcon::More => format!("All actions · {m}-k or right-click"),
                     };
+                    let always = icon == RowIcon::Pin && pinned;
                     div()
                         .id((icon.id(), row))
                         .tooltip(tooltip(tip, t))
@@ -218,35 +323,16 @@ impl Palette {
                             cx.stop_propagation();
                             this.click_row_icon(row, icon, cx);
                         }))
-                        .when(row != self.selected, |d| {
+                        .when(!selected && !always, |d| {
                             d.invisible().group_hover(ROW_GROUP, |s| s.visible())
                         })
                         .child(glyph)
                 }))
-                // While the icons are hidden, a pinned row still shows its pin, at the
-                // end, wherever the pin icon sits among them.
-                .when(pinned && row != self.selected, |d| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .right_0()
-                            .size(px(28.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
-                            .text_size(px(14.))
-                            .text_color(rgb(t.accent))
-                            .group_hover(ROW_GROUP, |s| s.invisible())
-                            .child(icons::PINNED),
-                    )
-                })
         });
 
         // A line between the pinned projects and the rest, while the list
         // shows them all in order.
-        let after_pins = self.list() == List::Projects
+        let after_pins = is_projects
             && self.filter_query().is_empty()
             && row > 0
             && !pinned
@@ -272,6 +358,7 @@ impl Palette {
                 div()
                     .id(row)
                     .group(ROW_GROUP)
+                    .relative()
                     .w_full()
                     .h(px(ROW_HEIGHT))
                     .px_3()
@@ -279,13 +366,27 @@ impl Palette {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .when(row == self.selected, |d| d.bg(rgb(t.selected)))
-                    .hover(|d| d.bg(rgb(t.selected)))
+                    .map(|d| {
+                        if selected {
+                            d.bg(rgb(t.selected)).child(selection_bar(t, ROW_HEIGHT))
+                        } else {
+                            d.hover(|d| d.bg(rgb(t.hover)))
+                        }
+                    })
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.selected = row;
                         this.confirm(&Confirm, window, cx);
                     }))
+                    // Right-click: the project's actions, as a context menu would.
+                    .when(is_projects, |d| {
+                        d.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, _, _, cx| {
+                                this.click_row_icon(row, RowIcon::More, cx);
+                            }),
+                        )
+                    })
                     .when_some(dragged, |d, dragged| {
                         d.on_drag(dragged, |dragged, _, window, cx| {
                             let width = window.viewport_size().width - px(18.);
@@ -310,8 +411,7 @@ impl Palette {
                         ))
                     })
                     .children(number)
-                    .children(mark)
-                    .children(program)
+                    .child(icon)
                     .child(
                         div()
                             .flex_1()
@@ -353,7 +453,6 @@ impl Palette {
                                     .child(StyledText::new(subtitle).with_highlights(subtitle_hl)),
                             ),
                     )
-                    .children(icons)
                     .when(meta.top.is_some() || meta.bottom.is_some(), |d| {
                         let line = |text: String, color: u32| {
                             div()
@@ -373,28 +472,21 @@ impl Palette {
                                 .items_end()
                                 .text_size(px(SMALL_FONT_SIZE))
                                 .children(meta.top.map(|(text, color)| line(text, color)))
-                                .children(meta.bottom.map(|text| {
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .children(own_editor.map(|program| {
-                                            app_icon(Some(program), app_icon::SMALL_SIZE)
-                                        }))
-                                        .child(line(text, t.muted))
-                                }))
+                                .children(meta.bottom.map(|text| line(text, t.muted)))
                                 // What the branch's marks, "missing" or "· →" mean.
                                 .when_some(meta.tip, |d, tip| d.tooltip(tooltip(tip, t))),
                         )
                     })
+                    .children(icons)
                     .children(close),
             )
     }
 
-    /// The actions menu: one-line rows with an icon, under section headings,
-    /// and the highlighted row's explanation under it. A plain list rather
-    /// than a `uniform_list`, as the headings make rows differ in height.
-    fn render_actions(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The actions menu (ctrl-k), over the list at the bottom right like
+    /// PowerToys' Command Palette: its own search box, then one-line rows
+    /// with an icon under section headings. A plain list rather than a
+    /// `uniform_list`, as the headings make rows differ in height.
+    fn render_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = self.theme;
         let pinned = self.actions_project().is_some_and(|p| p.pinned);
         let highlight = HighlightStyle {
@@ -402,12 +494,12 @@ impl Palette {
             font_weight: Some(FontWeight::BOLD),
             ..Default::default()
         };
-        let entries: Vec<AnyElement> = self
+        let mut entries: Vec<AnyElement> = self
             .action_entries()
             .into_iter()
             .map(|entry| match entry {
                 ActionEntry::Heading(label) => div()
-                    .px_5()
+                    .px_4()
                     .pt_2()
                     .pb_1()
                     .text_size(px(11.))
@@ -415,17 +507,17 @@ impl Palette {
                     .child(label.to_uppercase())
                     .into_any_element(),
                 ActionEntry::Line => div()
-                    .mx_4()
-                    .my_2()
+                    .mx_3()
+                    .my_1()
                     .h(px(1.))
                     .bg(rgb(t.border))
                     .into_any_element(),
                 ActionEntry::Row(row) => {
-                    let m = &self.matches[row];
+                    let m = &self.menu_matches[row];
                     let action = self.actions[m.ix];
-                    let (title, subtitle) = self.item_text(m.ix);
-                    let meta = self.item_meta(m.ix, 0);
-                    let selected = row == self.selected;
+                    let (title, subtitle) = self.action_text(action);
+                    let detail = self.action_detail(action);
+                    let selected = row == self.menu_selected;
                     // Remove is in the warning colour, icon and all.
                     let danger = action == ProjectAction::Remove;
                     let (color, icon_color) = if danger {
@@ -438,76 +530,122 @@ impl Palette {
                         .collect();
                     div()
                         .id(("action", row))
-                        .mx_2()
+                        .relative()
+                        .mx_1()
                         .px_3()
+                        .h(px(32.))
+                        .flex_none()
                         .rounded_md()
                         .flex()
-                        .flex_col()
-                        .when(selected, |d| d.bg(rgb(t.selected)))
-                        .hover(|d| d.bg(rgb(t.selected)))
+                        .items_center()
+                        .gap_3()
+                        .map(|d| {
+                            if selected {
+                                d.bg(rgb(t.selected)).child(selection_bar(t, 32.))
+                            } else {
+                                d.hover(|d| d.bg(rgb(t.hover)))
+                            }
+                        })
                         // What it does, when the mouse rests on it.
                         .when(!subtitle.is_empty(), |d| d.tooltip(tooltip(subtitle, t)))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.selected = row;
-                            this.confirm(&Confirm, window, cx);
+                            this.menu_selected = row;
+                            this.confirm_menu(window, cx);
                         }))
                         .child(
                             div()
-                                .h(px(30.))
+                                .flex_none()
+                                .w(px(18.))
                                 .flex()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(18.))
-                                        .flex()
-                                        .justify_center()
-                                        .when(!icons::FONT.is_empty(), |d| {
-                                            d.font_family(icons::FONT)
-                                        })
-                                        .text_size(px(14.))
-                                        .text_color(rgb(icon_color))
-                                        .child(action.icon(pinned)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_size(px(FONT_SIZE - 1.))
-                                        .text_color(rgb(color))
-                                        .child(StyledText::new(title).with_highlights(title_hl)),
-                                )
-                                .children(meta.top.map(|(text, color)| {
-                                    div()
-                                        .flex_none()
-                                        .max_w(px(260.))
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_size(px(SMALL_FONT_SIZE))
-                                        .text_color(rgb(color))
-                                        .child(text)
-                                })),
+                                .justify_center()
+                                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                                .text_size(px(14.))
+                                .text_color(rgb(icon_color))
+                                .child(action.icon(pinned)),
                         )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(FONT_SIZE - 1.))
+                                .text_color(rgb(color))
+                                .child(StyledText::new(title).with_highlights(title_hl)),
+                        )
+                        // Its key, or the project's tags.
+                        .children(detail.map(|detail| {
+                            if detail.starts_with('#') {
+                                div()
+                                    .flex_none()
+                                    .max_w(px(160.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(SMALL_FONT_SIZE))
+                                    .text_color(rgb(t.muted))
+                                    .child(detail)
+                            } else {
+                                keycaps(&detail, t)
+                            }
+                        }))
                         .into_any_element()
                 }
             })
             .collect();
+        if self.menu_matches.is_empty() {
+            entries.push(
+                div()
+                    .px_4()
+                    .py_2()
+                    .text_size(px(SMALL_FONT_SIZE))
+                    .text_color(rgb(t.muted))
+                    .child("No matching actions")
+                    .into_any_element(),
+            );
+        }
         div()
-            .id("actions")
-            .flex_1()
-            .overflow_y_scroll()
-            .track_scroll(&self.actions_scroll)
-            .py_1()
+            .id("menu")
+            .absolute()
+            .right(px(8.))
+            .bottom(px(FOOTER_HEIGHT + 4.))
+            .w(px(420.))
+            .max_h(px(380.))
+            .occlude()
             .flex()
             .flex_col()
-            .children(entries)
-            .into_any_element()
+            .bg(rgb(t.bg))
+            .border_1()
+            .border_color(rgb(t.border))
+            .rounded_lg()
+            .shadow_lg()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(42.))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(rgb(t.border))
+                    .text_size(px(FONT_SIZE))
+                    .child(self.menu_input.clone()),
+            )
+            .child(
+                div()
+                    .id("actions")
+                    .flex_shrink()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.actions_scroll)
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .children(entries),
+            )
     }
 
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -518,8 +656,8 @@ impl Palette {
         {
             return div().flex_1().into_any_element();
         }
-        if self.list() == List::Templates && self.templates.is_empty() {
-            return div()
+        let centered = || {
+            div()
                 .flex_1()
                 .flex()
                 .flex_col()
@@ -529,6 +667,29 @@ impl Palette {
                 .px_6()
                 .text_size(px(FONT_SIZE))
                 .text_color(rgb(t.muted))
+        };
+        let add_button = |cx: &mut Context<Self>| {
+            div()
+                .id("add-projects")
+                .px_3()
+                .h(px(32.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .gap_2()
+                .bg(rgb(t.selected))
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.text))
+                .cursor_pointer()
+                .hover(|d| d.bg(rgb(t.border)))
+                .on_click(
+                    cx.listener(|this, _, window, cx| this.add_projects(&AddProjects, window, cx)),
+                )
+                .child("Add projects…")
+                .child(keycaps(&format!("{}-o", secondary()), t))
+        };
+        if self.list() == List::Templates && self.templates.is_empty() {
+            return centered()
                 .child("No templates yet")
                 .child(
                     div()
@@ -542,38 +703,34 @@ impl Palette {
                 .into_any_element();
         }
         if self.list() == List::Projects && self.projects.is_empty() {
-            return div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_3()
-                .text_size(px(FONT_SIZE))
-                .text_color(rgb(t.muted))
+            return centered()
                 .child("No projects yet")
+                .child(add_button(cx))
                 .child(
                     div()
-                        .id("add-projects")
-                        .px_4()
-                        .py_2()
-                        .rounded_md()
-                        .bg(rgb(t.selected))
-                        .text_color(rgb(t.text))
-                        .cursor_pointer()
-                        .hover(|d| d.bg(rgb(t.border)))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.add_projects(&AddProjects, window, cx)
-                        }))
-                        .child(format!("Add projects…  {}-o", secondary())),
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .child("or paste a folder path above"),
                 )
-                .child("or paste a folder path above")
                 .into_any_element();
         }
-        let empty = if self.list() == List::Switch && self.windows.is_empty() {
-            crate::platform::window_access_hint().unwrap_or("No editor windows are open")
-        } else {
-            "No matches"
+        // Not there: say how to get it there.
+        if self.list() == List::Projects {
+            return centered()
+                .child(format!("No projects match \"{}\"", self.filter_query()))
+                .child(add_button(cx))
+                .child(
+                    div()
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .child("or paste a folder path or a git URL to add or clone it"),
+                )
+                .into_any_element();
+        }
+        let empty = match self.list() {
+            List::Switch if self.windows.is_empty() => {
+                crate::platform::window_access_hint().unwrap_or("No editor windows are open")
+            }
+            List::Commands => "No commands match",
+            _ => "No matches",
         };
         div()
             .flex_1()
@@ -584,59 +741,42 @@ impl Palette {
             .into_any_element()
     }
 
+    /// A line under the search bar on pages that need saying what enter does.
+    /// The page's name is in the search bar; the keys are in the footer.
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let t = self.theme;
-        let (title, lines): (String, Vec<String>) = match self.mode {
-            // One project's windows, after → on its row.
-            _ if self.list() == List::Switch && self.expanded.is_some() => {
-                let project = &self.projects[self.expanded?];
-                (
-                    format!("{}'s windows", project.name),
-                    vec!["← back to every project's".into()],
-                )
-            }
-            Mode::Projects | Mode::Switch | Mode::Actions => return None,
-            Mode::Tags => {
-                let project = self.edited_project()?;
-                (
-                    format!("Tags for {}", project.name),
-                    vec![
-                        "Words, separated by spaces or commas. ↵ saves.".into(),
-                        "Then search for #tag to list just the projects with it.".into(),
-                    ],
-                )
-            }
+        let m = secondary();
+        let (title, lines): (Option<String>, Vec<String>) = match self.mode {
+            Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Tags => (
+                None,
+                vec!["Words, separated by spaces or commas; then search for #tag to list just those projects.".into()],
+            ),
             Mode::AddCommand => {
                 let project = self.edited_project()?;
                 (
-                    format!("Add a command to {}", project.name),
+                    None,
                     vec![format!(
-                        "↵ adds it to its actions ({}-k), to run in a terminal in {}.",
-                        secondary(),
+                        "It runs in a terminal in {}, from the project's actions ({m}-k).",
                         project.location()
                     )],
                 )
             }
-            Mode::Templates => (
-                "New project from a template".into(),
-                vec!["↵ picks one, then you name the new project.".into()],
-            ),
             Mode::NewProject => {
-                let template = self.new_from.as_ref()?;
                 let into = match self.config.scan_dirs.first() {
                     Some(dir) => format!("in {}", paths::display_path(dir)),
                     None => "in a folder you pick next".into(),
                 };
                 (
-                    format!("New project from {}", template.name()),
+                    None,
                     vec![format!(
-                        "↵ makes it {into}, with a git history of its own, and opens it."
+                        "Made {into}, with a git history of its own, then opened."
                     )],
                 )
             }
-            Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
+            // First run: nothing to go back to, so it says what proj is about.
             Mode::Editors if self.config.editor.is_none() => (
-                "Which editor should open your projects?".into(),
+                Some("Which editor should open your projects?".into()),
                 vec![
                     "The default for all projects. Change it any time: type > and pick \
                      \"Change the default editor\"."
@@ -648,12 +788,10 @@ impl Palette {
                 ],
             ),
             Mode::Editors => (
-                "Default editor for all projects".into(),
-                vec![
-                    "↵ changes it for every project that doesn't have its own editor.".into(),
-                    "Only for one project, once or as its default? Press alt-↵ on it instead."
-                        .into(),
-                ],
+                None,
+                vec![format!(
+                    "For every project without its own editor. Just one project? {m}-↵ on it instead."
+                )],
             ),
             Mode::Rename => {
                 let project = self.edited_project()?;
@@ -664,9 +802,9 @@ impl Palette {
                     .map(|n| n.to_string_lossy().into_owned())
                     .collect();
                 (
-                    format!("Rename {}", project.location()),
+                    None,
                     vec![format!(
-                        "↵ saves. Search still finds it by {}.",
+                        "Search still finds it by {}. Empty goes back to the folder name.",
                         folders.join(" and ")
                     )],
                 )
@@ -674,21 +812,16 @@ impl Palette {
             Mode::OpenWith => {
                 let project = self.open_with_project()?;
                 let name = &project.name;
-                let m = secondary();
                 let editor = self.name_of(&project.default_editor(&self.config));
                 let now = match project.editor {
-                    Some(_) => format!("{name}'s own default is {editor}."),
-                    None => format!("{name} opens in the default editor, {editor}."),
+                    Some(_) => format!("Its own default is {editor}."),
+                    None => format!("It opens in the default editor, {editor}."),
                 };
                 (
-                    format!("Open {name} with…"),
-                    vec![
-                        format!("{now} Here, ↵ opens it just this once and changes nothing."),
-                        format!(
-                            "{m}-↵ makes the highlighted editor {name}'s default \
-                             (again: back to the default for all projects)."
-                        ),
-                    ],
+                    None,
+                    vec![format!(
+                        "{now} ↵ opens {name} with another just this once; {m}-↵ makes that its default."
+                    )],
                 )
             }
         };
@@ -702,53 +835,281 @@ impl Palette {
                 .gap_1()
                 .text_size(px(SMALL_FONT_SIZE))
                 .text_color(rgb(t.muted))
-                .child(
+                .children(title.map(|title| {
                     div()
                         .text_size(px(FONT_SIZE))
                         .text_color(rgb(t.text))
-                        .child(title),
-                )
+                        .child(title)
+                }))
                 .children(lines),
         )
     }
 
-    /// Which project the actions menu is for: one line with a rule under it, so
-    /// it doesn't read as the first action.
-    pub(super) fn render_actions_header(&self) -> Option<impl IntoElement + use<>> {
+    /// The search bar: on a page off the project list, a back button and the
+    /// page's name before the search box; after `>` or `@`, what's searched.
+    fn render_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = self.theme;
-        let project = self
-            .actions_project()
-            .filter(|_| self.mode == Mode::Actions)?;
-        Some(
-            div()
-                .mx_4()
-                .pt_3()
-                .pb_2()
-                .mb_1()
-                .border_b_1()
-                .border_color(rgb(t.border))
-                .flex()
-                .items_baseline()
-                .gap_2()
-                .text_size(px(SMALL_FONT_SIZE))
-                .text_color(rgb(t.muted))
-                .child(div().flex_none().child("Actions for"))
+        let page = self.page_title();
+        let top_level = page.is_none();
+        let scope = match self.list() {
+            List::Commands => Some("Commands"),
+            List::Switch if self.mode == Mode::Projects && self.expanded.is_none() => {
+                Some("Windows")
+            }
+            _ => None,
+        };
+        div()
+            .flex_none()
+            .h(px(SEARCH_HEIGHT))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(rgb(t.border))
+            .when_some(page, |d, page| {
+                d.child(
+                    div()
+                        .id("back")
+                        .flex_none()
+                        .size(px(30.))
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                        .text_size(px(14.))
+                        .text_color(rgb(t.muted))
+                        .hover(|d| d.bg(rgb(t.hover)).text_color(rgb(t.text)))
+                        .cursor_pointer()
+                        .tooltip(tooltip("Back · esc, or backspace with nothing typed", t))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.go_back(cx);
+                        }))
+                        .child(icons::BACK),
+                )
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(FONT_SIZE))
+                        .max_w(px(280.))
+                        .h(px(26.))
+                        .px_2()
+                        .rounded_md()
+                        .bg(rgb(t.selected))
+                        .flex()
+                        .items_center()
+                        .text_size(px(SMALL_FONT_SIZE))
                         .text_color(rgb(t.text))
-                        .child(project.name.clone()),
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .child(page),
+                        ),
                 )
+            })
+            .when(top_level, |d| d.pl_4())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(INPUT_FONT_SIZE))
+                    .line_height(px(27.))
+                    .child(self.input.clone()),
+            )
+            .children(scope.map(|scope| {
+                div()
+                    .flex_none()
+                    .pr_2()
+                    .text_size(px(SMALL_FONT_SIZE))
+                    .text_color(rgb(t.muted))
+                    .child(scope)
+            }))
+    }
+
+    /// What the footer says on the left when there's no message.
+    fn footer_context(&self) -> Option<String> {
+        Some(match self.list() {
+            List::Projects if !self.marked.is_empty() => {
+                let names: Vec<String> = self
+                    .marked
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect();
+                format!("{} · esc clears", names.join(" + "))
+            }
+            List::Projects if !self.filter_query().is_empty() => {
+                format!("{} of {} projects", self.matches.len(), self.projects.len())
+            }
+            List::Projects => format!("{} projects", self.projects.len()),
+            List::Browse => format!("{} items", self.item_count()),
+            List::Switch if self.hold.is_some() => "Let go to switch".into(),
+            List::Switch => format!("{} windows", self.windows.len()),
+            _ => return None,
+        })
+    }
+
+    /// Something went wrong: in full, wrapped, in the warning colour, above
+    /// the footer.
+    fn render_problem(&self) -> Option<impl IntoElement + use<>> {
+        let t = self.theme;
+        let status = self.status.as_ref().filter(|s| s.problem)?;
+        Some(
+            div()
+                .flex_none()
+                .px_4()
+                .py_2()
+                .border_t_1()
+                .border_color(rgb(t.border))
+                .flex()
+                .items_start()
+                .gap_2()
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.danger))
+                .child(
+                    div()
+                        .flex_none()
+                        .pt(px(2.))
+                        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                        .text_size(px(12.))
+                        .child(icons::WARNING),
+                )
+                .child(div().flex_1().min_w_0().child(status.text.clone())),
+        )
+    }
+
+    /// Left: a message, or what the list holds. Right: buttons for the list's
+    /// main two keys, as in PowerToys' Command Palette, after a ? for all of them.
+    fn render_footer(
+        &self,
+        shortcuts: &[Shortcut],
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t = self.theme;
+        let info = self.status.as_ref().filter(|s| !s.problem);
+        let left = match info {
+            Some(status) => div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .min_w_0()
+                .text_color(rgb(t.accent))
                 .child(
                     div()
                         .min_w_0()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(project.location()),
-                ),
-        )
+                        .child(status.text.clone()),
+                )
+                .when(status.undo, |d| {
+                    d.child(
+                        div()
+                            .id("undo")
+                            .flex_none()
+                            .px_2()
+                            .h(px(24.))
+                            .rounded_md()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_color(rgb(t.text))
+                            .hover(|d| d.bg(rgb(t.hover)))
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| this.undo_last_remove(cx)))
+                            .child("Undo")
+                            .child(keycaps(&format!("{}-z", secondary()), t)),
+                    )
+                }),
+            None => div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .children(self.footer_context()),
+        };
+        let help = shortcuts.iter().any(|s| s.footer.is_none()).then(|| {
+            div()
+                .id("all-keys")
+                .flex_none()
+                .size(px(28.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                .text_size(px(13.))
+                .text_color(rgb(if self.show_shortcuts {
+                    t.accent
+                } else {
+                    t.muted
+                }))
+                .hover(|d| d.bg(rgb(t.hover)).text_color(rgb(t.text)))
+                .cursor_pointer()
+                .tooltip(tooltip("Every key of this list · f1", t))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_shortcuts(cx)))
+                .child(icons::HELP)
+        });
+        let mut buttons: Vec<AnyElement> = Vec::new();
+        for (ix, shortcut) in shortcuts.iter().enumerate() {
+            let Some(label) = shortcut.footer else {
+                continue;
+            };
+            if !buttons.is_empty() {
+                buttons.push(
+                    div()
+                        .flex_none()
+                        .w(px(1.))
+                        .h(px(16.))
+                        .bg(rgb(t.border))
+                        .into_any_element(),
+                );
+            }
+            let run = shortcut.run.as_ref().map(|run| run.boxed_clone());
+            buttons.push(
+                div()
+                    .id(("footer", ix))
+                    .flex_none()
+                    .h(px(30.))
+                    .px_2()
+                    .rounded_md()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_color(rgb(t.text))
+                    .tooltip(tooltip(shortcut.action, t))
+                    .when_some(run, |d, run| {
+                        d.cursor_pointer()
+                            .hover(|d| d.bg(rgb(t.hover)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.show_shortcuts = false;
+                                window.dispatch_action(run.boxed_clone(), cx);
+                            }))
+                    })
+                    .child(label)
+                    .child(keycaps(&shortcut.keys[0], t))
+                    .into_any_element(),
+            );
+        }
+        div()
+            .flex_none()
+            .h(px(FOOTER_HEIGHT))
+            .pl_4()
+            .pr_1()
+            .border_t_1()
+            .border_color(rgb(t.border))
+            .flex()
+            .items_center()
+            .gap_1()
+            .text_size(px(SMALL_FONT_SIZE))
+            .text_color(rgb(t.muted))
+            .child(left)
+            .child(div().flex_1())
+            .children(help)
+            .children(buttons)
     }
 }
 
@@ -766,11 +1127,18 @@ fn ranges<'a>(text: &'a str, offsets: &'a [usize]) -> impl Iterator<Item = Range
 }
 
 impl Render for Palette {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.theme;
-        let list = if self.list() == List::Actions && !self.matches.is_empty() {
-            self.render_actions(cx)
-        } else if !self.matches.is_empty() {
+        // Keys go to the menu's search box while it's open, else the main one.
+        let focus = if self.menu_open() {
+            self.menu_input.focus_handle(cx)
+        } else {
+            self.input.focus_handle(cx)
+        };
+        if !focus.is_focused(window) && window.is_window_active() {
+            window.focus(&focus);
+        }
+        let list = if !self.matches.is_empty() {
             let now = store::now();
             uniform_list(
                 "items",
@@ -805,17 +1173,28 @@ impl Render for Palette {
             });
         let add_row = action.map(|(label, detail)| {
             div()
+                .relative()
                 .mx_2()
                 .mt_1()
                 .px_3()
                 .h(px(ROW_HEIGHT))
                 .rounded_md()
                 .bg(rgb(t.selected))
+                .child(selection_bar(t, ROW_HEIGHT))
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_3()
                 .text_size(px(FONT_SIZE))
-                .child(div().text_color(rgb(t.accent)).child(label))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(ICON_SLOT))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(glyph(icons::ADD, t.accent)),
+                )
+                .child(div().flex_none().text_color(rgb(t.accent)).child(label))
                 .child(
                     div()
                         .min_w_0()
@@ -825,114 +1204,52 @@ impl Render for Palette {
                         .text_color(rgb(t.text))
                         .child(detail),
                 )
-                .child(
-                    div()
-                        .ml_auto()
-                        .text_size(px(SMALL_FONT_SIZE))
-                        .text_color(rgb(t.muted))
-                        .child("↵"),
-                )
+                .child(div().flex_1())
+                .child(keycaps("↵", t))
         });
 
-        let hint = |key: String, label: &'static str| {
-            div()
-                .flex()
-                .gap_1()
-                .child(div().text_color(rgb(t.text)).child(key))
-                .child(label)
-        };
         let shortcuts = self.shortcuts();
-        // Each says in full what it does when the mouse rests on it.
-        let mut hints: Vec<AnyElement> = shortcuts
-            .iter()
-            .enumerate()
-            .filter_map(|(ix, s)| {
-                Some(
-                    hint(s.keys[0].clone(), s.footer?)
-                        .id(("hint", ix))
-                        .tooltip(tooltip(s.action, t))
-                        .into_any_element(),
-                )
-            })
-            .collect();
-        // The rest are in the dropdown, opened by F1 or by clicking this.
-        let more = shortcuts.iter().any(|s| s.footer.is_none()).then(|| {
-            hint("f1".into(), "all keys")
-                .id("all-keys")
-                .tooltip(tooltip("Every key of this list; click one to run it", t))
-                .cursor_pointer()
-                .hover(|d| d.text_color(rgb(t.text)))
-                .when(self.show_shortcuts, |d| d.text_color(rgb(t.accent)))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_shortcuts(cx)))
-        });
-        let dropdown =
-            (self.show_shortcuts && more.is_some()).then(|| self.render_shortcuts(shortcuts, cx));
-        if let Some(more) = more {
-            hints.push(more.into_any_element());
-        }
-        let footer = div()
-            .h(px(FOOTER_HEIGHT))
-            .px_4()
-            .border_t_1()
-            .border_color(rgb(t.border))
-            .flex()
-            .items_center()
-            .gap_4()
-            .text_size(px(SMALL_FONT_SIZE))
-            .text_color(rgb(t.muted))
-            .child(match (&self.status, self.list()) {
-                (Some(status), _) => div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_color(rgb(t.accent))
-                    .child(status.clone()),
-                (None, List::Projects) if !self.marked.is_empty() => {
-                    let names: Vec<String> = self
-                        .marked
-                        .iter()
-                        .filter_map(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .collect();
-                    div()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .text_color(rgb(t.accent))
-                        .child(names.join(" + "))
-                }
-                (None, List::Projects) if !self.filter_query().is_empty() => div().child(format!(
-                    "{} of {} projects",
-                    self.matches.len(),
-                    self.projects.len()
-                )),
-                (None, List::Projects) => div().child(format!("{} projects", self.projects.len())),
-                (None, List::Browse) => div().child(format!("{} items", self.item_count())),
-                (None, List::Switch) if self.hold.is_some() => div().child("let go to switch"),
-                (None, List::Switch) => div().child(format!("{} windows", self.windows.len())),
-                // What the highlighted action does, as its tooltip says for the mouse.
-                (None, List::Actions) => div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .children(
-                        self.matches
-                            .get(self.selected)
-                            .map(|m| self.item_text(m.ix).1),
+        let footer = self.render_footer(&shortcuts, cx);
+        let dropdown = self
+            .show_shortcuts
+            .then(|| self.render_shortcuts(shortcuts, cx));
+        // The menu, over a backdrop that closes it when clicked, as clicking
+        // outside a context menu does.
+        let menu = self.menu_open().then(|| {
+            (
+                // Not over the footer, whose buttons work on the menu.
+                div()
+                    .id("backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom(px(FOOTER_HEIGHT))
+                    .occlude()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| this.close_menu(cx)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, _, _, cx| this.close_menu(cx)),
                     ),
-                (None, _) => div(),
-            })
-            .child(div().flex_1())
-            .children(hints);
+                self.render_menu(cx),
+            )
+        });
+        let (backdrop, menu) = match menu {
+            Some((backdrop, menu)) => (Some(backdrop), Some(menu)),
+            None => (None, None),
+        };
 
         div()
             .key_context("Palette")
             // While the switcher is held open, a number switches to that window
             // and other keys start a search.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.menu_open() {
+                    return;
+                }
                 if this.switch_to_number(&event.keystroke.key, window, cx)
                     || this.open_number(&event.keystroke, window, cx)
                     || this.type_in_switcher(&event.keystroke, window, cx)
@@ -947,14 +1264,42 @@ impl Render for Palette {
             }))
             // Home/end move the text cursor; with nothing typed, the selection.
             .capture_action(cx.listener(|this, _: &input::Home, _, cx| {
-                if this.query.is_empty() && !this.matches.is_empty() {
+                if this.menu_open() {
+                    if this.menu_query.is_empty() {
+                        this.select_menu_row(0, cx);
+                        cx.stop_propagation();
+                    }
+                } else if this.query.is_empty() && !this.matches.is_empty() {
                     this.select_row(0, cx);
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &input::End, _, cx| {
-                if this.query.is_empty() && !this.matches.is_empty() {
+                if this.menu_open() {
+                    if this.menu_query.is_empty() {
+                        this.select_menu_row(usize::MAX, cx);
+                        cx.stop_propagation();
+                    }
+                } else if this.query.is_empty() && !this.matches.is_empty() {
                     this.select_row(usize::MAX, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            // Backspace with nothing typed goes back a page, as in PowerToys'
+            // Command Palette; in the menu, closes it. Not while typing a name
+            // or tags, where empty is a value.
+            .capture_action(cx.listener(|this, _: &input::Backspace, _, cx| {
+                if this.menu_open() {
+                    if this.menu_input.read(cx).text().is_empty() {
+                        this.close_menu(cx);
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                if this.list() != List::Text
+                    && this.input.read(cx).text().is_empty()
+                    && this.go_back(cx)
+                {
                     cx.stop_propagation();
                 }
             }))
@@ -964,11 +1309,14 @@ impl Render for Palette {
             // →/← browse into projects and folders, but only at the ends of the
             // search text, so they still move the cursor while editing it.
             .capture_action(cx.listener(|this, _: &input::Right, _, cx| {
-                if this.input.read(cx).cursor_at_end() && this.enter(cx) {
+                if !this.menu_open() && this.input.read(cx).cursor_at_end() && this.enter(cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &input::Left, _, cx| {
+                if this.menu_open() {
+                    return;
+                }
                 // Out of a project's windows also from just after the `@` that
                 // lists them in the project search.
                 let at_start = this.input.read(cx).cursor_at_start()
@@ -977,40 +1325,84 @@ impl Render for Palette {
                     cx.stop_propagation();
                 }
             }))
-            .on_action(cx.listener(Self::remove_task))
+            .on_action(cx.listener(|this, _: &RemoveItem, _, cx| {
+                if this.menu_open() {
+                    this.remove_task(cx);
+                } else if this.list() == List::Projects {
+                    this.remove(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &RenameItem, _, cx| {
+                if this.list() == List::Projects {
+                    this.close_menu(cx);
+                    this.rename(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &TogglePin, _, cx| {
+                if this.list() == List::Projects {
+                    this.close_menu(cx);
+                    this.toggle_pin(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenConfig, window, cx| {
+                this.close_menu(cx);
+                this.run_command(PaletteCommand::OpenConfig, window, cx);
+            }))
             .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(Self::confirm))
-            .on_action(cx.listener(|this, _: &ToggleProjectDefault, window, cx| {
-                if this.list() == List::OpenWith {
-                    this.toggle_project_default(window, cx);
-                }
-            }))
+            // The row's second action: in the Open-with list, make the editor
+            // the project's default; on a project, open with…
+            .on_action(
+                cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
+                    List::OpenWith => this.toggle_project_default(window, cx),
+                    List::Projects if !this.menu_open() => this.open_with_selected(cx),
+                    _ => {}
+                }),
+            )
             .on_action(cx.listener(|this, _: &ShowInFileManager, window, cx| {
+                this.close_menu(cx);
                 this.open_selected(Target::FileManager, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenTerminal, window, cx| {
+                this.close_menu(cx);
                 this.open_selected(Target::Terminal, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenWithMenu, _, cx| {
-                let entry = if this.marked.len() > 1 {
-                    this.marked_workspace(cx)
+                this.close_menu(cx);
+                this.open_with_selected(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleMark, _, cx| {
+                if this.menu_open() {
+                    this.select_in_menu(1, cx);
                 } else {
-                    this.selected_project().cloned()
-                };
-                if let Some(entry) = entry {
-                    this.show_open_with(entry.key(), cx);
+                    this.toggle_mark(1, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleMark, _, cx| this.toggle_mark(1, cx)))
-            .on_action(cx.listener(|this, _: &ToggleMarkUp, _, cx| this.toggle_mark(-1, cx)))
+            .on_action(cx.listener(|this, _: &ToggleMarkUp, _, cx| {
+                if this.menu_open() {
+                    this.select_in_menu(-1, cx);
+                } else {
+                    this.toggle_mark(-1, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &ShowActions, _, cx| this.show_actions(cx)))
             .on_action(cx.listener(Self::copy_path))
-            .on_action(cx.listener(Self::open_remote))
-            .on_action(cx.listener(Self::add_projects))
-            .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| this.toggle_shortcuts(cx)))
+            .on_action(cx.listener(|this, action: &OpenRemote, window, cx| {
+                this.close_menu(cx);
+                this.open_remote(action, window, cx);
+            }))
+            .on_action(cx.listener(|this, action: &AddProjects, window, cx| {
+                this.close_menu(cx);
+                this.add_projects(action, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleShortcuts, _, cx| {
+                this.close_menu(cx);
+                this.toggle_shortcuts(cx);
+            }))
             .on_action(cx.listener(Self::dismiss))
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -1020,28 +1412,31 @@ impl Render for Palette {
             .rounded_lg()
             .overflow_hidden()
             .text_color(rgb(t.text))
-            .child(
-                div()
-                    .h(px(58.))
-                    .px_4()
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(rgb(t.border))
-                    .text_size(px(INPUT_FONT_SIZE))
-                    .line_height(px(27.))
-                    .child(self.input.clone()),
-            )
+            .child(self.render_search_bar(cx))
             .children(self.render_banner())
-            .children(self.render_actions_header())
             .children(add_row)
             .child(list)
+            .children(self.render_problem())
             .child(footer)
+            .children(backdrop)
+            .children(menu)
             .children(dropdown)
     }
 }
 
 impl Palette {
+    /// Alt-enter or ctrl-enter on a project, or the marked ones: the Open-with list.
+    fn open_with_selected(&mut self, cx: &mut Context<Self>) {
+        let entry = if self.marked.len() > 1 {
+            self.marked_workspace(cx)
+        } else {
+            self.selected_project().cloned()
+        };
+        if let Some(entry) = entry {
+            self.show_open_with(entry.key(), cx);
+        }
+    }
+
     fn toggle_shortcuts(&mut self, cx: &mut Context<Self>) {
         self.show_shortcuts = !self.show_shortcuts;
         // While it's open the arrows move through it, from its first key.
@@ -1091,7 +1486,7 @@ impl Palette {
         }
     }
 
-    /// Every shortcut of the current list, above the footer's "all keys".
+    /// Every shortcut of the current list, above the footer's ? button.
     /// Clicking one closes the dropdown and runs it.
     fn render_shortcuts(
         &self,
@@ -1103,11 +1498,13 @@ impl Palette {
             .into_iter()
             .enumerate()
             .map(|(ix, shortcut)| {
+                let selected = ix == self.shortcut_selected;
                 div()
                     .id(("shortcut", ix))
+                    .relative()
                     .mx_1()
                     .px_2()
-                    .h(px(28.))
+                    .h(px(30.))
                     .flex_none()
                     .rounded_sm()
                     .flex()
@@ -1115,16 +1512,28 @@ impl Palette {
                     .gap_3()
                     .child(
                         div()
-                            .w(px(160.))
+                            .w(px(190.))
                             .flex_none()
-                            .text_color(rgb(t.text))
-                            .child(shortcut.keys.join("  ")),
+                            .flex()
+                            .gap_2()
+                            .children(shortcut.keys.iter().map(|key| keycaps(key, t))),
                     )
-                    .child(div().text_color(rgb(t.muted)).child(shortcut.action))
-                    .when(ix == self.shortcut_selected, |d| d.bg(rgb(t.selected)))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_color(rgb(if shortcut.run.is_some() {
+                                t.text
+                            } else {
+                                t.muted
+                            }))
+                            .child(shortcut.action),
+                    )
+                    .when(selected, |d| {
+                        d.bg(rgb(t.selected)).child(selection_bar(t, 30.))
+                    })
                     .when_some(shortcut.run, |row, run| {
                         row.cursor_pointer()
-                            .hover(|d| d.bg(rgb(t.selected)))
+                            .when(!selected, |d| d.hover(|d| d.bg(rgb(t.hover))))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.show_shortcuts = false;
                                 cx.notify();
@@ -1138,8 +1547,8 @@ impl Palette {
             .absolute()
             .right(px(8.))
             .bottom(px(FOOTER_HEIGHT + 4.))
-            .w(px(440.))
-            .max_h(px(400.))
+            .w(px(520.))
+            .max_h(px(380.))
             .overflow_y_scroll()
             .track_scroll(&self.shortcuts_scroll)
             .occlude()
@@ -1149,7 +1558,7 @@ impl Palette {
             .bg(rgb(t.bg))
             .border_1()
             .border_color(rgb(t.border))
-            .rounded_md()
+            .rounded_lg()
             .shadow_lg()
             .text_size(px(SMALL_FONT_SIZE))
             .children(rows)

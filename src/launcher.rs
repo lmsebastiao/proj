@@ -511,7 +511,7 @@ fn handle(command: Command, tray: Option<&Tray>, cx: &mut App) {
             // Clicking the tray icon takes focus from the palette, which closes it
             // just before the click arrives; treat that click as "close".
             let closed_at = cx.global::<PaletteWindow>().closed_at;
-            if !closed_at.is_some_and(|at| at.elapsed() < Duration::from_millis(400)) {
+            if closed_at.is_none_or(|at| at.elapsed() >= Duration::from_millis(400)) {
                 toggle_palette(tray, cx);
             }
         }
@@ -700,13 +700,21 @@ fn close_palette(handle: WindowHandle<Palette>, cx: &mut App) {
 
 fn toggle_palette(tray: Option<&Tray>, cx: &mut App) {
     if let Some(handle) = open_palette(cx) {
+        // Closed by its shortcut, without opening anything.
+        handle
+            .update(cx, |palette, _, cx| palette.remember_search(cx))
+            .ok();
         close_palette(handle, cx);
         return;
     }
     reload_hotkeys(tray, cx);
     // In the switcher's order, for the `@` list and its numbers.
     let (windows, _) = arranged_windows(1, cx);
-    show_palette(cx, move |window, cx| Palette::new(window, cx, windows));
+    show_palette(cx, move |window, cx| {
+        let mut palette = Palette::new(window, cx, windows);
+        palette.restore_search(cx);
+        palette
+    });
 }
 
 /// Opens the palette window in front, with `build` making its contents.
@@ -714,7 +722,7 @@ fn show_palette(
     cx: &mut App,
     build: impl FnOnce(&mut Window, &mut Context<Palette>) -> Palette + 'static,
 ) {
-    let display = platform::launcher_display(cx);
+    let display = platform::launcher_display(config::load_config().monitor, cx);
 
     let window_size = size(px(720.), px(500.));
     let bounds = match &display {

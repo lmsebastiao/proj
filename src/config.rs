@@ -32,6 +32,9 @@ pub struct Config {
     /// Light or dark colours, or follow the system setting.
     #[serde(deserialize_with = "theme_or_system")]
     pub theme: ThemeSetting,
+    /// Which screen the launcher opens on.
+    #[serde(deserialize_with = "monitor_or_cursor")]
+    pub monitor: MonitorSetting,
     /// Git hosts and the software they run ("github", "gitlab", "gitea",
     /// "forgejo", "bitbucket", "azure"), for sites whose name doesn't say.
     pub forges: BTreeMap<String, String>,
@@ -67,6 +70,28 @@ impl ThemeSetting {
     }
 }
 
+/// Which screen the launcher opens on.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum MonitorSetting {
+    /// The one with the mouse pointer.
+    #[default]
+    Cursor,
+    /// The one with the window in front (the one being typed in).
+    Focused,
+    Primary,
+}
+
+/// A misspelt monitor falls back to "cursor", like the theme.
+fn monitor_or_cursor<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<MonitorSetting, D::Error> {
+    Ok(match String::deserialize(deserializer)?.trim() {
+        "focused" => MonitorSetting::Focused,
+        "primary" => MonitorSetting::Primary,
+        _ => MonitorSetting::Cursor,
+    })
+}
+
 /// A misspelt theme falls back to "system" instead of failing the whole file.
 fn theme_or_system<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ThemeSetting, D::Error> {
     Ok(match String::deserialize(deserializer)?.trim() {
@@ -88,6 +113,7 @@ impl Default for Config {
             switch_hotkey: None,
             switch_number_modifiers: None,
             theme: ThemeSetting::System,
+            monitor: MonitorSetting::Cursor,
             forges: BTreeMap::new(),
             templates: Vec::new(),
         }
@@ -224,6 +250,10 @@ check_for_updates = true
 # Also changed from the launcher: type > and pick "Theme".
 theme = "system"
 
+# The screen the launcher opens on: "cursor" (the one with the mouse pointer),
+# "focused" (the one with the window you're typing in) or "primary".
+# monitor = "focused"
+
 # Program used to open projects; the project path is appended after editor_args.
 # Chosen from the launcher (type > and pick "Change the default editor").
 # "" opens projects in the file manager.
@@ -296,6 +326,15 @@ mod tests {
         );
         let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"ctrl+alt+space\"");
         assert_eq!(parse(&template), ThemeSetting::System);
+    }
+
+    #[test]
+    fn monitors() {
+        let parse = |text: &str| toml::from_str::<Config>(text).unwrap().monitor;
+        assert_eq!(parse(""), MonitorSetting::Cursor);
+        assert_eq!(parse(r#"monitor = "focused""#), MonitorSetting::Focused);
+        assert_eq!(parse(r#"monitor = "primary""#), MonitorSetting::Primary);
+        assert_eq!(parse(r#"monitor = "left""#), MonitorSetting::Cursor);
     }
 
     #[test]

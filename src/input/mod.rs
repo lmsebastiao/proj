@@ -17,11 +17,20 @@ actions!(
     [
         Backspace,
         DeleteWordLeft,
+        DeleteWordRight,
         Delete,
         Left,
         Right,
+        WordLeft,
+        WordRight,
         Home,
         End,
+        SelectLeft,
+        SelectRight,
+        SelectWordLeft,
+        SelectWordRight,
+        SelectHome,
+        SelectEnd,
         SelectAll,
         Paste,
         Copy,
@@ -36,10 +45,21 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-backspace", DeleteWordLeft, ctx),
         KeyBinding::new("alt-backspace", DeleteWordLeft, ctx),
         KeyBinding::new("delete", Delete, ctx),
+        KeyBinding::new("ctrl-delete", DeleteWordRight, ctx),
         KeyBinding::new("left", Left, ctx),
         KeyBinding::new("right", Right, ctx),
+        // Not alt-←/→ (the word keys on macOS): the palette's window switcher
+        // uses those while alt is held.
+        KeyBinding::new("ctrl-left", WordLeft, ctx),
+        KeyBinding::new("ctrl-right", WordRight, ctx),
         KeyBinding::new("home", Home, ctx),
         KeyBinding::new("end", End, ctx),
+        KeyBinding::new("shift-left", SelectLeft, ctx),
+        KeyBinding::new("shift-right", SelectRight, ctx),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, ctx),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, ctx),
+        KeyBinding::new("shift-home", SelectHome, ctx),
+        KeyBinding::new("shift-end", SelectEnd, ctx),
         KeyBinding::new("secondary-a", SelectAll, ctx),
         KeyBinding::new("secondary-v", Paste, ctx),
         KeyBinding::new("secondary-c", Copy, ctx),
@@ -55,6 +75,9 @@ pub struct TextInput {
     content: SharedString,
     placeholder: SharedString,
     selected_range: Range<usize>,
+    /// The cursor is at the start of `selected_range` (shift-← past where the
+    /// selection began), not the end.
+    selection_reversed: bool,
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -79,6 +102,7 @@ impl TextInput {
             content: SharedString::default(),
             placeholder: placeholder.into(),
             selected_range: 0..0,
+            selection_reversed: false,
             marked_range: None,
             last_layout: None,
             last_bounds: None,
@@ -120,6 +144,7 @@ impl TextInput {
     pub fn set_text(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.content = text.into();
         self.selected_range = self.content.len()..self.content.len();
+        self.selection_reversed = false;
         self.marked_range = None;
         cx.emit(Changed);
         cx.notify();
@@ -156,6 +181,38 @@ impl TextInput {
         self.move_to(self.content.len(), cx);
     }
 
+    fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.previous_word(self.cursor_offset()), cx);
+    }
+
+    fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.next_word(self.cursor_offset()), cx);
+    }
+
+    fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.previous_boundary(self.cursor_offset()), cx);
+    }
+
+    fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.next_boundary(self.cursor_offset()), cx);
+    }
+
+    fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.previous_word(self.cursor_offset()), cx);
+    }
+
+    fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.next_word(self.cursor_offset()), cx);
+    }
+
+    fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(0, cx);
+    }
+
+    fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.content.len(), cx);
+    }
+
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.select_all_text(cx);
     }
@@ -163,6 +220,7 @@ impl TextInput {
     /// Selects all the text, so typing replaces it.
     pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
         self.selected_range = 0..self.content.len();
+        self.selection_reversed = false;
         cx.notify();
     }
 
@@ -180,14 +238,19 @@ impl TextInput {
         cx: &mut Context<Self>,
     ) {
         if self.selected_range.is_empty() {
-            let before = &self.content[..self.selected_range.start];
-            let trimmed = before.trim_end_matches(|c: char| !c.is_alphanumeric());
-            let start = trimmed
-                .rfind(|c: char| !c.is_alphanumeric())
-                .map_or(0, |i| {
-                    i + trimmed[i..].chars().next().map_or(1, char::len_utf8)
-                });
-            self.selected_range.start = start;
+            self.selected_range.start = self.previous_word(self.selected_range.start);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    fn delete_word_right(
+        &mut self,
+        _: &DeleteWordRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            self.selected_range.end = self.next_word(self.selected_range.end);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -226,7 +289,54 @@ impl TextInput {
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
+        self.selection_reversed = false;
         cx.notify();
+    }
+
+    /// Where the cursor is: the end of the selection that moves.
+    fn cursor_offset(&self) -> usize {
+        if self.selection_reversed {
+            self.selected_range.start
+        } else {
+            self.selected_range.end
+        }
+    }
+
+    /// Moves the cursor to `offset`, keeping the other end of the selection.
+    fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        if self.selection_reversed {
+            self.selected_range.start = offset;
+        } else {
+            self.selected_range.end = offset;
+        }
+        if self.selected_range.end < self.selected_range.start {
+            self.selection_reversed = !self.selection_reversed;
+            self.selected_range = self.selected_range.end..self.selected_range.start;
+        }
+        cx.notify();
+    }
+
+    /// The start of the word before `offset`, skipping what isn't a word first.
+    fn previous_word(&self, offset: usize) -> usize {
+        let before = &self.content[..offset];
+        let trimmed = before.trim_end_matches(|c: char| !c.is_alphanumeric());
+        trimmed
+            .rfind(|c: char| !c.is_alphanumeric())
+            .map_or(0, |i| {
+                i + trimmed[i..].chars().next().map_or(1, char::len_utf8)
+            })
+    }
+
+    /// The start of the word after `offset`, as ctrl-→ goes on Windows.
+    fn next_word(&self, offset: usize) -> usize {
+        let after = &self.content[offset..];
+        let word = after
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(after.len());
+        let gap = after[word..]
+            .find(char::is_alphanumeric)
+            .unwrap_or(after.len() - word);
+        offset + word + gap
     }
 
     fn previous_boundary(&self, offset: usize) -> usize {
@@ -290,7 +400,7 @@ impl EntityInputHandler for TextInput {
     ) -> Option<UTF16Selection> {
         Some(UTF16Selection {
             range: self.range_to_utf16(&self.selected_range),
-            reversed: false,
+            reversed: self.selection_reversed,
         })
     }
 
@@ -318,6 +428,7 @@ impl EntityInputHandler for TextInput {
             (self.content[..range.start].to_owned() + new_text + &self.content[range.end..]).into();
         let cursor = range.start + new_text.len();
         self.selected_range = cursor..cursor;
+        self.selection_reversed = false;
         self.marked_range = None;
         cx.emit(Changed);
         cx.notify();
@@ -395,11 +506,20 @@ impl Render for TextInput {
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete_word_left))
+            .on_action(cx.listener(Self::delete_word_right))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
+            .on_action(cx.listener(Self::word_left))
+            .on_action(cx.listener(Self::word_right))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
+            .on_action(cx.listener(Self::select_left))
+            .on_action(cx.listener(Self::select_right))
+            .on_action(cx.listener(Self::select_word_left))
+            .on_action(cx.listener(Self::select_word_right))
+            .on_action(cx.listener(Self::select_home))
+            .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))

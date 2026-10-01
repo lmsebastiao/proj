@@ -23,6 +23,25 @@ pub fn display_under_cursor(cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
         }
         MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST)
     };
+    display_of_monitor(target, cx)
+}
+
+/// The display with the window in front, the one being typed in.
+pub fn display_of_foreground(cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
+    use windows_sys::Win32::{
+        Graphics::Gdi::MonitorFromWindow, UI::WindowsAndMessaging::GetForegroundWindow,
+    };
+    let target = unsafe {
+        let window = GetForegroundWindow();
+        if window.is_null() {
+            return None;
+        }
+        MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST)
+    };
+    display_of_monitor(target, cx)
+}
+
+fn display_of_monitor(target: HMONITOR, cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
     let mut monitors: Vec<HMONITOR> = Vec::new();
     unsafe extern "system" fn collect(
         monitor: HMONITOR,

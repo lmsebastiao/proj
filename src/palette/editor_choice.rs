@@ -89,9 +89,7 @@ impl Palette {
         store::set_editor(&mut self.db, &project.key(), editor.clone());
         self.undo = None;
         if let Err(err) = store::save_db(&self.db) {
-            self.status = Some(format!("Could not save: {err}").into());
-            cx.notify();
-            return;
+            return self.problem(format!("Could not save: {err}"), cx);
         }
         self.reload_projects();
         let status = match &editor {
@@ -164,9 +162,7 @@ impl Palette {
         cx: &mut Context<Self>,
     ) {
         if let Err(err) = config::set_editor(&command) {
-            self.status = Some(format!("Could not save config: {err}").into());
-            cx.notify();
-            return;
+            return self.problem(format!("Could not save config: {err}"), cx);
         }
         self.config.editor = Some(command.clone());
         self.reload_projects();

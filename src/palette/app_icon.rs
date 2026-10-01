@@ -1,5 +1,4 @@
-//! Programs' own icons, on the editor and window rows, and by the name of a
-//! project's own editor.
+//! Programs' own icons, at the start of the project, editor and window rows.
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -7,10 +6,8 @@ use gpui::{App, Asset, ImageCacheError, ImageSource, RenderImage, div, img, prel
 
 use crate::platform;
 
-/// On screen, in pixels: on the editor and window rows, and before a
-/// project's own editor's name.
+/// On screen, in pixels.
 pub(super) const ROW_SIZE: f32 = 24.;
-pub(super) const SMALL_SIZE: f32 = 14.;
 /// Extracted at twice the row size, for high-DPI displays.
 const EXTRACT_SIZE: u32 = 48;
 
