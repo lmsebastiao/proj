@@ -127,6 +127,32 @@ impl Palette {
                 .text_color(rgb(t.muted))
                 .child(text)
         };
+        // A switcher row's close button, like ctrl-w: shown on the highlighted
+        // row, and on any row the mouse is over.
+        let close = (self.list() == List::Switch).then(|| {
+            div()
+                .id(("close", row))
+                .flex_none()
+                .size(px(28.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                .text_size(px(12.))
+                .text_color(rgb(t.muted))
+                .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.danger)))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not also a click on the row, which switches to it.
+                    cx.stop_propagation();
+                    this.close_row(row, cx);
+                }))
+                .when(row != self.selected, |d| {
+                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
+                })
+                .child(icons::CLOSE)
+        });
         // Pin, rename, remove and the actions menu: shown on the highlighted row,
         // and on any row the mouse is over.
         let icons = (self.list() == List::Projects).then(|| {
@@ -282,7 +308,8 @@ impl Palette {
                             .children(meta.top.map(|(text, color)| line(text, color)))
                             .children(meta.bottom.map(|text| line(text, t.muted))),
                     )
-                }),
+                })
+                .children(close),
         )
     }
 

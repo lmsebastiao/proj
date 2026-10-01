@@ -312,20 +312,26 @@ impl Palette {
         self.set_query(&query, cx);
     }
 
-    /// Ctrl-W in the switcher: asks the highlighted row's window (for a
-    /// project's row, the one it would switch to) to close.
+    /// Ctrl-W in the switcher: closes the highlighted row's window.
     pub(super) fn close_window(&mut self, _: &CloseWindow, _: &mut Window, cx: &mut Context<Self>) {
+        self.close_row(self.selected, cx);
+    }
+
+    /// Asks the window of the switcher's `row` (for a project's row, the one
+    /// it would switch to) to close, and takes it off the list.
+    pub(super) fn close_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if self.list() != List::Switch {
             return;
         }
         let Some(&w) = self
             .matches
-            .get(self.selected)
+            .get(row)
             .and_then(|m| self.switch_rows.get(m.ix))
             .and_then(|row| row.first())
         else {
             return;
         };
+        self.selected = row;
         let closed = self.windows.remove(w);
         platform::close_window(closed.window);
         self.match_windows();

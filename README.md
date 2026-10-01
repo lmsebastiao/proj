@@ -88,7 +88,8 @@ A project's windows share one row ("3 windows · …"), which switches to the on
 (or, for the project you're in, to its other window). **→** on that row (**alt+→** while
 holding) lists its windows one by one; **←** goes back. **ctrl-w** (**ctrl+alt+w** while
 holding) closes the highlighted window, as its close button would, so the editor can still
-ask about unsaved changes.
+ask about unsaved changes. So does the **✕** at the end of the highlighted row, or of any row
+under the mouse.
 
 The list keeps its order: rows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before

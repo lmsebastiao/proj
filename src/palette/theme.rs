@@ -72,6 +72,7 @@ pub(super) mod icons {
         pub const RENAME: &str = "\u{E8AC}";
         pub const REMOVE: &str = "\u{E74D}";
         pub const MORE: &str = "\u{E712}";
+        pub const CLOSE: &str = "\u{E8BB}";
     }
     #[cfg(not(windows))]
     mod glyphs {
@@ -81,6 +82,7 @@ pub(super) mod icons {
         pub const RENAME: &str = "✎";
         pub const REMOVE: &str = "✕";
         pub const MORE: &str = "⋯";
+        pub const CLOSE: &str = "✕";
     }
     pub use glyphs::*;
 }
