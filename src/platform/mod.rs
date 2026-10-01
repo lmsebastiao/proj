@@ -51,6 +51,9 @@ pub fn trim_memory() {
     windows::trim_memory();
 }
 
+/// Whether `app_icon` can find programs' icons here.
+pub const HAS_APP_ICONS: bool = cfg!(any(windows, target_os = "macos"));
+
 /// A program's icon at about `size` pixels square: width, height and BGRA
 /// pixels with straight alpha (Windows and macOS).
 pub fn app_icon(path: &std::path::Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {

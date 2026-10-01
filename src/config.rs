@@ -251,7 +251,8 @@ check_for_updates = true
 theme = "system"
 
 # The screen the launcher opens on: "cursor" (the one with the mouse pointer),
-# "focused" (the one with the window you're typing in) or "primary".
+# "focused" (the one with the window you're typing in) or "primary". Windows
+# only: elsewhere it opens on the primary screen.
 # monitor = "focused"
 
 # Program used to open projects; the project path is appended after editor_args.

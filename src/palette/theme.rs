@@ -148,7 +148,7 @@ pub(super) mod icons {
         pub const FILE: &str = "▫";
         pub const MISSING: &str = "!";
         pub const PROGRAM: &str = "…";
-        pub const POWER: &str = "⏻";
+        pub const POWER: &str = "↻";
         pub const EDIT: &str = "✎";
         pub const THEME: &str = "◐";
         pub const SETTINGS: &str = "⚙";

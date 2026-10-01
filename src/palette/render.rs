@@ -1,6 +1,6 @@
 //! Drawing the palette.
 
-use std::{cmp::Ordering, ops::Range};
+use std::{cmp::Ordering, ops::Range, path::PathBuf};
 
 use gpui::{
     AnyElement, Context, Div, Focusable, FontWeight, HighlightStyle, KeyDownEvent,
@@ -78,6 +78,20 @@ fn glyph(icon: &'static str, color: u32) -> Div {
         .child(icon)
 }
 
+/// A program's icon, or `fallback` where the platform has none to show
+/// (Linux), so the slot isn't left empty.
+fn program_icon(program: Option<PathBuf>, fallback: &'static str, t: Theme) -> AnyElement {
+    match program {
+        Some(program) if crate::platform::HAS_APP_ICONS => {
+            app_icon(Some(program), app_icon::ROW_SIZE).into_any_element()
+        }
+        _ if crate::platform::HAS_APP_ICONS => {
+            app_icon(None, app_icon::ROW_SIZE).into_any_element()
+        }
+        _ => glyph(fallback, t.muted).into_any_element(),
+    }
+}
+
 /// The accent bar at the start of the highlighted row.
 fn selection_bar(t: Theme, height: f32) -> Div {
     div()
@@ -152,9 +166,7 @@ impl Palette {
                         .or(self.config.editor.as_ref())
                         .filter(|c| !c.trim().is_empty());
                     match command.and_then(|c| self.apps.get(c).cloned().flatten()) {
-                        Some(program) => {
-                            app_icon(Some(program), app_icon::ROW_SIZE).into_any_element()
-                        }
+                        Some(program) => program_icon(Some(program), icons::FOLDER, t),
                         None => glyph(icons::FOLDER, t.muted).into_any_element(),
                     }
                 }
@@ -165,16 +177,16 @@ impl Palette {
             }
             List::Editors | List::OpenWith => match &self.editors[ix] {
                 EditorOption::Detected(editor) => {
-                    app_icon(editor.app.clone(), app_icon::ROW_SIZE).into_any_element()
+                    program_icon(editor.app.clone(), icons::PROGRAM, t)
                 }
                 EditorOption::Browse => glyph(icons::PROGRAM, t.muted).into_any_element(),
                 EditorOption::FileManager => glyph(icons::FOLDER, t.muted).into_any_element(),
             },
-            List::Switch => app_icon(
+            List::Switch => program_icon(
                 Some(self.windows[self.switch_rows[ix][0]].exe.clone()),
-                app_icon::ROW_SIZE,
-            )
-            .into_any_element(),
+                icons::PROGRAM,
+                t,
+            ),
             List::Commands => glyph(self.commands[ix].icon(), t.muted).into_any_element(),
             List::Templates => match self.templates[ix] {
                 Template::Folder(_) => glyph(icons::FOLDER, t.muted).into_any_element(),

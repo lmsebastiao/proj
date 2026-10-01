@@ -257,7 +257,7 @@ scan_dirs = []          # optional: list every sub-folder of these folders as pr
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
 theme = "system"        # or "light" / "dark"; also set with > Theme
-monitor = "cursor"      # the screen it opens on: "cursor", "focused" (the window in front) or "primary"
+monitor = "cursor"      # the screen it opens on: "cursor", "focused" (the window in front) or "primary" (Windows only)
 editor = "zed"          # set from the launcher; "" = file manager
 editor_args = []        # e.g. ["--new-window"]
 ```
