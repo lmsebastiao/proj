@@ -65,8 +65,13 @@ impl Palette {
         match self.list() {
             List::Projects => {
                 let marking = !self.marked.is_empty();
+                let has_window = self
+                    .selected_project()
+                    .is_some_and(|p| self.open_keys.contains(&p.key()));
                 let (open, open_short) = if self.marked.len() > 1 {
                     ("Open the marked projects in one window", "open together")
+                } else if has_window {
+                    ("Switch to its open editor window", "switch")
                 } else {
                     ("Open in the editor", "open")
                 };

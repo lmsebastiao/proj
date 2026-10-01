@@ -51,7 +51,8 @@ impl Palette {
         self.projects.iter().find(|p| p.key() == key).cloned()
     }
 
-    /// Enter on an entry: its own default editor, else the global one.
+    /// Enter on an entry: to its editor window if one is open, else open it in
+    /// its own default editor, else the global one.
     pub(super) fn open_entry(
         &mut self,
         project: Project,
@@ -59,6 +60,9 @@ impl Palette {
         cx: &mut Context<Self>,
     ) {
         let editor = project.default_editor(&self.config);
+        if let Some(ix) = self.open_window_of(&project, &editor) {
+            return self.switch_to(ix, window, cx);
+        }
         self.launch(&project, Target::Editor(editor), window, cx);
     }
 

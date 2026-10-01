@@ -75,11 +75,10 @@ fn detect_editors() -> Vec<Editor> {
         ("Fleet", "fleet", &[]),
     ];
     let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    let mut found: Vec<Editor> = Vec::new();
-    for &(name, cli, locations) in KNOWN {
-        let command = if which(cli).is_some() {
-            Some(cli.to_string())
-        } else {
+    // Each editor's own install, where it's in its usual place.
+    let installs: Vec<Option<PathBuf>> = KNOWN
+        .iter()
+        .map(|&(_, _, locations)| {
             locations
                 .iter()
                 .filter(|l| !(local_app_data.is_empty() && l.contains("%LOCALAPPDATA%")))
@@ -87,6 +86,22 @@ fn detect_editors() -> Vec<Editor> {
                 .find(|p| p.is_file())
                 // Normalise separators ("C:\Users\me/Programs/..." -> all native).
                 .map(|p| p.components().collect::<PathBuf>())
+        })
+        .collect();
+    let mut found: Vec<Editor> = Vec::new();
+    for (i, &(name, cli, _)) in KNOWN.iter().enumerate() {
+        // The CLI name on PATH, unless it starts another editor's install:
+        // Zed Preview's installer puts its own `zed` on PATH.
+        let on_path = which(cli).is_some_and(|path| {
+            !installs.iter().enumerate().any(|(j, install)| {
+                j != i && install.as_deref().is_some_and(|o| same_path(o, &path))
+            })
+        });
+        let command = if on_path {
+            Some(cli.to_string())
+        } else {
+            installs[i]
+                .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
         };
         // Skip duplicates, e.g. Zed Preview resolving to the same binary as Zed.
@@ -205,7 +220,18 @@ pub fn app_path(command: &str) -> Option<PathBuf> {
 
 pub fn same_program(a: &str, b: &str) -> bool {
     let resolve = |s: &str| which(s).unwrap_or_else(|| PathBuf::from(s));
-    resolve(a) == resolve(b)
+    same_path(&resolve(a), &resolve(b))
+}
+
+/// Whether two paths name the same file: on Windows, whatever their casing
+/// ("Zed.exe" from PATH, "zed.exe" from the install list) or separators.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let normal = |p: &Path| {
+        let p: PathBuf = p.components().collect();
+        let p = p.to_string_lossy().into_owned();
+        if cfg!(windows) { p.to_lowercase() } else { p }
+    };
+    normal(a) == normal(b)
 }
 
 /// Display name for a configured editor command.
@@ -247,5 +273,21 @@ mod tests {
         let script = file(r"tools\edit.cmd");
         assert_eq!(app_path(&script.to_string_lossy()), None);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn paths_match_whatever_their_casing() {
+        assert!(same_path(
+            Path::new(r"C:\Programs\Zed Preview\bin\Zed.exe"),
+            Path::new(r"C:\Programs\Zed Preview\bin\zed.exe"),
+        ));
+        assert!(same_path(
+            Path::new(r"C:\Programs\Zed/bin\zed.exe"),
+            Path::new(r"C:\Programs\Zed\bin\zed.exe"),
+        ));
+        assert!(!same_path(
+            Path::new(r"C:\Programs\Zed\bin\zed.exe"),
+            Path::new(r"C:\Programs\Zed Preview\bin\zed.exe"),
+        ));
     }
 }

@@ -7,7 +7,11 @@ use std::time::Duration;
 use global_hotkey::hotkey::Modifiers;
 use gpui::{Context, Keystroke, Pixels, SharedString, Window, div, prelude::*, px, rgb};
 
-use crate::{launcher, platform, store, switcher::EditorWindow};
+use crate::{
+    launcher, platform,
+    store::{self, Project},
+    switcher::EditorWindow,
+};
 
 use super::{
     Palette,
@@ -230,6 +234,21 @@ impl Palette {
             .flatten()
             .map(|&ix| self.projects[ix].key())
             .collect();
+    }
+
+    /// The open window showing `project`, preferring one of `editor`'s, as its
+    /// index in `windows`.
+    pub(super) fn open_window_of(&self, project: &Project, editor: &str) -> Option<usize> {
+        let key = project.key();
+        let editor = self.name_of(editor);
+        let showing: Vec<usize> = (0..self.windows.len())
+            .filter(|&w| self.window_projects[w].is_some_and(|p| self.projects[p].key() == key))
+            .collect();
+        showing
+            .iter()
+            .copied()
+            .find(|&w| self.windows[w].editor == editor)
+            .or_else(|| showing.first().copied())
     }
 
     pub(super) fn switch_to(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
