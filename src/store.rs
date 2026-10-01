@@ -16,8 +16,9 @@ use crate::{
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
 ///
-/// `names`, `pinned`, `editors` and `opened` are keyed by [`Project::key`]: the folder path for a
-/// project, or all folder paths joined with `|` for a workspace.
+/// `names`, `pinned`, `editors`, `opened`, `tags` and `commands` are keyed by
+/// [`Project::key`]: the folder path for a project, or all folder paths joined
+/// with `|` for a workspace.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Db {
@@ -36,10 +37,14 @@ pub struct Db {
     pub editors: BTreeMap<String, Vec<String>>,
     /// Entry -> unix seconds of last open.
     pub opened: BTreeMap<String, u64>,
+    /// Entry -> its tags, lowercase, searched with `#tag`.
+    pub tags: BTreeMap<String, BTreeSet<String>>,
+    /// Entry -> commands added to its actions menu, run in a terminal there.
+    pub commands: BTreeMap<String, Vec<String>>,
 }
 
 /// A list entry: a project folder, or a workspace of several folders opened together.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Project {
     /// Folder name (plus its parent when several projects share it), or
     /// "a + b" for a workspace.
@@ -54,6 +59,11 @@ pub struct Project {
     pub editor: Option<String>,
     pub manual: bool,
     pub last_opened: u64,
+    /// Its folder (or one of a workspace's) is gone: moved, deleted, or on a
+    /// drive that isn't connected.
+    pub missing: bool,
+    /// Sorted, lowercase.
+    pub tags: Vec<String>,
 }
 
 impl Project {
@@ -83,6 +93,13 @@ impl Project {
     /// Search bonus so pinned and recently used entries win ties.
     pub fn search_boost(&self) -> i32 {
         (i32::from(self.pinned) + i32::from(self.last_opened > 0)) * 8
+    }
+
+    /// Whether it has a tag starting with each of `prefixes` (lowercase).
+    pub fn has_tags(&self, prefixes: &[String]) -> bool {
+        prefixes
+            .iter()
+            .all(|prefix| self.tags.iter().any(|tag| tag.starts_with(prefix.as_str())))
     }
 
     /// The editor Enter uses: the entry's own default, else the global one.
@@ -126,7 +143,8 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Builds the project list: scanned + manual, minus hidden, most recently opened first.
+/// Builds the project list: scanned + manual, minus hidden, most recently
+/// opened first. Added projects whose folder is gone come last, marked missing.
 pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     let mut seen = HashSet::new();
     let mut projects = Vec::new();
@@ -135,17 +153,24 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         if !seen.insert(key.clone()) {
             return;
         }
+        let missing = !paths.iter().all(|p| p.is_dir());
         let mut paths = paths.into_iter();
         let path = paths.next().expect("at least one folder");
         projects.push(Project {
             name,
-            branch: git::git_branch(&path),
+            branch: (!missing).then(|| git::git_branch(&path)).flatten(),
             pinned: db.pinned.contains(&key),
             editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
             last_opened: db.opened.get(&key).copied().unwrap_or(0),
+            tags: db
+                .tags
+                .get(&key)
+                .map(|tags| tags.iter().cloned().collect())
+                .unwrap_or_default(),
             path,
             extra: paths.collect(),
             manual,
+            missing,
         });
     };
     let folder_name = |path: &Path| {
@@ -154,12 +179,7 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
             .unwrap_or_else(|| path.to_string_lossy().into_owned())
     };
 
-    let mut folders: Vec<(PathBuf, bool)> = db
-        .manual
-        .iter()
-        .filter(|p| p.is_dir())
-        .map(|p| (p.clone(), true))
-        .collect();
+    let mut folders: Vec<(PathBuf, bool)> = db.manual.iter().map(|p| (p.clone(), true)).collect();
     let mut scanned = Vec::new();
     for dir in &config.scan_dirs {
         scan(dir, config.scan_depth.max(1), &mut scanned);
@@ -171,7 +191,7 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         }
     }
     for workspace in &db.workspaces {
-        if workspace.len() > 1 && workspace.iter().all(|p| p.is_dir()) {
+        if workspace.len() > 1 {
             let name = workspace
                 .iter()
                 .map(|p| folder_name(p))
@@ -188,8 +208,9 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
         }
     }
     projects.sort_by(|a, b| {
-        b.pinned
-            .cmp(&a.pinned)
+        a.missing
+            .cmp(&b.missing)
+            .then_with(|| b.pinned.cmp(&a.pinned))
             .then_with(|| b.last_opened.cmp(&a.last_opened))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -274,6 +295,44 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     db.pinned.remove(&key);
     db.editors.remove(&key);
     db.opened.remove(&key);
+    db.tags.remove(&key);
+    db.commands.remove(&key);
+}
+
+/// Sets an entry's tags from text like "work, #oss client-x": lowercase, without
+/// the `#`. Empty text removes them all.
+pub fn set_tags(db: &mut Db, key: &str, text: &str) {
+    let tags: BTreeSet<String> = text
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(|tag| tag.trim_start_matches('#').to_lowercase())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if tags.is_empty() {
+        db.tags.remove(key);
+    } else {
+        db.tags.insert(key.to_string(), tags);
+    }
+}
+
+/// Adds a command to an entry's actions menu, unless it's there already.
+pub fn add_command(db: &mut Db, key: &str, command: &str) {
+    let command = command.trim();
+    if command.is_empty() {
+        return;
+    }
+    let commands = db.commands.entry(key.to_string()).or_default();
+    if !commands.iter().any(|c| c == command) {
+        commands.push(command.to_string());
+    }
+}
+
+pub fn remove_command(db: &mut Db, key: &str, command: &str) {
+    if let Some(commands) = db.commands.get_mut(key) {
+        commands.retain(|c| c != command);
+        if commands.is_empty() {
+            db.commands.remove(key);
+        }
+    }
 }
 
 /// Sets an entry's own default editor, or with `None` goes back to the global one.
@@ -318,13 +377,61 @@ mod tests {
         Project {
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             path,
-            extra: Vec::new(),
-            branch: None,
-            pinned: false,
-            editor: None,
             manual: true,
-            last_opened: 0,
+            ..Project::default()
         }
+    }
+
+    #[test]
+    fn gone_folders_stay_listed_as_missing() {
+        let dir = std::env::temp_dir().join(format!("proj-missing-{}", std::process::id()));
+        let (app, gone) = (dir.join("app"), dir.join("gone"));
+        fs::create_dir_all(&app).unwrap();
+        let mut db = Db {
+            manual: vec![gone.clone(), app.clone()],
+            ..Db::default()
+        };
+        db.opened.insert(entry_key(std::slice::from_ref(&gone)), 99);
+        remember_workspace(&mut db, vec![app.clone(), gone.clone()]);
+        let projects = collect(&Config::default(), &db);
+        let listed: Vec<(&Path, bool, bool)> = projects
+            .iter()
+            .map(|p| (p.path.as_path(), p.is_workspace(), p.missing))
+            .collect();
+        // Last, even though it was opened most recently.
+        assert_eq!(
+            listed,
+            [
+                (app.as_path(), false, false),
+                (gone.as_path(), false, true),
+                (app.as_path(), true, true),
+            ]
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn tags_and_commands() {
+        let mut db = Db::default();
+        set_tags(&mut db, "k", "Work, #oss  client-x #work");
+        let tags: Vec<&str> = db.tags["k"].iter().map(String::as_str).collect();
+        assert_eq!(tags, ["client-x", "oss", "work"]);
+        let tagged = Project {
+            tags: tags.iter().map(|t| (*t).to_string()).collect(),
+            ..project("/a/app")
+        };
+        assert!(tagged.has_tags(&["wo".into(), "cl".into()]));
+        assert!(!tagged.has_tags(&["web".into()]));
+        set_tags(&mut db, "k", "  ");
+        assert!(db.tags.is_empty(), "no tags left");
+
+        add_command(&mut db, "k", " npm run dev ");
+        add_command(&mut db, "k", "npm run dev");
+        add_command(&mut db, "k", "cargo watch");
+        assert_eq!(db.commands["k"], ["npm run dev", "cargo watch"]);
+        remove_command(&mut db, "k", "npm run dev");
+        remove_command(&mut db, "k", "cargo watch");
+        assert!(db.commands.is_empty());
     }
 
     #[test]

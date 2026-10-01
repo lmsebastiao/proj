@@ -176,13 +176,15 @@ pub fn editor_name(command: &str, detected: &[Editor]) -> String {
 /// The program an editor command starts, for its icon. Commands are often
 /// launchers inside the install (`bin\code.cmd`, `resources\app\bin\cursor.cmd`),
 /// so look a few folders up for the program of the same name, or its GUI name.
+/// On macOS the launcher (through the link on PATH) is in the app, whose icon
+/// the platform finds from there.
 pub fn app_path(command: &str) -> Option<PathBuf> {
     if command.trim().is_empty() {
         return None;
     }
     let path = which(command).unwrap_or_else(|| PathBuf::from(command));
     if !cfg!(windows) {
-        return path.is_file().then_some(path);
+        return std::fs::canonicalize(path).ok().filter(|p| p.is_file());
     }
     let stem = path.file_stem()?.to_string_lossy().to_lowercase();
     let names: Vec<&str> = GUI_NAMES

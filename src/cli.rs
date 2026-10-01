@@ -75,11 +75,14 @@ pub fn run(args: &[String]) -> i32 {
             db.pinned.remove(key.as_ref());
             db.editors.remove(key.as_ref());
             db.opened.remove(key.as_ref());
+            db.tags.remove(key.as_ref());
+            db.commands.remove(key.as_ref());
             println!("removed {}", path.display());
         }
         "list" | "ls" => {
             for project in store::collect(&config, &db) {
-                println!("{:<32} {}", project.name, project.path.display());
+                let missing = if project.missing { "  (missing)" } else { "" };
+                println!("{:<32} {}{missing}", project.name, project.path.display());
             }
             return 0;
         }
@@ -177,7 +180,7 @@ pub fn run(args: &[String]) -> i32 {
 /// The entry the dialog would put first for `query`.
 fn best_match<'a>(query: &str, projects: &'a [Project]) -> Option<&'a Project> {
     let mut best: Option<(i32, &Project)> = None;
-    for project in projects {
+    for project in projects.iter().filter(|p| !p.missing) {
         let m = fuzzy::score_item(
             query,
             &project.name,
@@ -200,12 +203,8 @@ mod tests {
         Project {
             name: name.into(),
             path: path.into(),
-            extra: Vec::new(),
-            branch: None,
-            pinned: false,
-            editor: None,
             manual: true,
-            last_opened: 0,
+            ..Project::default()
         }
     }
 
@@ -223,6 +222,14 @@ mod tests {
             "a renamed entry is still found by its folder"
         );
         assert!(best_match("zzz", &projects).is_none());
+        projects.push(Project {
+            missing: true,
+            ..project("vanished", "/gone/vanished")
+        });
+        assert!(
+            best_match("vanished", &projects).is_none(),
+            "a missing one can't be opened"
+        );
 
         // Equal scores: the earlier entry (the list is sorted pinned/recent first) wins.
         projects.insert(0, project("api", "/other/api"));

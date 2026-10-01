@@ -91,8 +91,8 @@ impl Palette {
                 .text_color(rgb(t.muted))
                 .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
         });
-        // Switcher rows can be dragged to another place in the list (the list's
-        // rows are the windows in order then, so `row` is also the window).
+        // Switcher rows can be dragged to another place in the list (it shows
+        // every row in order then, so `row` is also the row's index).
         let dragged = self.can_reorder().then(|| DraggedWindow {
             ix: m.ix,
             title: title.clone().into(),
@@ -106,10 +106,27 @@ impl Palette {
                 EditorOption::Detected(editor) => editor.app.clone(),
                 EditorOption::Browse | EditorOption::FileManager => None,
             }),
-            List::Switch => Some(Some(self.windows[m.ix].exe.clone())),
+            List::Switch => Some(Some(self.windows[self.switch_rows[m.ix][0]].exe.clone())),
             _ => None,
         }
         .map(app_icon);
+        // A project whose folder is gone is dimmed; tags show after the name.
+        let project = (self.list() == List::Projects).then(|| &self.projects[m.ix]);
+        let missing = project.is_some_and(|p| p.missing);
+        let tags: Vec<String> = project
+            .map(|p| p.tags.iter().map(|tag| format!("#{tag}")).collect())
+            .unwrap_or_default();
+        let badge = |text: String| {
+            div()
+                .flex_none()
+                .px_1()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(t.border))
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .child(text)
+        };
         // Pin, rename, remove and the actions menu: shown on the highlighted row,
         // and on any row the mouse is over.
         let icons = (self.list() == List::Projects).then(|| {
@@ -228,20 +245,11 @@ impl Palette {
                                 .items_center()
                                 .gap_2()
                                 .text_size(px(FONT_SIZE))
-                                .text_color(rgb(t.text))
+                                .text_color(rgb(if missing { t.muted } else { t.text }))
+                                .overflow_hidden()
                                 .child(StyledText::new(title).with_highlights(title_hl))
-                                .when(open, |d| {
-                                    d.child(
-                                        div()
-                                            .px_1()
-                                            .rounded_sm()
-                                            .border_1()
-                                            .border_color(rgb(t.border))
-                                            .text_size(px(SMALL_FONT_SIZE))
-                                            .text_color(rgb(t.muted))
-                                            .child("open"),
-                                    )
-                                }),
+                                .when(open, |d| d.child(badge("open".into())))
+                                .children(tags.into_iter().map(badge)),
                         )
                         .child(
                             div()
@@ -282,9 +290,32 @@ impl Palette {
         let t = self.theme;
         if self.add_candidate.is_some()
             || self.clone_candidate.is_some()
-            || self.list() == List::Rename
+            || self.list() == List::Text
         {
             return div().flex_1().into_any_element();
+        }
+        if self.list() == List::Templates && self.templates.is_empty() {
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .px_6()
+                .text_size(px(FONT_SIZE))
+                .text_color(rgb(t.muted))
+                .child("No templates yet")
+                .child(
+                    div()
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .child("List folders and git URLs under templates in the config file (> Open config file)."),
+                )
+                .child(div().text_size(px(SMALL_FONT_SIZE)).child(format!(
+                    "Any project works too: {}-k on it, then \"New project from this one\".",
+                    secondary()
+                )))
+                .into_any_element();
         }
         if self.list() == List::Projects && self.projects.is_empty() {
             return div()
@@ -316,7 +347,7 @@ impl Palette {
                 .into_any_element();
         }
         let empty = if self.list() == List::Switch && self.windows.is_empty() {
-            "No editor windows are open"
+            crate::platform::window_access_hint().unwrap_or("No editor windows are open")
         } else {
             "No matches"
         };
@@ -332,7 +363,53 @@ impl Palette {
     pub(super) fn render_banner(&self) -> Option<impl IntoElement + use<>> {
         let t = self.theme;
         let (title, lines): (String, Vec<String>) = match self.mode {
+            // One project's windows, after → on its row.
+            _ if self.list() == List::Switch && self.expanded.is_some() => {
+                let project = &self.projects[self.expanded?];
+                (
+                    format!("{}'s windows", project.name),
+                    vec!["← back to every project's".into()],
+                )
+            }
             Mode::Projects | Mode::Switch | Mode::Actions => return None,
+            Mode::Tags => {
+                let project = self.edited_project()?;
+                (
+                    format!("Tags for {}", project.name),
+                    vec![
+                        "Words, separated by spaces or commas. ↵ saves.".into(),
+                        "Then search for #tag to list just the projects with it.".into(),
+                    ],
+                )
+            }
+            Mode::AddCommand => {
+                let project = self.edited_project()?;
+                (
+                    format!("Add a command to {}", project.name),
+                    vec![format!(
+                        "↵ adds it to its actions ({}-k), to run in a terminal in {}.",
+                        secondary(),
+                        project.location()
+                    )],
+                )
+            }
+            Mode::Templates => (
+                "New project from a template".into(),
+                vec!["↵ picks one, then you name the new project.".into()],
+            ),
+            Mode::NewProject => {
+                let template = self.new_from.as_ref()?;
+                let into = match self.config.scan_dirs.first() {
+                    Some(dir) => format!("in {}", paths::display_path(dir)),
+                    None => "in a folder you pick next".into(),
+                };
+                (
+                    format!("New project from {}", template.name()),
+                    vec![format!(
+                        "↵ makes it {into}, with a git history of its own, and opens it."
+                    )],
+                )
+            }
             Mode::Browse => (self.browse.as_ref()?.breadcrumb(), Vec::new()),
             Mode::Editors if self.config.editor.is_none() => (
                 "Which editor should open your projects?".into(),
@@ -355,7 +432,7 @@ impl Palette {
                 ],
             ),
             Mode::Rename => {
-                let project = self.renamed_project()?;
+                let project = self.edited_project()?;
                 let folders: Vec<String> = project
                     .paths()
                     .iter()
@@ -618,10 +695,16 @@ impl Render for Palette {
                 }
             }))
             .capture_action(cx.listener(|this, _: &input::Left, _, cx| {
-                if this.input.read(cx).cursor_at_start() && this.leave(cx) {
+                // Out of a project's windows also from just after the `@` that
+                // lists them in the project search.
+                let at_start = this.input.read(cx).cursor_at_start()
+                    || (this.list() == List::Switch && this.filter_query().is_empty());
+                if at_start && this.leave(cx) {
                     cx.stop_propagation();
                 }
             }))
+            .on_action(cx.listener(Self::remove_task))
+            .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(Self::confirm))

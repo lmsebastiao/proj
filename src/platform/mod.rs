@@ -1,5 +1,7 @@
 //! OS-specific behaviour behind small cross-platform functions.
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
@@ -39,20 +41,38 @@ pub fn trim_memory() {
 }
 
 /// A program's icon at about `size` pixels square: width, height and BGRA
-/// pixels with straight alpha (Windows only).
+/// pixels with straight alpha (Windows and macOS).
 pub fn app_icon(path: &std::path::Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     #[cfg(windows)]
     return windows::app_icon(path, size);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::app_icon(path, size);
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (path, size);
         None
     }
 }
 
+/// Why the switcher can't list other apps' windows, when it can't: on macOS,
+/// until proj is allowed to use the Accessibility API.
+pub fn window_access_hint() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    return macos::window_access_hint();
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// Another app's top-level window.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WindowRef(isize);
+
+#[cfg(test)]
+impl WindowRef {
+    pub fn test(id: isize) -> Self {
+        Self(id)
+    }
+}
 
 pub struct TopWindow {
     pub window: WindowRef,
@@ -61,25 +81,44 @@ pub struct TopWindow {
     pub exe: std::path::PathBuf,
 }
 
-/// Other apps' windows as Alt+Tab lists them, front to back (Windows only).
+/// Other apps' windows as Alt+Tab lists them, front to back (Windows and
+/// macOS). On macOS, `WindowRef`s point into the last list made.
 pub fn top_windows() -> Vec<TopWindow> {
     #[cfg(windows)]
     return windows::top_windows();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::top_windows();
+    #[cfg(not(any(windows, target_os = "macos")))]
     Vec::new()
 }
 
+/// The window in front. On macOS, only one of the last `top_windows` list.
 pub fn foreground_window() -> Option<WindowRef> {
     #[cfg(windows)]
     return Some(WindowRef(windows::foreground_window()));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::foreground_window();
+    #[cfg(not(any(windows, target_os = "macos")))]
     None
 }
 
 pub fn focus_window(window: WindowRef) {
     #[cfg(windows)]
     windows::focus_window(window.0);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    macos::focus_window(window);
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = window;
+}
+
+/// Asks a window to close, as its close button does: the app can still ask
+/// about unsaved changes first.
+pub fn close_window(window: WindowRef) {
+    #[cfg(windows)]
+    windows::close_window(window.0);
+    #[cfg(target_os = "macos")]
+    macos::close_window(window);
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = window;
 }
 
@@ -87,7 +126,17 @@ pub fn focus_window(window: WindowRef) {
 pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
     #[cfg(windows)]
     return windows::modifiers_held(mods);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        use global_hotkey::hotkey::Modifiers;
+        macos::modifiers_held(
+            mods.contains(Modifiers::ALT),
+            mods.contains(Modifiers::CONTROL),
+            mods.contains(Modifiers::SHIFT),
+            mods.intersects(Modifiers::SUPER | Modifiers::META),
+        )
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = mods;
         false

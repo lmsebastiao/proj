@@ -166,6 +166,67 @@ pub fn open_terminal(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Opens a terminal in `path` that runs `command` and stays open after it ends.
+pub fn run_in_terminal(path: &Path, command: &str) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if which("wt").is_some() {
+            let mut wt = Command::new("wt");
+            // As typed, without Rust's quoting; wt reads `;` as its next command.
+            wt.arg("-d")
+                .arg(path)
+                .args(["cmd", "/K"])
+                .raw_arg(command.replace(';', "\\;"));
+            return spawn(wt);
+        }
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        Command::new("cmd")
+            .arg("/K")
+            .raw_arg(command)
+            .current_dir(path)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(drop)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Terminal runs it in a new window: `cd` there first.
+        let script = format!("cd {} && {command}", shell_quote(&path.to_string_lossy()));
+        let script = script.replace('\\', "\\\\").replace('"', "\\\"");
+        let mut osascript = Command::new("osascript");
+        osascript
+            .arg("-e")
+            .arg(format!(
+                "tell application \"Terminal\" to do script \"{script}\""
+            ))
+            .args(["-e", "tell application \"Terminal\" to activate"]);
+        spawn(osascript)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let script = format!("{command}; exec \"${{SHELL:-sh}}\"");
+        let terminal = ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]
+            .into_iter()
+            .find(|t| which(t).is_some())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no terminal found"))?;
+        let mut run = Command::new(terminal);
+        if terminal == "gnome-terminal" {
+            run.arg("--");
+        } else {
+            run.arg("-e");
+        }
+        run.args(["sh", "-c", &script]).current_dir(path);
+        spawn(run)
+    }
+}
+
+/// `text` in single quotes for a POSIX shell.
+#[cfg(target_os = "macos")]
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
 /// Opens `path` in the system file manager.
 pub fn reveal(path: &Path) -> io::Result<()> {
     system_open(path.as_os_str())

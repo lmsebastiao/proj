@@ -31,6 +31,8 @@ gpui = "0.2.2"
 # The pixel buffer type gpui images are made of.
 image = { version = "0.25", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
+# package.json scripts, listed in the file's order.
+serde_json = { version = "1", features = ["preserve_order"] }
 toml = "1.1.6"
 toml_edit = "0.25"
 ureq = { version = "3.4.2", features = ["json"] }
@@ -55,6 +57,49 @@ windows-sys = { version = "0.61", features = [
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 tray-icon = "0.25"
+
+# App icons, and the window switcher through the Accessibility API.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "libc",
+  "NSGraphicsContext",
+  "NSImage",
+  "NSImageRep",
+  "NSRunningApplication",
+  "NSWorkspace",
+  "objc2-core-graphics",
+] }
+objc2-application-services = { version = "0.3", default-features = false, features = [
+  "std",
+  "libc",
+  "AXError",
+  "AXUIElement",
+  "HIServices",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "CFArray",
+  "CFCGTypes",
+  "CFDictionary",
+  "CFNumber",
+  "CFString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+  "std",
+  "CGBitmapContext",
+  "CGColorSpace",
+  "CGContext",
+  "CGEventSource",
+  "CGEventTypes",
+  "CGImage",
+  "CGWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSString",
+  "NSURL",
+] }
 
 [profile.release]
 lto = "thin"

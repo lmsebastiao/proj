@@ -1,6 +1,7 @@
 //! The window switcher: open editor windows, like Alt+Tab for your projects.
 //! It stays up while the shortcut's modifiers are held and letting go switches;
-//! typing while holding them keeps it up to search in instead.
+//! typing while holding them keeps it up to search in instead. A project's
+//! windows share a row, which → opens up.
 
 use std::time::Duration;
 
@@ -10,13 +11,13 @@ use gpui::{Context, Keystroke, Pixels, SharedString, Window, div, prelude::*, px
 use crate::{
     launcher, platform,
     store::{self, Project},
-    switcher::EditorWindow,
+    switcher::{self, EditorWindow},
 };
 
 use super::{
-    Palette,
+    Palette, SWITCH_PREFIX,
     items::{List, Mode},
-    keymap::Confirm,
+    keymap::{CloseWindow, Confirm},
     theme::{FONT_SIZE, ROW_HEIGHT, Theme},
 };
 
@@ -24,7 +25,7 @@ use super::{
 /// mouse as a copy of the row.
 #[derive(Clone)]
 pub(super) struct DraggedWindow {
-    /// Its index in `Palette::windows`.
+    /// Its index in `Palette::switch_rows`.
     pub(super) ix: usize,
     pub(super) title: SharedString,
     pub(super) width: Pixels,
@@ -59,7 +60,8 @@ impl Render for DraggedWindow {
 }
 
 impl Palette {
-    /// The switcher, with `selected` highlighted, until `hold` is let go.
+    /// The switcher, with the row of `windows[selected]` highlighted, until
+    /// `hold` is let go.
     pub fn switcher(
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -70,12 +72,18 @@ impl Palette {
         let mut this = Self::new(window, cx, windows);
         this.hold = Some(hold);
         this.set_mode(Mode::Switch, cx);
-        this.selected = selected.min(this.matches.len().saturating_sub(1));
+        this.selected = this
+            .switch_rows
+            .iter()
+            .position(|row| row.contains(&selected))
+            .unwrap_or(0)
+            .min(this.matches.len().saturating_sub(1));
         this.set_switch_placeholder(cx);
-        this.status = this
-            .windows
-            .is_empty()
-            .then(|| "No editor windows are open".into());
+        this.status = this.windows.is_empty().then(|| {
+            platform::window_access_hint()
+                .unwrap_or("No editor windows are open")
+                .into()
+        });
         this.wait_for_release(window, cx);
         this
     }
@@ -111,11 +119,16 @@ impl Palette {
         if self.mode != Mode::Switch || (self.hold.is_none() && !keystroke.modifiers.alt) {
             return false;
         }
-        // Not keys like "up" or "f1", nor space or tab.
+        // Not keys like "up" or "f1", nor space or tab, nor shortcuts with ctrl
+        // (an AltGr character comes as one, but with its `key_char`).
+        let mods = keystroke.modifiers;
         let text = keystroke
             .key_char
             .clone()
-            .or_else(|| (keystroke.key.chars().count() == 1).then(|| keystroke.key.clone()))
+            .or_else(|| {
+                (!mods.control && !mods.platform && keystroke.key.chars().count() == 1)
+                    .then(|| keystroke.key.clone())
+            })
             .filter(|text| text.chars().all(|c| !c.is_whitespace() && !c.is_control()));
         let Some(text) = text else {
             return false;
@@ -179,7 +192,7 @@ impl Palette {
     }
 
     /// A key pressed while the switcher is held open: 1 to 9 switch straight to
-    /// the window with that number. Returns whether the key was one of those.
+    /// the row with that number. Returns whether the key was one of those.
     pub(super) fn switch_to_number(
         &mut self,
         key: &str,
@@ -192,36 +205,43 @@ impl Palette {
         let Some(n) = key.parse::<usize>().ok().filter(|n| (1..=9).contains(n)) else {
             return false;
         };
-        // A number past the last window does nothing, rather than typing it.
-        if n <= self.windows.len() {
+        // A number past the last row does nothing, rather than typing it.
+        if let Some(&w) = self.switch_rows.get(n - 1).and_then(|row| row.first()) {
             self.hold = None;
-            self.switch_to(n - 1, window, cx);
+            self.switch_to(w, window, cx);
         }
         true
     }
 
     /// Whether rows can be dragged to reorder the list: only while it shows
-    /// every window in order, not search results.
+    /// every project's row in order, not search results or one project's windows.
     pub(super) fn can_reorder(&self) -> bool {
-        self.list() == List::Switch && self.filter_query().is_empty()
+        self.list() == List::Switch && self.filter_query().is_empty() && self.expanded.is_none()
     }
 
-    /// A row dropped on another: the window at `from` takes the place of the
-    /// one at `to`, and stays highlighted. The switcher keeps the new order.
+    /// A row dropped on another: the row at `from` (all of a project's
+    /// windows) takes the place of the one at `to`, and stays highlighted. The
+    /// switcher keeps the new order.
     pub(super) fn move_window(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
-        let len = self.windows.len();
+        let len = self.switch_rows.len();
         if from == to || from >= len || to >= len || !self.can_reorder() {
             return;
         }
-        let moved = self.windows.remove(from);
-        self.windows.insert(to, moved);
+        let mut rows = self.switch_rows.clone();
+        let moved = rows.remove(from);
+        rows.insert(to, moved);
+        self.windows = rows
+            .iter()
+            .flatten()
+            .map(|&w| self.windows[w].clone())
+            .collect();
         self.match_windows();
         launcher::set_switch_order(self.windows.iter().map(|w| w.window).collect(), cx);
         self.selected = to;
         cx.notify();
     }
 
-    /// Works out which project each open window shows.
+    /// Works out which project each open window shows, and the rows.
     pub(super) fn match_windows(&mut self) {
         self.window_projects = self
             .windows
@@ -234,21 +254,107 @@ impl Palette {
             .flatten()
             .map(|&ix| self.projects[ix].key())
             .collect();
+        self.arrange_rows();
     }
 
-    /// The open window showing `project`, preferring one of `editor`'s, as its
-    /// index in `windows`.
+    /// The switcher's rows: a row per project, or `expanded`'s windows one by one.
+    pub(super) fn arrange_rows(&mut self) {
+        self.switch_rows = match self.expanded {
+            Some(project) => (0..self.windows.len())
+                .filter(|&w| self.window_projects[w] == Some(project))
+                .map(|w| vec![w])
+                .collect(),
+            None => switcher::rows(&self.windows, &self.window_projects),
+        };
+    }
+
+    /// →: a project row with several windows lists them one by one.
+    /// Returns false when the highlighted row isn't one.
+    pub(super) fn expand_row(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.expanded.is_some() {
+            return false;
+        }
+        let Some(row) = self
+            .matches
+            .get(self.selected)
+            .and_then(|m| self.switch_rows.get(m.ix))
+            .filter(|row| row.len() > 1)
+        else {
+            return false;
+        };
+        self.expanded = self.window_projects[row[0]];
+        self.arrange_rows();
+        self.clear_switch_query(cx);
+        true
+    }
+
+    /// ←: back from one project's windows to every project's rows, on its row.
+    pub(super) fn collapse_row(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(project) = self.expanded.take() else {
+            return false;
+        };
+        self.arrange_rows();
+        self.clear_switch_query(cx);
+        self.select_where(|this, ix| {
+            this.window_projects[this.switch_rows[ix][0]] == Some(project)
+        });
+        cx.notify();
+        true
+    }
+
+    /// An empty search, keeping the `@` that shows the windows in the project search.
+    fn clear_switch_query(&mut self, cx: &mut Context<Self>) {
+        let query = if self.mode == Mode::Projects {
+            SWITCH_PREFIX.to_string()
+        } else {
+            String::new()
+        };
+        self.set_query(&query, cx);
+    }
+
+    /// Ctrl-W in the switcher: asks the highlighted row's window (for a
+    /// project's row, the one it would switch to) to close.
+    pub(super) fn close_window(&mut self, _: &CloseWindow, _: &mut Window, cx: &mut Context<Self>) {
+        if self.list() != List::Switch {
+            return;
+        }
+        let Some(&w) = self
+            .matches
+            .get(self.selected)
+            .and_then(|m| self.switch_rows.get(m.ix))
+            .and_then(|row| row.first())
+        else {
+            return;
+        };
+        let closed = self.windows.remove(w);
+        platform::close_window(closed.window);
+        self.match_windows();
+        // Down to one window: no list of them to show.
+        if let Some(project) = self.expanded
+            && self
+                .window_projects
+                .iter()
+                .filter(|&&p| p == Some(project))
+                .count()
+                < 2
+        {
+            self.expanded = None;
+            self.arrange_rows();
+        }
+        let selected = self.selected;
+        self.refilter(cx);
+        self.selected = selected.min(self.matches.len().saturating_sub(1));
+        self.status = Some(format!("Closing {}", closed.title).into());
+    }
+
+    /// The open window showing `project`, preferring one of `editor`'s and then
+    /// the one used last, as its index in `windows`.
     pub(super) fn open_window_of(&self, project: &Project, editor: &str) -> Option<usize> {
         let key = project.key();
         let editor = self.name_of(editor);
-        let showing: Vec<usize> = (0..self.windows.len())
+        (0..self.windows.len())
             .filter(|&w| self.window_projects[w].is_some_and(|p| self.projects[p].key() == key))
-            .collect();
-        showing
-            .iter()
-            .copied()
-            .find(|&w| self.windows[w].editor == editor)
-            .or_else(|| showing.first().copied())
+            .min_by_key(|&w| (self.windows[w].editor != editor, self.windows[w].rank()))
     }
 
     pub(super) fn switch_to(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {

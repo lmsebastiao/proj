@@ -117,14 +117,19 @@ fn file_name(path: &Path) -> String {
 }
 
 impl Palette {
-    /// →: enter the selected project, or the selected folder while browsing.
-    /// Returns false when there's nothing to enter, so the key moves the cursor.
+    /// →: enter the selected project, or the selected folder while browsing;
+    /// in the switcher, a project's windows. Returns false when there's
+    /// nothing to enter, so the key moves the cursor.
     pub(super) fn enter(&mut self, cx: &mut Context<Self>) -> bool {
         match self.list() {
+            List::Switch => self.expand_row(cx),
             List::Projects => {
                 let Some(project) = self.selected_project().cloned() else {
                     return false;
                 };
+                if self.say_if_missing(&project, cx) {
+                    return true;
+                }
                 self.browse = Some(Browse::new(project));
                 self.set_mode(Mode::Browse, cx);
                 true
@@ -149,7 +154,11 @@ impl Palette {
     }
 
     /// ←: up one folder; from the project's top level, back to the project list.
+    /// In the switcher, back from a project's windows.
     pub(super) fn leave(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.list() == List::Switch {
+            return self.collapse_row(cx);
+        }
         if self.mode != Mode::Browse {
             return false;
         }
@@ -228,11 +237,8 @@ mod tests {
             name: file_name(path),
             path: path.to_path_buf(),
             extra,
-            branch: None,
-            pinned: false,
-            editor: None,
             manual: true,
-            last_opened: 0,
+            ..Project::default()
         }
     }
 

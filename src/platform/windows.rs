@@ -319,6 +319,12 @@ pub fn focus_window(hwnd: isize) {
     }
 }
 
+/// Posts WM_CLOSE, what the window's close button sends.
+pub fn close_window(hwnd: isize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    unsafe { PostMessageW(hwnd as HWND, WM_CLOSE, 0, 0) };
+}
+
 /// Whether every one of these modifiers is physically held down right now.
 pub fn modifiers_held(mods: global_hotkey::hotkey::Modifiers) -> bool {
     use global_hotkey::hotkey::Modifiers;

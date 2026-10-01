@@ -22,6 +22,38 @@ pub struct EditorWindow {
     pub exe: PathBuf,
     /// Lowercase program name, e.g. "zed", "devenv".
     process: String,
+    /// Its place front to back when the list was made: 0 was used last.
+    z: usize,
+    /// It was the window in front then, the one being switched away from.
+    front: bool,
+}
+
+impl EditorWindow {
+    /// The order to switch to a project's windows in: the one used last
+    /// first, but the one being switched away from last.
+    pub fn rank(&self) -> (bool, usize) {
+        (self.front, self.z)
+    }
+}
+
+/// The switcher's rows, as indexes into `windows` (in the switcher's order):
+/// windows of the same project (`projects_of`) share a row where the first of
+/// them is, best to switch to first (see [`EditorWindow::rank`]); the others
+/// get a row each.
+pub fn rows(windows: &[EditorWindow], projects_of: &[Option<usize>]) -> Vec<Vec<usize>> {
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    for (w, project) in projects_of.iter().enumerate() {
+        let shared =
+            project.and_then(|p| rows.iter().position(|row| projects_of[row[0]] == Some(p)));
+        match shared {
+            Some(row) => rows[row].push(w),
+            None => rows.push(vec![w]),
+        }
+    }
+    for row in &mut rows {
+        row.sort_by_key(|&w| windows[w].rank());
+    }
+    rows
 }
 
 /// A shortcut from the config for display, like the palette's keys:
@@ -59,29 +91,40 @@ pub fn editor_windows(config: &Config, db: &Db) -> Vec<EditorWindow> {
         .filter(|command| !command.trim().is_empty())
         .map(|command| {
             let path = which(&command).unwrap_or_else(|| PathBuf::from(&command));
+            // macOS: `zed` on PATH is a link into Zed.app.
+            #[cfg(target_os = "macos")]
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
             let name = editors::editor_name(&command, &detected);
             (path, name)
         })
         .collect();
-    platform::top_windows()
+    // After listing them: on macOS the window in front is one of that list.
+    let windows = platform::top_windows();
+    let front = platform::foreground_window();
+    windows
         .into_iter()
         .filter_map(|window| {
             let process = stem(&window.exe);
             let editor = editor_of(&window.exe, &process, &known)?;
-            Some(EditorWindow {
-                window: window.window,
-                title: window.title,
-                editor,
-                exe: window.exe,
-                process,
-            })
+            Some((window, process, editor))
+        })
+        .enumerate()
+        .map(|(z, (window, process, editor))| EditorWindow {
+            front: Some(window.window) == front,
+            window: window.window,
+            title: window.title,
+            editor,
+            exe: window.exe,
+            process,
+            z,
         })
         .collect()
 }
 
 /// The editor a program belongs to. The command is often a launcher (`bin\zed.exe`,
-/// `code.cmd`) next to the real program, so match on the name, then prefer the
-/// install that shares the most of the program's path (Zed vs Zed Preview).
+/// `code.cmd`) next to the real program, so match on the name, or on macOS on
+/// the app both are in, then prefer the install that shares the most of the
+/// program's path (Zed vs Zed Preview).
 fn editor_of(exe: &Path, process: &str, known: &[(PathBuf, String)]) -> Option<String> {
     known
         .iter()
@@ -91,6 +134,7 @@ fn editor_of(exe: &Path, process: &str, known: &[(PathBuf, String)]) -> Option<S
                 || editors::GUI_NAMES
                     .iter()
                     .any(|&(cli, gui)| cli == name && gui == process)
+                || app_bundle(exe).is_some_and(|app| Some(app) == app_bundle(command))
         })
         .max_by_key(|(command, _)| {
             exe.components()
@@ -99,6 +143,13 @@ fn editor_of(exe: &Path, process: &str, known: &[(PathBuf, String)]) -> Option<S
                 .count()
         })
         .map(|(_, name)| name.clone())
+}
+
+/// The macOS app a program is in: `/Applications/Zed.app` for
+/// `/Applications/Zed.app/Contents/MacOS/cli`.
+fn app_bundle(path: &Path) -> Option<&Path> {
+    path.ancestors()
+        .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
 }
 
 fn stem(path: &Path) -> String {
@@ -184,11 +235,8 @@ mod tests {
             name: name.into(),
             path: paths[0].into(),
             extra: paths[1..].iter().map(PathBuf::from).collect(),
-            branch: None,
-            pinned: false,
-            editor: None,
             manual: true,
-            last_opened: 0,
+            ..Project::default()
         }
     }
 
@@ -255,5 +303,57 @@ mod tests {
             Some("VSCodium")
         );
         assert_eq!(editor(r"C:\Windows\explorer.exe"), None);
+
+        // macOS: the CLI and the app's own program share the app.
+        let known = vec![
+            (
+                PathBuf::from("/Applications/Zed.app/Contents/MacOS/cli"),
+                "Zed".to_string(),
+            ),
+            (
+                PathBuf::from(
+                    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+                ),
+                "Visual Studio Code".to_string(),
+            ),
+        ];
+        let editor = |exe: &str| {
+            let exe = PathBuf::from(exe);
+            editor_of(&exe, &stem(&exe), &known)
+        };
+        assert_eq!(
+            editor("/Applications/Zed.app/Contents/MacOS/zed").as_deref(),
+            Some("Zed")
+        );
+        assert_eq!(
+            editor("/Applications/Visual Studio Code.app/Contents/MacOS/Electron").as_deref(),
+            Some("Visual Studio Code")
+        );
+        assert_eq!(
+            editor("/Applications/Safari.app/Contents/MacOS/Safari"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_project_s_windows_share_a_row() {
+        // In the switcher's order; z is front to back, and window 2 was in front.
+        let window = |id: isize, z: usize| EditorWindow {
+            window: WindowRef::test(id),
+            title: format!("window {id}"),
+            editor: "Zed".into(),
+            exe: PathBuf::new(),
+            process: "zed".into(),
+            z,
+            front: z == 0,
+        };
+        let windows = [window(0, 3), window(1, 1), window(2, 0), window(3, 2)];
+        let projects_of = [Some(7), None, Some(7), Some(7)];
+        assert_eq!(
+            rows(&windows, &projects_of),
+            [vec![3, 0, 2], vec![1]],
+            "where its first window is; the one switched away from last"
+        );
+        assert_eq!(rows(&[], &[]), Vec::<Vec<usize>>::new());
     }
 }

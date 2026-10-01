@@ -15,6 +15,8 @@ mod paths;
 mod platform;
 mod store;
 mod switcher;
+mod tasks;
+mod templates;
 mod tray;
 mod update;
 

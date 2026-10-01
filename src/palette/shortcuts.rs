@@ -5,7 +5,7 @@ use gpui::Action;
 
 use super::{
     Palette,
-    items::{List, Mode},
+    items::{List, Mode, ProjectAction},
     keymap::*,
     secondary,
 };
@@ -91,7 +91,7 @@ impl Palette {
                         .run(ToggleMark),
                     s(
                         &["mod-k", "shift-f10"],
-                        "Actions: pin, rename, remove, copy path…",
+                        "Actions: pin, rename, tags, commands to run, remove…",
                     )
                     .footer_if(!marking, "actions")
                     .run(ShowActions),
@@ -102,6 +102,7 @@ impl Palette {
                     s(&["mod-o"], "Add projects…").run(AddProjects),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["@"], "Open editor windows, to search and switch to"),
+                    s(&["#tag"], "Just the projects with that tag (set in mod-k)"),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["esc"], esc).footer_if(marking, esc_short).run(Dismiss),
                     s(&["mod-q"], "Quit proj").run(QuitApp),
@@ -141,8 +142,27 @@ impl Palette {
                     s(&["esc"], "Back").footer("back").run(Dismiss),
                 ]
             }
-            List::Actions => vec![
-                s(&["↵"], "Run it").footer("run").run(Confirm),
+            List::Actions => {
+                // On a command added to the menu: it can be taken out again.
+                let added = match self.matches.get(self.selected).map(|m| self.actions[m.ix]) {
+                    Some(ProjectAction::Run(i)) => self.tasks.get(i).is_some_and(|t| t.added),
+                    _ => false,
+                };
+                vec![
+                    s(&["↵"], "Run it").footer("run").run(Confirm),
+                    s(&["shift-del"], "Remove the added command")
+                        .footer_if(added, "remove")
+                        .run(RemoveItem),
+                    s(&["↑ ↓"], "Move the selection"),
+                    s(&["esc"], "Back to the projects")
+                        .footer("back")
+                        .run(Dismiss),
+                ]
+            }
+            List::Templates => vec![
+                s(&["↵"], "Make a new project from it")
+                    .footer("pick")
+                    .run(Confirm),
                 s(&["↑ ↓"], "Move the selection"),
                 s(&["esc"], "Back to the projects")
                     .footer("back")
@@ -172,7 +192,13 @@ impl Palette {
             // While the modifier is held these keys come with alt.
             List::Switch if self.hold.is_some() => vec![
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
-                s(&["alt-1…9"], "Switch to the window with that number"),
+                s(&["alt-1…9"], "Switch to the row with that number"),
+                s(
+                    &["alt-→", "alt-←"],
+                    "A project's windows one by one, and back",
+                )
+                .footer_if(self.selected_row_is_group(), "windows"),
+                s(&["alt-mod-w"], "Close the window").run(CloseWindow),
                 s(&["type"], "Search the windows; the list stays open"),
                 s(&["alt-esc"], "Cancel").footer("cancel").run(Dismiss),
             ],
@@ -187,24 +213,55 @@ impl Palette {
                     .config
                     .switch_number_modifiers()
                     .map(|mods| crate::switcher::shortcut_label(&format!("{mods}+1…9")));
+                let (esc, esc_short) = if self.expanded.is_some() {
+                    ("Back to every project's windows", "back")
+                } else {
+                    (esc, esc_short)
+                };
                 let mut keys = vec![
                     s(&["↵"], "Switch to it").footer("switch").run(Confirm),
+                    s(&["→", "←"], "A project's windows one by one, and back")
+                        .footer_if(self.selected_row_is_group(), "windows"),
+                    s(&["mod-w"], "Close the window").run(CloseWindow),
                     s(&["↑ ↓"], "Move the selection"),
-                    s(&["drag"], "Move a window to another place in the list"),
+                    s(&["drag"], "Move a row to another place in the list"),
                 ];
                 if let Some(numbers) = numbers {
                     keys.push(s(
                         &[numbers.as_str()],
-                        "Switch straight to the window with that number, from anywhere",
+                        "Switch straight to the row with that number, from anywhere",
                     ));
                 }
                 keys.push(s(&["esc"], esc).footer(esc_short).run(Dismiss));
                 keys
             }
-            List::Rename => vec![
-                s(&["↵"], "Save the name").footer("save").run(Confirm),
-                s(&["esc"], "Cancel").footer("cancel").run(Dismiss),
-            ],
+            List::Text => {
+                let save = match self.mode {
+                    Mode::Tags => "Save the tags",
+                    Mode::AddCommand => "Add the command",
+                    Mode::NewProject => "Make the project and open it",
+                    _ => "Save the name",
+                };
+                let short = if self.mode == Mode::NewProject {
+                    "make"
+                } else {
+                    "save"
+                };
+                vec![
+                    s(&["↵"], save).footer(short).run(Confirm),
+                    s(&["esc"], "Cancel").footer("cancel").run(Dismiss),
+                ]
+            }
         }
+    }
+
+    /// The highlighted switcher row has several of a project's windows.
+    fn selected_row_is_group(&self) -> bool {
+        self.expanded.is_none()
+            && self
+                .matches
+                .get(self.selected)
+                .and_then(|m| self.switch_rows.get(m.ix))
+                .is_some_and(|row| row.len() > 1)
     }
 }

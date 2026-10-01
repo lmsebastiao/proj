@@ -26,7 +26,9 @@ actions!(
         AddProjects,
         ToggleShortcuts,
         Dismiss,
-        QuitApp
+        QuitApp,
+        RemoveItem,
+        CloseWindow
     ]
 );
 
@@ -61,10 +63,18 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f1", ToggleShortcuts, ctx),
         KeyBinding::new("escape", Dismiss, ctx),
         KeyBinding::new("secondary-q", QuitApp, ctx),
+        // A command added to a project's actions menu: take it out again.
+        KeyBinding::new("shift-delete", RemoveItem, ctx),
+        // The window switcher: close the highlighted window.
+        KeyBinding::new("secondary-w", CloseWindow, ctx),
         // The window switcher is used with alt held down.
         KeyBinding::new("alt-escape", Dismiss, ctx),
         KeyBinding::new("alt-down", SelectNext, ctx),
         KeyBinding::new("alt-up", SelectPrev, ctx),
+        // Into a project's windows, and back out.
+        KeyBinding::new("alt-right", input::Right, ctx),
+        KeyBinding::new("alt-left", input::Left, ctx),
+        KeyBinding::new("alt-secondary-w", CloseWindow, ctx),
     ]);
     cx.on_action(|_: &QuitApp, cx| cx.quit());
 }

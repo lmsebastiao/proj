@@ -664,24 +664,26 @@ fn arranged_windows(delta: isize, cx: &mut App) -> (Vec<EditorWindow>, usize) {
     cx.global_mut::<Switching>().arrange(windows, delta)
 }
 
-/// A switch-by-number shortcut: straight to the `ix`th window (0 = the first)
-/// in the switcher's order, without showing the list.
+/// A switch-by-number shortcut: straight to the `ix`th row (0 = the first) of
+/// the switcher, without showing it: to a project's window used last.
 fn switch_to_number(ix: usize, cx: &mut App) {
     let (windows, _) = arranged_windows(1, cx);
-    let Some(target) = windows.get(ix) else {
+    let config = config::load_config();
+    let mut db = store::load_db();
+    let projects = store::collect(&config, &db);
+    let projects_of: Vec<Option<usize>> = windows.iter().map(|w| w.project(&projects)).collect();
+    let rows = switcher::rows(&windows, &projects_of);
+    let Some(&target) = rows.get(ix).and_then(|row| row.first()) else {
         return;
     };
     // Before closing an open palette, while proj is still in front and allowed
     // to hand over focus.
-    platform::focus_window(target.window);
+    platform::focus_window(windows[target].window);
     if let Some(handle) = open_palette(cx) {
         close_palette(handle, cx);
     }
     // Recently used, like switching from the list.
-    let config = config::load_config();
-    let mut db = store::load_db();
-    let projects = store::collect(&config, &db);
-    if let Some(project) = target.project(&projects) {
+    if let Some(project) = projects_of[target] {
         db.opened.insert(projects[project].key(), store::now());
         if let Err(err) = store::save_db(&db) {
             eprintln!("proj: could not save: {err}");

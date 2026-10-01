@@ -29,7 +29,8 @@ then opens a folder picker where you can select one or more projects at once.
 | → / ←                   | browse into a project / back up (see below) |
 | alt-enter               | open with… (another editor once, or set the project's default) |
 | tab / shift-tab         | mark projects to open together, moving down / up |
-| ctrl-k, shift-f10, menu key | actions for the project: pin, rename, remove, and the ones below |
+| ctrl-k, shift-f10, menu key | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
+| `#tag`                  | only the projects with that tag (see Tags) |
 | ctrl-e                  | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-g                  | open the repository page (from the git `origin` remote) |
 | ctrl-c                  | copy the project path (text, if some is selected) |
@@ -44,16 +45,18 @@ instead of the list and enter runs the highlighted key; clicking one runs it too
 typing closes it.
 
 **ctrl-k** (or shift-f10, or the menu key) lists everything you can do with the highlighted
-project: open with, show in Explorer, terminal, pin, rename, copy the path, open the
-repository page, remove. Type to filter it and press enter; the project's name and folder
-show above the list. The highlighted
+project: open with, show in Explorer, terminal, its commands (see Commands), pin, rename,
+tags, copy the path, open the repository page, its pull requests or its CI runs, copy the
+clone URL, start a new project from it, remove. Type to filter it and press enter; the
+project's name and folder show above the list. The highlighted
 row, and any row under the mouse, also has icons for rename, remove, **⋯** (the same list)
 and pin. The remove icon asks for a second click. Pinned projects stay on top and keep their
 pin icon showing. Renaming to an empty name goes back to the folder name.
 Removing only takes a project off the list; the folder isn't touched.
 
-Type `>` to list commands: start on login, add projects, change the default editor, theme,
-open the config file, check for updates / install update (installed copies), quit.
+Type `>` to list commands: start on login, add projects, new project from a template, change
+the default editor, theme, open the config file, remove missing projects (when some are),
+check for updates / install update (installed copies), quit.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
 keep typing to filter it, enter switches, esc goes back to the projects.
 
@@ -77,25 +80,30 @@ move the cursor while you edit a search.
 Hold **alt** and tap **\\** to switch between your open editor windows, like Alt+Tab but only
 for editors. It's the \\ key wherever your layout has it: left of 1 on Portuguese keyboards,
 above enter on US ones. Keep tapping to move down the list; **alt+shift+\\** or **alt+↑** goes
-back up, and a
-number (**alt+1** to **9**) switches straight to that window. Let go of alt and the highlighted
-window comes to the front. The list shows as soon as you press the key, like Alt+Tab; a quick
-tap switches to the editor window you used before. **alt-esc** cancels.
+back up, and a number (**alt+1** to **9**) switches straight to that row. Let go of alt and
+the highlighted window comes to the front. The list shows as soon as you press the key, like
+Alt+Tab; a quick tap switches to the editor window you used before. **alt-esc** cancels.
 
-The list keeps its order: windows stay where they first appeared, new ones are added at the
+A project's windows share one row ("3 windows · …"), which switches to the one you used last
+(or, for the project you're in, to its other window). **→** on that row (**alt+→** while
+holding) lists its windows one by one; **←** goes back. **ctrl-w** (**ctrl+alt+w** while
+holding) closes the highlighted window, as its close button would, so the editor can still
+ask about unsaved changes.
+
+The list keeps its order: rows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before
-the current one. To put a window somewhere else, drag its row with the mouse and drop it on
+the current one. To put a row somewhere else, drag it with the mouse and drop it on
 another; a line shows where it will go. It keeps that place (and number) until it closes.
-Dragging works while the list shows every window, not while you're searching it. If you let
+Dragging works while the list shows every row, not while you're searching it. If you let
 go of alt mid-drag, the list stays open so you can drop the row.
 
 To search instead, start typing while you still hold alt: the list stays open when you let
 go, typing filters it, **enter** switches and **esc** closes. From the project search, typing
 `@` gets you the same list.
 
-**alt+shift+1** to **9** switch straight to that window in the list, without showing it,
-like Win+1 on the taskbar. The list numbers its first nine windows, and since it keeps its
-order, each window keeps its number until it closes. Set other modifiers with
+**alt+shift+1** to **9** switch straight to that row of the list, without showing it,
+like Win+1 on the taskbar. The list numbers its first nine rows, and since it keeps its
+order, each row keeps its number until it closes. Set other modifiers with
 `switch_number_modifiers` in config.toml, but not ctrl+alt on Windows: Windows reads AltGr as
 ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 
@@ -107,7 +115,9 @@ one switches to its window instead of opening it again (**alt-↵** still opens 
 editor).
 
 `switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`, or `""` turns the
-switcher off. Windows only.
+switcher off. Windows and macOS; on macOS proj needs to be allowed under System Settings ›
+Privacy & Security › Accessibility (it asks the first time), and lists the apps with windows
+on screen, so not ones with only minimized windows or windows on other Spaces.
 
 ### Opening projects together
 
@@ -140,7 +150,46 @@ Visual Studio is found automatically and gets the project's `.sln`/`.slnx` inste
 folder. Project defaults live in `projects.toml` under `[editors]`.
 
 Each row shows the current git branch (read from `.git/HEAD`) and when you last opened it.
+After the branch, **●** means uncommitted changes and **↑2 ↓1** commits to push and pull:
+`git status` runs in the background each time the dialog opens (at most every 10 seconds per
+repository), so the counts show up a moment later, and right away the next time.
 Projects that share a folder name get their parent folder added, e.g. `app (client)`.
+
+A project you added whose folder is gone (moved, deleted, or on a drive that isn't
+connected) stays listed at the end, dimmed and marked **missing**, instead of vanishing. Type
+`>` and pick **Remove missing projects** to forget them all, or remove one with ctrl-k.
+
+### Tags
+
+ctrl-k → **Tags…** on a project, type words like `work oss` and press enter. Tags show after
+the project's name. Search for `#work` to list only the projects tagged with it; the start of a
+tag is enough (`#wo`), several tags must all match, and the rest of the search filters as
+usual: `#work api`.
+
+### Commands
+
+ctrl-k on a project lists its commands to run: the ones you added with **Add a command…**
+(e.g. `npm run dev`), then its `package.json` scripts, run with npm, pnpm, yarn or bun
+according to its lock file. Enter opens a terminal in the project's folder running it, which
+stays open when it ends. **shift-delete** on an added command takes it out again.
+
+### Pull requests and CI
+
+ctrl-k → **Open the pull requests** and **Open the CI runs** go to those pages of the
+repository's site, from its `origin` remote: GitHub, GitLab, Gitea, Forgejo (Codeberg),
+Bitbucket and Azure DevOps, by their site names (`gitlab.example.com` counts too). For a
+self-hosted site with another name, say what it runs in config.toml:
+`forges = { "git.example.com" = "gitlab" }`. **Copy the clone URL** copies the remote's URL.
+
+### New projects from templates
+
+Type `>` and pick **New project from a template**, or ctrl-k → **New project from this one…**
+on any project. Templates are the folders and git URLs listed under `templates` in
+config.toml. After picking one, type the new project's folder name and press enter: it's made
+in the first `scan_dirs` folder (or one you pick), with a git history of its own, and opens.
+A folder that is a git repository is copied as git would commit it, so without what
+`.gitignore` leaves out; other folders are copied whole, but for `node_modules`, `target` and
+the like. A git URL is cloned without its history.
 
 Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
 
@@ -170,8 +219,11 @@ proj version        # show the installed version
 
 ```toml
 hotkey = "alt+space"
-# switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that window; default alt+shift
+# switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
+# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that row; default alt+shift
 scan_dirs = []          # optional: list every sub-folder of these folders as projects
+# templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]
+# forges = { "git.example.com" = "gitlab" }  # for pull request and CI links
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
 theme = "system"        # or "light" / "dark"; also set with > Theme
@@ -186,7 +238,8 @@ Config and folder scans are re-read every time the dialog opens, so changes appl
 That includes `hotkey`: a new shortcut starts working once the dialog has opened, by the old
 shortcut or the tray icon. If none of the new shortcuts can be registered, the old ones keep
 working and the dialog says why.
-Manually added projects, hidden projects, names and open history live in `projects.toml`.
+Manually added projects, hidden projects, names, tags, added commands and open history live
+in `projects.toml`.
 
 ## Windows installer
 
@@ -260,4 +313,6 @@ key on Windows, a LaunchAgent on macOS, and `~/.config/autostart` on Linux.
 
 Only tested on Windows so far. Global hotkeys don't work on Linux Wayland (a limitation of
 `global-hotkey`); X11 is fine. On macOS the app shows a Dock icon, because gpui 0.2 doesn't
-expose the accessory activation policy.
+expose the accessory activation policy. The macOS editor and window icons and the window
+switcher (through the Accessibility API) are written but haven't been run on a Mac yet. On
+Linux the switcher lists no windows and rows have no icons.

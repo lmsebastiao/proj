@@ -1,7 +1,7 @@
 //! User-edited settings (`config.toml`).
 
 use serde::{Deserialize, Deserializer};
-use std::{fs, io, path::PathBuf};
+use std::{collections::BTreeMap, fs, io, path::PathBuf};
 
 use crate::paths::{app_dir, write_atomic};
 
@@ -32,6 +32,11 @@ pub struct Config {
     /// Light or dark colours, or follow the system setting.
     #[serde(deserialize_with = "theme_or_system")]
     pub theme: ThemeSetting,
+    /// Git hosts and the software they run ("github", "gitlab", "gitea",
+    /// "forgejo", "bitbucket", "azure"), for sites whose name doesn't say.
+    pub forges: BTreeMap<String, String>,
+    /// Folders and git URLs to start new projects from.
+    pub templates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -83,6 +88,8 @@ impl Default for Config {
             switch_hotkey: None,
             switch_number_modifiers: None,
             theme: ThemeSetting::System,
+            forges: BTreeMap::new(),
+            templates: Vec::new(),
         }
     }
 }
@@ -200,6 +207,15 @@ scan_dirs = []
 # into folders that are not git repositories, up to this depth.
 scan_depth = 1
 
+# Folders and git URLs to start new projects from: type > and pick "New project
+# from a template". Copies leave out what git ignores, and start a new git history.
+# templates = ['C:\Users\me\templates\rust-cli', "https://github.com/me/web-starter"]
+
+# The pull request and CI actions know GitHub, GitLab, Gitea, Forgejo, Bitbucket
+# and Azure DevOps by their site names. Name the software of other hosts here:
+# "github", "gitlab", "gitea", "forgejo", "bitbucket" or "azure".
+# forges = { "git.example.com" = "gitlab" }
+
 # Look for a new version on GitHub about once a day. When there is one, the tray
 # menu offers "Install update"; nothing is installed without asking.
 check_for_updates = true
@@ -298,5 +314,26 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(config.hotkey_label(), "a+b or c+d");
+    }
+
+    #[test]
+    fn forges_and_templates_as_the_template_shows_them() {
+        let config: Config = toml::from_str(
+            r#"
+templates = ['C:\Users\me\templates\rust-cli', "https://github.com/me/web-starter"]
+forges = { "git.example.com" = "gitlab" }
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.templates.len(), 2);
+        assert_eq!(config.forges["git.example.com"], "gitlab");
+        // Uncommenting them leaves `editor` added later at the top level.
+        let template = CONFIG_TEMPLATE
+            .replace("{hotkey}", "\"alt+p\"")
+            .replace("# forges =", "forges =");
+        let added = with_editor(&template, "zed").unwrap();
+        let config: Config = toml::from_str(&added).unwrap();
+        assert_eq!(config.editor.as_deref(), Some("zed"));
+        assert_eq!(config.forges.len(), 1);
     }
 }

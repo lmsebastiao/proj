@@ -5,8 +5,11 @@ use std::path::PathBuf;
 use crate::{
     config::{self, ThemeSetting},
     editors::Editor,
+    git::{self, Forge},
     launcher::UpdateState,
-    paths, store, update,
+    paths,
+    store::{self, Project},
+    update,
 };
 
 use super::{Palette, secondary};
@@ -20,8 +23,16 @@ pub(super) enum Mode {
     OpenWith,
     /// Inside a project's folders (`Palette::browse`).
     Browse,
-    /// Typing a new name for an entry (`Palette::renaming`).
+    /// Typing a new name for an entry (`Palette::editing`).
     Rename,
+    /// Typing an entry's tags (`Palette::editing`).
+    Tags,
+    /// Typing a command for an entry's actions menu (`Palette::editing`).
+    AddCommand,
+    /// Choosing a template for a new project (`Palette::templates`).
+    Templates,
+    /// Typing the name of a new project made from `Palette::new_from`.
+    NewProject,
     /// The window switcher: open editor windows (`Palette::windows`).
     Switch,
     /// Ctrl-K: what can be done with one project (`Palette::actions_for`).
@@ -36,35 +47,34 @@ pub(super) enum List {
     OpenWith,
     Browse,
     Commands,
-    /// Nothing: the search box holds the new name.
-    Rename,
+    /// Nothing: the search box holds what's being typed (a name, tags, a command).
+    Text,
+    /// The switcher's rows (`Palette::switch_rows`).
     Switch,
     Actions,
+    Templates,
 }
 
-/// An entry in a project's actions menu (ctrl-k).
+/// An entry in a project's actions menu (ctrl-k), as `Palette::actions` lists them.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ProjectAction {
     OpenWith,
     ShowInFileManager,
     Terminal,
+    /// Runs `Palette::tasks[i]` in a terminal in the project's folder.
+    Run(usize),
+    AddCommand,
     TogglePin,
     Rename,
+    Tags,
     CopyPath,
     RepoPage,
+    PullRequests,
+    Ci,
+    CopyCloneUrl,
+    NewFromThis,
     Remove,
 }
-
-pub(super) const PROJECT_ACTIONS: [ProjectAction; 8] = [
-    ProjectAction::OpenWith,
-    ProjectAction::ShowInFileManager,
-    ProjectAction::Terminal,
-    ProjectAction::TogglePin,
-    ProjectAction::Rename,
-    ProjectAction::CopyPath,
-    ProjectAction::RepoPage,
-    ProjectAction::Remove,
-];
 
 /// A git URL pasted into the search.
 #[derive(Clone)]
@@ -86,25 +96,31 @@ pub(super) enum EditorOption {
 pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
+    NewFromTemplate,
     ChangeEditor,
     /// Go through system → light → dark.
     Theme,
     OpenConfig,
+    /// Forget the added projects whose folders are gone.
+    RemoveMissing,
     /// Check for an update, or install the one found.
     Update,
     Quit,
 }
 
-/// The `>` commands. `updates`: this copy can update itself (it was installed).
-pub(super) fn commands(updates: bool) -> Vec<PaletteCommand> {
+/// The `>` commands. `updates`: this copy can update itself (it was
+/// installed). `missing`: some projects' folders are gone.
+pub(super) fn commands(updates: bool, missing: bool) -> Vec<PaletteCommand> {
     [
         PaletteCommand::Autostart,
         PaletteCommand::AddProjects,
+        PaletteCommand::NewFromTemplate,
         PaletteCommand::ChangeEditor,
         PaletteCommand::Theme,
         PaletteCommand::OpenConfig,
     ]
     .into_iter()
+    .chain(missing.then_some(PaletteCommand::RemoveMissing))
     .chain(updates.then_some(PaletteCommand::Update))
     .chain([PaletteCommand::Quit])
     .collect()
@@ -126,6 +142,13 @@ pub(super) struct Match {
 pub(super) struct Meta {
     pub(super) top: Option<(String, u32)>,
     pub(super) bottom: Option<String>,
+}
+
+impl Meta {
+    const NONE: Self = Self {
+        top: None,
+        bottom: None,
+    };
 }
 
 impl Palette {
@@ -165,100 +188,223 @@ impl Palette {
                     "Open project folders in the file manager".into(),
                 ),
             },
-            List::Commands => {
-                let m = secondary();
-                match self.commands[ix] {
-                    PaletteCommand::Autostart => (
-                        format!(
-                            "Start on login: {}",
-                            if self.autostart { "on" } else { "off" }
-                        ),
-                        format!(
-                            "Turn {} starting proj when you log in",
-                            if self.autostart { "off" } else { "on" }
-                        ),
-                    ),
-                    PaletteCommand::AddProjects => (
-                        "Add projects…".into(),
-                        format!("Pick one or more project folders · {m}-o"),
-                    ),
-                    PaletteCommand::ChangeEditor => (
-                        "Change the default editor".into(),
-                        format!(
-                            "All projects open in {} unless they have their own",
-                            self.name_of(self.config.editor.as_deref().unwrap_or(""))
-                        ),
-                    ),
-                    PaletteCommand::OpenConfig => (
-                        "Open config file".into(),
-                        paths::display_path(&config::config_path()),
-                    ),
-                    PaletteCommand::Theme => {
-                        let setting = self.config.theme;
-                        let now = if self.theme.is_dark() {
-                            "dark"
-                        } else {
-                            "light"
-                        };
-                        let title = match setting {
-                            ThemeSetting::System => format!("Theme: system ({now})"),
-                            _ => format!("Theme: {now}"),
-                        };
-                        let next = match setting.next() {
-                            ThemeSetting::System => "follow the system setting".to_string(),
-                            other => format!("use {}", other.as_str()),
-                        };
-                        (title, format!("↵ to {next}"))
-                    }
-                    PaletteCommand::Update => self.update_text(),
-                    PaletteCommand::Quit => (
-                        "Quit proj".into(),
-                        format!("Stop the background launcher · {m}-q"),
-                    ),
-                }
-            }
-            // The project's name over the window's title ("proj — main.rs");
-            // windows of no known project show just their title.
+            List::Commands => self.command_text(self.commands[ix]),
+            // The project's name over the window's title ("proj — main.rs"), or
+            // over all its windows' titles; windows of no known project show
+            // just their title. A project's own windows, once → opens them up,
+            // show their titles.
             List::Switch => {
-                let window = &self.windows[ix];
-                match self.window_projects[ix] {
+                let row = &self.switch_rows[ix];
+                let window = &self.windows[row[0]];
+                match self.window_projects[row[0]] {
+                    _ if self.expanded.is_some() => (window.title.clone(), window.editor.clone()),
+                    Some(project) if row.len() > 1 => {
+                        let titles: Vec<&str> = row
+                            .iter()
+                            .map(|&w| self.windows[w].title.as_str())
+                            .collect();
+                        (
+                            self.projects[project].name.clone(),
+                            format!("{} windows · {}", row.len(), titles.join(" · ")),
+                        )
+                    }
                     Some(project) => (self.projects[project].name.clone(), window.title.clone()),
                     None => (window.title.clone(), window.editor.clone()),
                 }
             }
-            List::Actions => {
-                let pinned = self.actions_project().is_some_and(|p| p.pinned);
-                let (title, subtitle) = match PROJECT_ACTIONS[ix] {
-                    ProjectAction::OpenWith => (
-                        "Open with…",
-                        "Another editor just this once, or set its default",
-                    ),
-                    ProjectAction::ShowInFileManager => {
-                        (super::shortcuts::file_manager().0, "The project's folder")
-                    }
-                    ProjectAction::Terminal => (
-                        "Open a terminal there",
-                        "Windows Terminal if it's installed",
-                    ),
-                    ProjectAction::TogglePin if pinned => ("Unpin", "Back into the recent order"),
-                    ProjectAction::TogglePin => ("Pin", "Pinned projects stay on top"),
-                    ProjectAction::Rename => (
-                        "Rename…",
-                        "A shorter name; search still finds it by its folder",
-                    ),
-                    ProjectAction::CopyPath => ("Copy the path", "To the clipboard"),
-                    ProjectAction::RepoPage => (
-                        "Open the repository page",
-                        "From the git origin remote (GitHub, GitLab…)",
-                    ),
-                    ProjectAction::Remove => {
-                        ("Remove from the list", "The folder itself isn't touched")
-                    }
-                };
-                (title.into(), subtitle.into())
+            List::Actions => self.action_text(self.actions[ix]),
+            List::Templates => {
+                let template = &self.templates[ix];
+                (template.name(), template.source())
             }
-            List::Rename => Default::default(),
+            List::Text => Default::default(),
         }
+    }
+
+    fn command_text(&self, command: PaletteCommand) -> (String, String) {
+        let m = secondary();
+        match command {
+            PaletteCommand::Autostart => (
+                format!(
+                    "Start on login: {}",
+                    if self.autostart { "on" } else { "off" }
+                ),
+                format!(
+                    "Turn {} starting proj when you log in",
+                    if self.autostart { "off" } else { "on" }
+                ),
+            ),
+            PaletteCommand::AddProjects => (
+                "Add projects…".into(),
+                format!("Pick one or more project folders · {m}-o"),
+            ),
+            PaletteCommand::NewFromTemplate => (
+                "New project from a template…".into(),
+                match self.config.templates.len() {
+                    0 => "Set up templates in the config file".into(),
+                    1 => "From the template in the config file".into(),
+                    n => format!("From one of the {n} templates in the config file"),
+                },
+            ),
+            PaletteCommand::ChangeEditor => (
+                "Change the default editor".into(),
+                format!(
+                    "All projects open in {} unless they have their own",
+                    self.name_of(self.config.editor.as_deref().unwrap_or(""))
+                ),
+            ),
+            PaletteCommand::OpenConfig => (
+                "Open config file".into(),
+                paths::display_path(&config::config_path()),
+            ),
+            PaletteCommand::Theme => {
+                let setting = self.config.theme;
+                let now = if self.theme.is_dark() {
+                    "dark"
+                } else {
+                    "light"
+                };
+                let title = match setting {
+                    ThemeSetting::System => format!("Theme: system ({now})"),
+                    _ => format!("Theme: {now}"),
+                };
+                let next = match setting.next() {
+                    ThemeSetting::System => "follow the system setting".to_string(),
+                    other => format!("use {}", other.as_str()),
+                };
+                (title, format!("↵ to {next}"))
+            }
+            PaletteCommand::RemoveMissing => {
+                let missing = self.projects.iter().filter(|p| p.missing).count();
+                let projects = if missing == 1 { "project" } else { "projects" };
+                (
+                    "Remove missing projects".into(),
+                    format!("Forget the {missing} {projects} whose folders are gone"),
+                )
+            }
+            PaletteCommand::Update => self.update_text(),
+            PaletteCommand::Quit => (
+                "Quit proj".into(),
+                format!("Stop the background launcher · {m}-q"),
+            ),
+        }
+    }
+
+    fn action_text(&self, action: ProjectAction) -> (String, String) {
+        let project = self.actions_project();
+        let pinned = project.is_some_and(|p| p.pinned);
+        let (title, subtitle): (String, String) = match action {
+            ProjectAction::OpenWith => (
+                "Open with…".into(),
+                "Another editor just this once, or set its default".into(),
+            ),
+            ProjectAction::ShowInFileManager => (
+                super::shortcuts::file_manager().0.into(),
+                "The project's folder".into(),
+            ),
+            ProjectAction::Terminal => (
+                "Open a terminal there".into(),
+                "Windows Terminal if it's installed".into(),
+            ),
+            ProjectAction::Run(i) => {
+                let task = &self.tasks[i];
+                let from = if task.added {
+                    "Runs in a terminal there · shift-del removes it"
+                } else {
+                    "A package.json script, run in a terminal there"
+                };
+                (format!("Run {}", task.command), from.into())
+            }
+            ProjectAction::AddCommand => (
+                "Add a command…".into(),
+                "To run in a terminal there from this menu, e.g. npm run dev".into(),
+            ),
+            ProjectAction::TogglePin if pinned => {
+                ("Unpin".into(), "Back into the recent order".into())
+            }
+            ProjectAction::TogglePin => ("Pin".into(), "Pinned projects stay on top".into()),
+            ProjectAction::Rename => (
+                "Rename…".into(),
+                "A shorter name; search still finds it by its folder".into(),
+            ),
+            ProjectAction::Tags => {
+                let tags = project.map(|p| p.tags.as_slice()).unwrap_or_default();
+                let subtitle = if tags.is_empty() {
+                    "Group projects, then search for them with #tag".to_string()
+                } else {
+                    tags.iter()
+                        .map(|t| format!("#{t}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                ("Tags…".into(), subtitle)
+            }
+            ProjectAction::CopyPath => ("Copy the path".into(), "To the clipboard".into()),
+            ProjectAction::RepoPage => (
+                "Open the repository page".into(),
+                "From the git origin remote (GitHub, GitLab…)".into(),
+            ),
+            ProjectAction::PullRequests => (
+                "Open the pull requests".into(),
+                self.forge_hint("Merge requests on GitLab"),
+            ),
+            ProjectAction::Ci => (
+                "Open the CI runs".into(),
+                self.forge_hint("Actions, pipelines or builds"),
+            ),
+            ProjectAction::CopyCloneUrl => (
+                "Copy the clone URL".into(),
+                project
+                    .and_then(|p| git::git_remote_url(&p.path))
+                    .unwrap_or_default(),
+            ),
+            ProjectAction::NewFromThis => (
+                "New project from this one…".into(),
+                "A copy without what git ignores, with a history of its own".into(),
+            ),
+            ProjectAction::Remove => (
+                "Remove from the list".into(),
+                "The folder itself isn't touched".into(),
+            ),
+        };
+        (title, subtitle)
+    }
+
+    /// The pull request and CI actions' subtitle: `known` when the site is,
+    /// else how to tell proj what it runs.
+    fn forge_hint(&self, known: &str) -> String {
+        match self.actions_forge() {
+            Some(_) => known.to_string(),
+            None => {
+                let host = self
+                    .actions_web_url()
+                    .as_deref()
+                    .and_then(git::url_host)
+                    .map(str::to_string)
+                    .unwrap_or_default();
+                format!("Name the software {host} runs under forges in the config file")
+            }
+        }
+    }
+
+    /// The web page of the actions menu's project, and the kind of site it's on.
+    pub(super) fn actions_web_url(&self) -> Option<String> {
+        git::git_web_url(&self.actions_project()?.path)
+    }
+
+    pub(super) fn actions_forge(&self) -> Option<Forge> {
+        Forge::for_url(&self.actions_web_url()?, &self.config.forges)
+    }
+
+    /// The branch, with what `git status` said about it: "main ● ↑2".
+    pub(super) fn branch_label(&self, project: &Project) -> Option<String> {
+        let branch = project.branch.as_ref()?;
+        let status = self
+            .git_status
+            .get(&project.path)
+            .map(|s| s.suffix())
+            .unwrap_or_default();
+        Some(format!("{branch}{status}"))
     }
 
     /// Right-hand details: branch, own editor and last opened for projects;
@@ -267,22 +413,25 @@ impl Palette {
         match self.list() {
             List::Projects => {
                 let project = &self.projects[ix];
+                if project.missing {
+                    return Meta {
+                        top: Some(("missing".into(), self.theme.danger)),
+                        bottom: Some("its folder is gone".into()),
+                    };
+                }
                 // Only projects with their own default name it; the rest use the global one.
                 let editor = project.editor.as_deref().map(|c| self.name_of(c));
                 let opened =
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now));
                 let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
                 Meta {
-                    top: project.branch.clone().map(|b| (b, self.theme.branch)),
+                    top: self.branch_label(project).map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
                 }
             }
             List::OpenWith => {
                 let EditorOption::Detected(editor) = &self.editors[ix] else {
-                    return Meta {
-                        top: None,
-                        bottom: None,
-                    };
+                    return Meta::NONE;
                 };
                 let own = self.open_with_project().and_then(|p| p.editor.as_deref());
                 let is_global = self.config.editor.as_deref() == Some(editor.command.as_str());
@@ -318,36 +467,53 @@ impl Palette {
                 bottom: None,
             },
             List::Switch => {
-                let project = self.window_projects[ix].map(|p| &self.projects[p]);
+                let row = &self.switch_rows[ix];
+                let project = self.window_projects[row[0]].map(|p| &self.projects[p]);
+                let mut editors: Vec<&str> = Vec::new();
+                for &w in row {
+                    if !editors.contains(&self.windows[w].editor.as_str()) {
+                        editors.push(&self.windows[w].editor);
+                    }
+                }
+                let expanded = self.expanded.is_some();
                 Meta {
                     top: project
-                        .and_then(|p| p.branch.clone())
+                        .and_then(|p| self.branch_label(p))
                         .map(|b| (b, self.theme.branch)),
-                    bottom: project.map(|_| self.windows[ix].editor.clone()),
+                    // A project's several windows: → shows them.
+                    bottom: (project.is_some() && !expanded).then(|| {
+                        let more = if row.len() > 1 { " · →" } else { "" };
+                        format!("{}{more}", editors.join(", "))
+                    }),
                 }
             }
             // The action's own shortcut, where it has one.
             List::Actions => {
                 let m = secondary();
-                let key = match PROJECT_ACTIONS[ix] {
+                let key = match self.actions[ix] {
                     ProjectAction::OpenWith => Some("alt-↵".to_string()),
                     ProjectAction::ShowInFileManager => Some(format!("{m}-e")),
                     ProjectAction::Terminal => Some(format!("{m}-t")),
                     ProjectAction::CopyPath => Some(format!("{m}-c")),
                     ProjectAction::RepoPage => Some(format!("{m}-g")),
-                    ProjectAction::TogglePin | ProjectAction::Rename | ProjectAction::Remove => {
-                        None
-                    }
+                    _ => None,
                 };
                 Meta {
                     top: key.map(|k| (k, self.theme.muted)),
                     bottom: None,
                 }
             }
-            List::Commands | List::Rename => Meta {
-                top: None,
+            List::Templates => Meta {
+                top: Some((
+                    match self.templates[ix] {
+                        crate::templates::Template::Folder(_) => "folder".into(),
+                        crate::templates::Template::Git(_) => "git".into(),
+                    },
+                    self.theme.muted,
+                )),
                 bottom: None,
             },
+            List::Commands | List::Text => Meta::NONE,
         }
     }
 
@@ -388,9 +554,10 @@ impl Palette {
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => self.commands.len(),
-            List::Switch => self.windows.len(),
-            List::Actions => PROJECT_ACTIONS.len(),
-            List::Rename => 0,
+            List::Switch => self.switch_rows.len(),
+            List::Actions => self.actions.len(),
+            List::Templates => self.templates.len(),
+            List::Text => 0,
         }
     }
 }

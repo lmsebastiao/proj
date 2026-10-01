@@ -1,7 +1,10 @@
 //! Acting on projects: opening, marking, pinning, renaming, removing, adding and
 //! cloning them, plus `>` commands.
 
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use gpui::{ClipboardItem, Context, Focusable, PathPromptOptions, Window};
 
@@ -59,11 +62,36 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.say_if_missing(&project, cx) {
+            return;
+        }
         let editor = project.default_editor(&self.config);
         if let Some(ix) = self.open_window_of(&project, &editor) {
             return self.switch_to(ix, window, cx);
         }
         self.launch(&project, Target::Editor(editor), window, cx);
+    }
+
+    /// Whether `project`'s folder is gone, saying so if it is.
+    pub(super) fn say_if_missing(&mut self, project: &Project, cx: &mut Context<Self>) -> bool {
+        if !project.missing {
+            return false;
+        }
+        let gone = project
+            .paths()
+            .into_iter()
+            .find(|p| !p.is_dir())
+            .unwrap_or_else(|| project.path.clone());
+        self.status = Some(
+            format!(
+                "{} isn't there anymore. Reconnect its drive, or remove it with {}-k",
+                paths::display_path(&gone),
+                super::secondary()
+            )
+            .into(),
+        );
+        cx.notify();
+        true
     }
 
     pub(super) fn show_open_with(&mut self, key: String, cx: &mut Context<Self>) {
@@ -91,6 +119,9 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.say_if_missing(project, cx) {
+            return;
+        }
         let result = match &target {
             Target::Editor(editor) => open::open_with(&self.config, editor, &project.paths()),
             Target::FileManager => open::reveal(&project.path),
@@ -148,19 +179,67 @@ impl Palette {
 
     /// Type a new name for the selected entry in the search box.
     pub(super) fn rename(&mut self, cx: &mut Context<Self>) {
+        self.edit_selected(Mode::Rename, cx);
+    }
+
+    /// Type something about the selected entry in the search box: its name
+    /// (`Mode::Rename`), tags or a command.
+    pub(super) fn edit_selected(&mut self, mode: Mode, cx: &mut Context<Self>) {
         let Some(key) = self.selected_project().map(Project::key) else {
             return;
         };
-        self.renaming = Some(key);
-        self.set_mode(Mode::Rename, cx);
+        self.editing = Some(key);
+        self.set_mode(mode, cx);
+    }
+
+    /// Back to the project list after typing, with `key` selected and `status` said.
+    fn done_editing(&mut self, key: &str, status: Option<String>, cx: &mut Context<Self>) {
+        self.save(cx);
+        self.reload_projects();
+        self.set_mode(Mode::Projects, cx);
+        self.select_where(|this, ix| this.projects[ix].key() == key);
+        if let Some(status) = status {
+            self.status = Some(status.into());
+        }
+    }
+
+    pub(super) fn finish_tags(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.editing.clone() else {
+            return;
+        };
+        store::set_tags(&mut self.db, &key, &self.query);
+        let status = match self.db.tags.get(&key) {
+            Some(tags) => {
+                let tags: Vec<String> = tags.iter().map(|t| format!("#{t}")).collect();
+                format!("Tagged {}", tags.join(" "))
+            }
+            None => "No tags".into(),
+        };
+        self.done_editing(&key, Some(status), cx);
+    }
+
+    pub(super) fn finish_add_command(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.editing.clone() else {
+            return;
+        };
+        let command = self.query.trim().to_string();
+        if command.is_empty() {
+            return self.back_to_projects(cx);
+        }
+        store::add_command(&mut self.db, &key, &command);
+        let status = format!(
+            "Added \"{command}\" to its actions ({}-k)",
+            super::secondary()
+        );
+        self.done_editing(&key, Some(status), cx);
     }
 
     pub(super) fn finish_rename(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.renaming.clone() else {
+        let Some(key) = self.editing.clone() else {
             return;
         };
         // Unchanged: don't freeze a generated name like "app (client)".
-        if self.renamed_project().is_some_and(|p| p.name == self.query) {
+        if self.edited_project().is_some_and(|p| p.name == self.query) {
             self.set_mode(Mode::Projects, cx);
             self.select_where(|this, ix| this.projects[ix].key() == key);
             return;
@@ -224,26 +303,78 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let job = move |dest: &Path| git::clone(&url, dest);
+        self.start_making(dest, scanned, Making::Clone, job, window, cx);
+    }
+
+    /// Enter on the new project's name: make it from `new_from` in the first
+    /// scan folder (or one picked now), then list and open it.
+    pub(super) fn finish_new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(template) = self.new_from.clone() else {
+            return;
+        };
+        let name = self.query.trim().to_string();
+        if let Err(problem) = check_folder_name(&name) {
+            self.status = Some(problem.into());
+            cx.notify();
+            return;
+        }
+        let job = move |dest: &Path| template.create(dest);
+        match self.config.scan_dirs.first().cloned() {
+            Some(folder) => {
+                self.start_making(folder.join(&name), true, Making::Template, job, window, cx);
+            }
+            None => {
+                let options = PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some(format!("Make {name} in").into()),
+                };
+                self.pick(options, window, cx, move |this, paths, window, cx| {
+                    if let Some(folder) = paths.into_iter().next() {
+                        let dest = folder.join(&name);
+                        this.start_making(dest, false, Making::Template, job, window, cx);
+                    }
+                });
+            }
+        }
+    }
+
+    /// Runs `job` (a clone or a copy) to make `dest` in the background, then
+    /// lists and opens it. `scanned`: `dest` is in a scan folder.
+    fn start_making(
+        &mut self,
+        dest: PathBuf,
+        scanned: bool,
+        making: Making,
+        job: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.cloning {
+            return;
+        }
         if dest.exists() {
             self.status = Some(format!("{} already exists", paths::display_path(&dest)).into());
             cx.notify();
             return;
         }
         self.cloning = true;
-        self.status = Some(format!("Cloning into {}…", paths::display_path(&dest)).into());
+        self.status = Some(format!("{} {}…", making.doing(), paths::display_path(&dest)).into());
         cx.notify();
-        let clone = cx.background_executor().spawn({
+        let work = cx.background_executor().spawn({
             let dest = dest.clone();
-            async move { git::clone(&url, &dest) }
+            async move { job(&dest) }
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = clone.await;
-            let cloned = result.is_ok();
+            let result = work.await;
+            let made = result.is_ok();
             let finished = this.update_in(cx, |this, window, cx| {
-                this.finish_clone(dest.clone(), scanned, result, window, cx);
+                this.finish_making(dest.clone(), scanned, making, result, window, cx);
             });
-            // Closed with esc while cloning: still list the new project.
-            if finished.is_err() && cloned {
+            // Closed with esc meanwhile: still list the new project.
+            if finished.is_err() && made {
                 let mut db = store::load_db();
                 list_clone(&mut db, dest, scanned);
                 store::save_db(&db).ok();
@@ -252,17 +383,18 @@ impl Palette {
         .detach();
     }
 
-    fn finish_clone(
+    fn finish_making(
         &mut self,
         dest: PathBuf,
         scanned: bool,
+        making: Making,
         result: io::Result<()>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.cloning = false;
         if let Err(err) = result {
-            self.status = Some(format!("Clone failed: {err}").into());
+            self.status = Some(format!("{}: {err}", making.failed()).into());
             cx.notify();
             return;
         }
@@ -277,8 +409,9 @@ impl Palette {
         match project {
             Some(project) => self.open_entry(project, window, cx),
             None => {
-                self.set_query("", cx);
-                self.status = Some(format!("Cloned into {}", paths::display_path(&dest)).into());
+                self.set_mode(Mode::Projects, cx);
+                self.status =
+                    Some(format!("{} {}", making.done(), paths::display_path(&dest)).into());
             }
         }
     }
@@ -358,6 +491,27 @@ impl Palette {
             PaletteCommand::AddProjects => {
                 self.set_query("", cx);
                 self.add_projects(&AddProjects, window, cx);
+            }
+            PaletteCommand::NewFromTemplate => self.set_mode(Mode::Templates, cx),
+            PaletteCommand::RemoveMissing => {
+                let missing: Vec<Project> = self
+                    .projects
+                    .iter()
+                    .filter(|p| p.missing)
+                    .cloned()
+                    .collect();
+                for project in &missing {
+                    store::forget_entry(&mut self.db, project);
+                }
+                self.save(cx);
+                self.reload_projects();
+                self.set_query("", cx);
+                let projects = if missing.len() == 1 {
+                    "project"
+                } else {
+                    "projects"
+                };
+                self.status = Some(format!("Removed {} missing {projects}", missing.len()).into());
             }
             PaletteCommand::ChangeEditor => self.choose_default_editor(cx),
             // Saved to config.toml and applied right away; the palette stays open
@@ -466,6 +620,52 @@ impl Palette {
         })
         .detach();
     }
+}
+
+/// What `start_making` makes a project with, for what the footer says.
+#[derive(Clone, Copy)]
+enum Making {
+    Clone,
+    Template,
+}
+
+impl Making {
+    fn doing(self) -> &'static str {
+        match self {
+            Self::Clone => "Cloning into",
+            Self::Template => "Making",
+        }
+    }
+
+    fn failed(self) -> &'static str {
+        match self {
+            Self::Clone => "Clone failed",
+            Self::Template => "Could not make the project",
+        }
+    }
+
+    fn done(self) -> &'static str {
+        match self {
+            Self::Clone => "Cloned into",
+            Self::Template => "Made",
+        }
+    }
+}
+
+/// A name that works as a folder name everywhere (Windows is the pickiest).
+fn check_folder_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("Type a name for the new project");
+    }
+    if name == "." || name == ".." || name.ends_with(['.', ' ']) {
+        return Err("A folder name can't be that, or end with a dot or a space");
+    }
+    if name.contains(['<', '>', ':', '"', '/', '\\', '|', '?', '*'])
+        || name.contains(char::is_control)
+    {
+        return Err("A folder name can't have any of < > : \" / \\ | ? *");
+    }
+    Ok(())
 }
 
 /// Lists a freshly cloned folder: the scan already finds it inside a scan
