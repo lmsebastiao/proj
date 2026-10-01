@@ -56,12 +56,15 @@ pub(super) enum List {
     Forges,
 }
 
-/// An entry in a project's actions menu (ctrl-k), as `Palette::actions` lists them.
+/// An entry in a project's actions (ctrl-k) or commands (ctrl-r) menu, as
+/// `Palette::actions` lists them.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ProjectAction {
     OpenWith,
     ShowInFileManager,
     Terminal,
+    /// Opens its commands menu (ctrl-r).
+    Commands,
     /// Runs `Palette::tasks[i]` in a terminal in the project's folder.
     Run(usize),
     AddCommand,
@@ -73,6 +76,9 @@ pub(super) enum ProjectAction {
     PullRequests,
     Ci,
     CopyCloneUrl,
+    /// Says what the repository's site runs (GitLab, Gitea…), for the pull
+    /// request and CI links.
+    ChangeForge,
     NewFromThis,
     Remove,
 }
@@ -322,6 +328,20 @@ impl Palette {
                 };
                 (task.command.clone(), from.into())
             }
+            ProjectAction::Commands => (
+                "Run a command…".into(),
+                "Its package.json scripts and the commands you add".into(),
+            ),
+            ProjectAction::ChangeForge => {
+                let web = self.actions_web_url().unwrap_or_default();
+                let host = git::url_host(&web).unwrap_or_default().to_string();
+                let now = match super::forges::known(&host, &web, &self.config.forges) {
+                    Some((name, true)) => format!("{name}, as set in the config file"),
+                    Some((name, false)) => format!("{name}, going by its name"),
+                    None => "Not known yet".into(),
+                };
+                (format!("Change what {host} runs…"), now)
+            }
             ProjectAction::AddCommand => (
                 "Add a command…".into(),
                 "To run in a terminal there from this menu, e.g. npm run dev".into(),
@@ -391,12 +411,13 @@ impl Palette {
         }
     }
 
-    /// The heading over a section of the actions menu; none over `Danger`,
-    /// which gets a line instead.
+    /// The heading over a section of a menu; none over `Danger` and
+    /// `AddNew`, which get a line instead.
     pub(super) fn section_label(&self, section: Section) -> Option<String> {
         Some(match section {
             Section::Open => "Open".into(),
-            Section::Run => "Run".into(),
+            Section::Added => "Your commands".into(),
+            Section::Scripts => "package.json".into(),
             Section::Organize => "Organize".into(),
             Section::Repository => {
                 let host = self
@@ -411,7 +432,7 @@ impl Palette {
                 }
             }
             Section::More => "More".into(),
-            Section::Danger => return None,
+            Section::Danger | Section::AddNew => return None,
         })
     }
 
@@ -598,6 +619,7 @@ impl Palette {
             ProjectAction::OpenWith => Some(format!("{m}-↵")),
             ProjectAction::ShowInFileManager => Some(format!("{m}-e")),
             ProjectAction::Terminal => Some(format!("{m}-t")),
+            ProjectAction::Commands => Some(format!("{m}-r")),
             ProjectAction::CopyPath => Some(format!("{m}-c")),
             ProjectAction::RepoPage => Some(format!("{m}-g")),
             ProjectAction::TogglePin => Some(format!("{m}-shift-p")),

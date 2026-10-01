@@ -28,7 +28,8 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-1 … 9, alt-1 … 9   | open the project in that place (hold ctrl or alt a moment to see the numbers) |
 | enter                   | open in editor                             |
 | ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
-| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, commands to run, remove, and the ones below |
+| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: pin, rename, tags, remove, and the ones below |
+| ctrl-r / alt-r          | its commands to run: package.json scripts and your own (see Commands) |
 | f2                      | rename                                     |
 | ctrl-shift-p / alt-p    | pin / unpin                                |
 | shift-delete            | remove from the list (the folder stays)    |
@@ -61,9 +62,9 @@ Esc or typing closes it.
 
 **ctrl-k** (or alt-k, handy right after alt+space; shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
 at the bottom right, with everything you can do with the highlighted project: open with,
-show in Explorer, terminal, its commands (see Commands), pin, rename, tags, copy the path,
-open the repository page, its pull requests or its CI runs, copy the clone URL, start a new
-project from it, remove. Each shows its own key, if it has one. Type to filter it and press
+show in Explorer, terminal, run a command (the ctrl-r menu, see Commands), pin, rename,
+tags, open the repository page, its pull requests or its CI runs, copy the clone URL, change
+what its git site runs, copy the path, start a new project from it, remove. Each shows its own key, if it has one. Type to filter it and press
 enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
 highlighted row, and any row under the mouse, also has a **⋯** icon (the same menu) and a
 pin. Pinned projects stay on top and keep their pin showing.
@@ -198,10 +199,12 @@ usual: `#work api`.
 
 ### Commands
 
-ctrl-k on a project lists its commands to run: the ones you added with **Add a command…**
-(e.g. `npm run dev`), then its `package.json` scripts, run with npm, pnpm, yarn or bun
-according to its lock file. Enter opens a terminal in the project's folder running it, which
-stays open when it ends. **shift-delete** on an added command takes it out again.
+**ctrl-r** (or alt-r, or ctrl-k → **Run a command…**) on a project opens its commands menu,
+over the list like the ctrl-k one: the ones you added, then its `package.json` scripts, run
+with npm, pnpm, yarn or bun according to its lock file, then **Add a command…** (e.g.
+`npm run dev`). Type to filter them. Enter opens a terminal in the project's folder running
+it, which stays open when it ends. **shift-delete** on an added command takes it out again.
+ctrl-r again, or esc, closes the menu; ctrl-k switches to the actions.
 
 ### Pull requests and CI
 
@@ -210,7 +213,8 @@ repository's site, from its `origin` remote: GitHub, GitLab, Gitea, Forgejo (Cod
 Bitbucket and Azure DevOps, by their site names (`gitlab.example.com` counts too). For a
 self-hosted site with another name, proj asks what it runs the first time (GitLab, Gitea,
 Forgejo…), opens the page, and saves the answer in config.toml as
-`forges = { "git.example.com" = "gitlab" }`, where you can also set or change it. **Copy the clone URL** copies the remote's URL.
+`forges = { "git.example.com" = "gitlab" }`. To change it later, ctrl-k →
+**Change what git.example.com runs…**, or edit that line. **Copy the clone URL** copies the remote's URL.
 
 ### New projects from templates
 

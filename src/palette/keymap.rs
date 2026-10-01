@@ -23,6 +23,7 @@ actions!(
         ToggleMark,
         ToggleMarkUp,
         ShowActions,
+        ShowCommands,
         CopyPath,
         AddProjects,
         ToggleShortcuts,
@@ -72,6 +73,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),
         KeyBinding::new("menu", ShowActions, ctx),
+        // Its commands to run (package.json scripts and added ones).
+        KeyBinding::new("secondary-r", ShowCommands, ctx),
         // The search box copies its selected text instead, when there is some.
         KeyBinding::new("secondary-c", CopyPath, ctx),
         KeyBinding::new("secondary-o", AddProjects, ctx),
@@ -108,6 +111,7 @@ pub fn bind_keys(cx: &mut App) {
     if ALT_ACTIONS {
         cx.bind_keys([
             KeyBinding::new("alt-k", ShowActions, ctx),
+            KeyBinding::new("alt-r", ShowCommands, ctx),
             KeyBinding::new("alt-t", OpenTerminal, ctx),
             KeyBinding::new("alt-e", ShowInFileManager, ctx),
             KeyBinding::new("alt-g", OpenRemote, ctx),

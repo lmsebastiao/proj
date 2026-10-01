@@ -1,6 +1,6 @@
-//! A project's actions: the ctrl-k menu (with its commands to run), which
-//! opens over the list with a search box of its own, and the icons on the
-//! highlighted row.
+//! A project's menus, which open over the list with a search box of their
+//! own: its actions (ctrl-k) and its commands to run (ctrl-r); and the icons
+//! on the highlighted row.
 
 use gpui::{Context, Window};
 
@@ -42,17 +42,32 @@ impl RowIcon {
     }
 }
 
-/// The actions menu's groups, in their order; each but `Danger` under a heading.
+/// Which of a project's menus is open.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum MenuKind {
+    /// Ctrl-K: everything that can be done with it.
+    Actions,
+    /// Ctrl-R: its commands to run in a terminal.
+    Commands,
+}
+
+/// The menus' groups, in their order; each but `Danger` and `AddNew` under a
+/// heading.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Section {
     Open,
-    Run,
     Organize,
     /// Named after the repository's site, e.g. "GitLab · git.example.com".
     Repository,
     More,
     /// Remove, on its own under a line.
     Danger,
+    /// The commands menu: the ones added by hand…
+    Added,
+    /// …then the package.json scripts…
+    Scripts,
+    /// …then "Add a command…", under a line.
+    AddNew,
 }
 
 /// What the actions menu draws, top to bottom.
@@ -66,26 +81,13 @@ pub(super) enum ActionEntry {
 }
 
 impl ProjectAction {
-    pub(super) fn section(self) -> Section {
-        match self {
-            Self::OpenWith | Self::ShowInFileManager | Self::Terminal => Section::Open,
-            Self::Run(_) | Self::AddCommand => Section::Run,
-            Self::TogglePin | Self::Rename | Self::Tags => Section::Organize,
-            Self::RepoPage | Self::PullRequests | Self::Ci | Self::CopyCloneUrl => {
-                Section::Repository
-            }
-            Self::CopyPath | Self::NewFromThis => Section::More,
-            Self::Remove => Section::Danger,
-        }
-    }
-
     /// Its glyph in the icon font. `pinned`: the project is.
     pub(super) fn icon(self, pinned: bool) -> &'static str {
         match self {
             Self::OpenWith => icons::OPEN_WITH,
             Self::ShowInFileManager => icons::FOLDER,
             Self::Terminal => icons::TERMINAL,
-            Self::Run(_) => icons::RUN,
+            Self::Commands | Self::Run(_) => icons::RUN,
             Self::AddCommand => icons::ADD,
             Self::TogglePin if pinned => icons::PINNED,
             Self::TogglePin => icons::PIN,
@@ -94,6 +96,7 @@ impl ProjectAction {
             Self::RepoPage => icons::GLOBE,
             Self::PullRequests => icons::PULL_REQUESTS,
             Self::Ci => icons::CI,
+            Self::ChangeForge => icons::SETTINGS,
             Self::CopyCloneUrl => icons::LINK,
             Self::CopyPath => icons::COPY,
             Self::NewFromThis => icons::NEW_PROJECT,
@@ -111,18 +114,37 @@ impl Palette {
     /// Ctrl-K: opens the actions menu for the selected project, or closes it
     /// when it's open.
     pub(super) fn show_actions(&mut self, cx: &mut Context<Self>) {
-        if self.menu_open() {
+        self.show_menu(MenuKind::Actions, cx);
+    }
+
+    /// Ctrl-R: the same for its commands to run.
+    pub(super) fn show_commands(&mut self, cx: &mut Context<Self>) {
+        self.show_menu(MenuKind::Commands, cx);
+    }
+
+    /// Opens the `kind` menu over the list; its own key again closes it, the
+    /// other one's switches to that.
+    fn show_menu(&mut self, kind: MenuKind, cx: &mut Context<Self>) {
+        if self.menu_open() && self.menu_kind == kind {
             return self.close_menu(cx);
         }
         let Some(project) = self.selected_project().cloned() else {
             return;
         };
+        // Its commands run in its folder.
+        if kind == MenuKind::Commands && self.say_if_missing(&project, cx) {
+            return;
+        }
         self.show_shortcuts = false;
         self.numbers_shown = false;
         self.actions_for = Some(project.key());
-        self.load_actions(&project);
+        self.menu_kind = kind;
+        self.load_actions(&project, kind);
         self.menu_query.clear();
-        let placeholder = format!("Actions for {}…", project.name);
+        let placeholder = match kind {
+            MenuKind::Actions => format!("Actions for {}…", project.name),
+            MenuKind::Commands => format!("Commands for {}…", project.name),
+        };
         self.menu_input.update(cx, |input, cx| {
             input.set_placeholder(placeholder, cx);
             input.set_text("", cx);
@@ -137,26 +159,34 @@ impl Palette {
         cx.notify();
     }
 
-    /// The menu's entries for `project`, section by section (see `Section`).
-    /// One whose folder is gone gets the ones that don't need it.
-    fn load_actions(&mut self, project: &Project) {
+    /// The `kind` menu's entries for `project`, section by section (see
+    /// `Section`). One whose folder is gone gets the actions that don't need it.
+    fn load_actions(&mut self, project: &Project, kind: MenuKind) {
         use ProjectAction as A;
+        if kind == MenuKind::Commands {
+            self.tasks = tasks::tasks(project, &self.db);
+            let mut actions: Vec<ProjectAction> = (0..self.tasks.len()).map(A::Run).collect();
+            actions.push(A::AddCommand);
+            self.actions = actions;
+            return;
+        }
+        self.tasks = Vec::new();
         if project.missing {
-            self.tasks = Vec::new();
             self.actions = vec![A::TogglePin, A::Rename, A::Tags, A::CopyPath, A::Remove];
             return;
         }
-        self.tasks = tasks::tasks(project, &self.db);
         let remote = git::git_remote_url(&project.path).is_some();
         let web = git::git_web_url(&project.path).is_some();
-        let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal];
-        actions.extend((0..self.tasks.len()).map(A::Run));
-        actions.extend([A::AddCommand, A::TogglePin, A::Rename, A::Tags]);
+        let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal, A::Commands];
+        actions.extend([A::TogglePin, A::Rename, A::Tags]);
         if web {
             actions.extend([A::RepoPage, A::PullRequests, A::Ci]);
         }
         if remote {
             actions.push(A::CopyCloneUrl);
+        }
+        if web {
+            actions.push(A::ChangeForge);
         }
         actions.push(A::CopyPath);
         if !project.is_workspace() {
@@ -164,6 +194,23 @@ impl Palette {
         }
         actions.push(A::Remove);
         self.actions = actions;
+    }
+
+    /// The group an entry of the open menu goes under.
+    fn action_section(&self, action: ProjectAction) -> Section {
+        use ProjectAction as A;
+        match action {
+            A::OpenWith | A::ShowInFileManager | A::Terminal | A::Commands => Section::Open,
+            A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
+            A::Run(_) => Section::Scripts,
+            A::AddCommand => Section::AddNew,
+            A::TogglePin | A::Rename | A::Tags => Section::Organize,
+            A::RepoPage | A::PullRequests | A::Ci | A::CopyCloneUrl | A::ChangeForge => {
+                Section::Repository
+            }
+            A::CopyPath | A::NewFromThis => Section::More,
+            A::Remove => Section::Danger,
+        }
     }
 
     /// Filters the menu by what's typed in its search box, best first.
@@ -260,7 +307,7 @@ impl Palette {
             return;
         };
         let selected = self.menu_selected;
-        self.load_actions(&project);
+        self.load_actions(&project, self.menu_kind);
         self.refilter_menu(cx);
         self.menu_selected = selected.min(self.menu_matches.len().saturating_sub(1));
         self.notice(format!("Removed \"{}\"", task.command), cx);
@@ -275,12 +322,15 @@ impl Palette {
         let mut entries = Vec::new();
         let mut section = None;
         for (row, m) in self.menu_matches.iter().enumerate() {
-            let this = self.actions[m.ix].section();
+            let this = self.action_section(self.actions[m.ix]);
             if section != Some(this) {
-                entries.push(match self.section_label(this) {
-                    Some(label) => ActionEntry::Heading(label),
-                    None => ActionEntry::Line,
-                });
+                match self.section_label(this) {
+                    Some(label) => entries.push(ActionEntry::Heading(label)),
+                    // A line only between groups: none over a menu that's
+                    // just "Add a command…".
+                    None if !entries.is_empty() => entries.push(ActionEntry::Line),
+                    None => {}
+                }
                 section = Some(this);
             }
             entries.push(ActionEntry::Row(row));
@@ -313,6 +363,20 @@ impl Palette {
         };
         match action {
             ProjectAction::OpenWith => self.show_open_with(key, cx),
+            ProjectAction::Commands => self.show_commands(cx),
+            ProjectAction::ChangeForge => {
+                let Some(web) = web else {
+                    return;
+                };
+                let host = git::url_host(&web).unwrap_or_default().to_string();
+                let pick = ForgePick {
+                    web,
+                    host,
+                    key,
+                    then: None,
+                };
+                self.ask_forge(pick, cx);
+            }
             ProjectAction::ShowInFileManager => {
                 self.open_selected(Target::FileManager, window, cx);
             }
@@ -345,7 +409,7 @@ impl Palette {
                         web,
                         host,
                         key,
-                        then: action,
+                        then: Some(action),
                     };
                     return self.ask_forge(pick, cx);
                 };

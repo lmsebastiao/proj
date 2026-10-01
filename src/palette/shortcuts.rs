@@ -6,6 +6,7 @@ use gpui::Action;
 
 use super::{
     Palette,
+    actions::MenuKind,
     items::{List, Mode, ProjectAction},
     keymap::*,
     secondary,
@@ -85,12 +86,16 @@ impl Palette {
                 _ => false,
             };
             let mut keys = vec![s(&["↵"], "Run it").footer("Run").run(Confirm)];
+            let own_key = match self.menu_kind {
+                MenuKind::Actions => "mod-k",
+                MenuKind::Commands => "mod-r",
+            };
             if added {
                 keys.push(s(&["shift-del"], "Remove the added command").run(RemoveItem));
             }
             keys.extend([
                 s(&["↑ ↓"], "Move the selection"),
-                s(&["esc", "mod-k"], "Close the menu")
+                s(&["esc", own_key], "Close the menu")
                     .or_alt()
                     .footer("Close")
                     .run(Dismiss),
@@ -120,6 +125,12 @@ impl Palette {
                     .or_alt()
                     .footer("Actions")
                     .run(ShowActions),
+                    s(
+                        &["mod-r"],
+                        "Commands: its package.json scripts and your own",
+                    )
+                    .or_alt()
+                    .run(ShowCommands),
                     s(
                         &["mod-↵", "alt-↵"],
                         "Open with another editor, or set its default…",

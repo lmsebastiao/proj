@@ -254,7 +254,7 @@ impl Palette {
         }
         store::add_command(&mut self.db, &key, &command);
         let status = format!(
-            "Added \"{command}\" to its actions ({}-k)",
+            "Added \"{command}\" to its commands ({}-r)",
             super::secondary()
         );
         self.done_editing(&key, Some(status), cx);

@@ -99,8 +99,10 @@ pub struct Palette {
     /// Key of the entry being renamed, tagged or given a command
     /// (`Mode::Rename`, `Mode::Tags`, `Mode::AddCommand`).
     editing: Option<String>,
-    /// Key of the entry whose actions menu (ctrl-k) is open over the list.
+    /// Key of the entry whose actions (ctrl-k) or commands (ctrl-r) menu is
+    /// open over the list, and which of the two.
     actions_for: Option<String>,
+    menu_kind: actions::MenuKind,
     /// That menu's entries, and the tasks its `Run` entries run.
     actions: Vec<ProjectAction>,
     tasks: Vec<Task>,
@@ -225,6 +227,7 @@ impl Palette {
             browse: None,
             editing: None,
             actions_for: None,
+            menu_kind: actions::MenuKind::Actions,
             actions: Vec::new(),
             tasks: Vec::new(),
             menu_input,

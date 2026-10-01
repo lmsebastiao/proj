@@ -12,7 +12,7 @@ use crate::{input, paths, store, templates::Template};
 
 use super::{
     Palette,
-    actions::{ActionEntry, ROW_ICONS, RowIcon},
+    actions::{ActionEntry, MenuKind, ROW_ICONS, RowIcon},
     app_icon::{self, app_icon},
     items::*,
     keymap::*,
@@ -615,7 +615,10 @@ impl Palette {
                     .py_2()
                     .text_size(px(SMALL_FONT_SIZE))
                     .text_color(rgb(t.muted))
-                    .child("No matching actions")
+                    .child(match self.menu_kind {
+                        MenuKind::Actions => "No matching actions",
+                        MenuKind::Commands => "No matching commands",
+                    })
                     .into_any_element(),
             );
         }
@@ -763,14 +766,16 @@ impl Palette {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
             Mode::Forges => {
                 let pick = self.forge_pick.as_ref()?;
-                (
-                    None,
-                    vec![format!(
-                        "proj can't tell from its name. ↵ opens its {} and saves the choice \
-                         under forges in the config file, so it won't ask again.",
-                        pick.opens()
-                    )],
-                )
+                let line = match pick.opens() {
+                    Some(opens) => format!(
+                        "proj can't tell from its name. ↵ opens its {opens} and saves the choice \
+                         under forges in the config file, so it won't ask again."
+                    ),
+                    None => "For its pull request and CI links. ↵ saves the choice under forges \
+                             in the config file."
+                        .into(),
+                };
+                (None, vec![line])
             }
             Mode::Tags => (
                 None,
@@ -781,7 +786,7 @@ impl Palette {
                 (
                     None,
                     vec![format!(
-                        "It runs in a terminal in {}, from the project's actions ({m}-k).",
+                        "It runs in a terminal in {}, from the project's commands ({m}-r).",
                         project.location()
                     )],
                 )
@@ -1415,6 +1420,7 @@ impl Render for Palette {
                 }
             }))
             .on_action(cx.listener(|this, _: &ShowActions, _, cx| this.show_actions(cx)))
+            .on_action(cx.listener(|this, _: &ShowCommands, _, cx| this.show_commands(cx)))
             .on_action(cx.listener(Self::copy_path))
             .on_action(cx.listener(|this, action: &OpenRemote, window, cx| {
                 this.close_menu(cx);
