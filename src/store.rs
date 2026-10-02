@@ -35,6 +35,9 @@ pub struct Db {
     pub editors: BTreeMap<String, Vec<String>>,
     /// Entry -> unix seconds of last open.
     pub opened: BTreeMap<String, u64>,
+    /// Entry -> unix seconds of its last `VISITS_KEPT` opens, oldest first:
+    /// how much and how recently it's used, for ranking search results.
+    pub visits: BTreeMap<String, Vec<u64>>,
     /// Entry -> its tags, lowercase, searched with `#tag`.
     pub tags: BTreeMap<String, BTreeSet<String>>,
     /// Entry -> commands added to its actions menu, run in a terminal there.
@@ -56,6 +59,8 @@ pub struct Project {
     pub editor: Option<String>,
     pub manual: bool,
     pub last_opened: u64,
+    /// How much and how recently it's used (see `frecency`).
+    pub frecency: f32,
     /// Its folder (or one of a workspace's) is gone: moved, deleted, or on a
     /// drive that isn't connected.
     pub missing: bool,
@@ -87,9 +92,11 @@ impl Project {
             .join(" + ")
     }
 
-    /// Search bonus so entries opened before win ties.
-    pub fn search_boost(&self) -> i32 {
-        i32::from(self.last_opened > 0) * 8
+    /// Search bonus for use, for `fuzzy::rank_item`: it grows slower the more
+    /// it's used, up to about 37, so it decides between matches about as
+    /// good but not over a much better one.
+    pub fn search_boost(&self) -> f32 {
+        8. * (1. + self.frecency / 10.).ln()
     }
 
     /// Whether it has a tag starting with each of `prefixes` (lowercase).
@@ -131,6 +138,36 @@ pub fn load_db() -> Db {
 pub fn save_db(db: &Db) -> io::Result<()> {
     let text = toml::to_string(db).map_err(io::Error::other)?;
     write_atomic(&db_path(), &text)
+}
+
+/// How many opens of each entry `visits` keeps.
+const VISITS_KEPT: usize = 10;
+
+/// Records that an entry was opened just now.
+pub fn record_open(db: &mut Db, key: String) {
+    let now = now();
+    db.opened.insert(key.clone(), now);
+    let visits = db.visits.entry(key).or_default();
+    visits.push(now);
+    if visits.len() > VISITS_KEPT {
+        visits.drain(..visits.len() - VISITS_KEPT);
+    }
+}
+
+/// How much and how recently an entry is used: each of its last opens counts
+/// 100 just now, fading as it gets older (50 after 6 hours, 20 after a day, 3
+/// after a week). So something opened five times yesterday beats one opened
+/// once an hour ago, and of two opened once, the later wins. An entry opened
+/// before opens were kept counts its last open once.
+pub fn frecency(db: &Db, key: &str, now: u64) -> f32 {
+    let weight = |at: u64| {
+        let hours = now.saturating_sub(at) as f32 / 3600.;
+        100. / (1. + hours / 6.)
+    };
+    match db.visits.get(key) {
+        Some(visits) => visits.iter().map(|&at| weight(at)).sum(),
+        None => db.opened.get(key).map_or(0., |&at| weight(at)),
+    }
 }
 
 pub fn now() -> u64 {
@@ -219,6 +256,7 @@ fn entry(paths: Vec<PathBuf>, name: String, manual: bool, db: &Db) -> Project {
         branch: (!missing).then(|| git::git_branch(&path)).flatten(),
         editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
         last_opened: db.opened.get(&key).copied().unwrap_or(0),
+        frecency: frecency(db, &key, now()),
         tags: db
             .tags
             .get(&key)
@@ -237,7 +275,7 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-/// A group's name until it's renamed: "app + shared-sdk".
+/// A group's name until it's renamed: "app + sample-sdk".
 fn group_name(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -333,6 +371,7 @@ pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
         rekey(&mut db.names, &old_key, &new_key);
         rekey(&mut db.editors, &old_key, &new_key);
         rekey(&mut db.opened, &old_key, &new_key);
+        rekey(&mut db.visits, &old_key, &new_key);
         rekey(&mut db.tags, &old_key, &new_key);
         rekey(&mut db.commands, &old_key, &new_key);
     }
@@ -353,6 +392,7 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     db.names.remove(&key);
     db.editors.remove(&key);
     db.opened.remove(&key);
+    db.visits.remove(&key);
     db.tags.remove(&key);
     db.commands.remove(&key);
 }
@@ -586,7 +626,7 @@ mod tests {
     #[test]
     fn workspaces_are_listed_remembered_and_forgotten() {
         let dir = std::env::temp_dir().join(format!("proj-ws-{}", std::process::id()));
-        let (app, sdk) = (dir.join("interactive-v2"), dir.join("shared-sdk"));
+        let (app, sdk) = (dir.join("example-v2"), dir.join("sample-sdk"));
         fs::create_dir_all(&app).unwrap();
         fs::create_dir_all(&sdk).unwrap();
         let config = Config::default();
@@ -607,7 +647,7 @@ mod tests {
         let projects = collect(&config, &db);
         assert_eq!(projects.len(), 3);
         let workspace = &projects[0];
-        assert_eq!(workspace.name, "interactive-v2 + shared-sdk");
+        assert_eq!(workspace.name, "example-v2 + sample-sdk");
         assert_eq!(workspace.paths(), [app.clone(), sdk.clone()]);
         assert_eq!(workspace.key(), key);
         assert!(workspace.is_workspace());
@@ -706,5 +746,66 @@ mod tests {
         app.manual = false;
         forget_entry(&mut db, &app);
         assert!(db.hidden.contains(&PathBuf::from("/a/app")));
+    }
+
+    #[test]
+    fn opens_are_kept_up_to_a_limit() {
+        let mut db = Db::default();
+        for _ in 0..VISITS_KEPT + 3 {
+            record_open(&mut db, "app".into());
+        }
+        assert_eq!(db.visits["app"].len(), VISITS_KEPT);
+        assert!(db.opened.contains_key("app"));
+    }
+
+    #[test]
+    fn frecency_counts_use_and_how_recent_it_was() {
+        let now = 1_000_000_000;
+        let hour = 3600;
+        let mut db = Db::default();
+        db.visits.insert("lately".into(), vec![now - 8 * 60]);
+        db.visits.insert("earlier".into(), vec![now - 46 * 60]);
+        db.visits
+            .insert("yesterday".into(), vec![now - 24 * hour; 5]);
+        // Opened before opens were kept: its last open, once.
+        db.opened.insert("old".into(), now - 46 * 60);
+        let f = |key: &str| frecency(&db, key, now);
+        assert!(f("lately") > f("earlier"));
+        assert!(f("yesterday") > f("lately"));
+        assert_eq!(f("old"), f("earlier"));
+        assert_eq!(f("never"), 0.);
+    }
+
+    /// "examp" in the screenshot that asked for this: the one used last
+    /// leads, not the shortest name; a group stays an entry of its own.
+    #[test]
+    fn search_ranks_equal_matches_by_use() {
+        let now = now();
+        let mut db = Db::default();
+        let opened = [
+            ("example", 46 * 60),
+            ("example-v2", 8 * 60),
+            ("example-v2 + sample-sdk", 5 * 60),
+        ];
+        for (name, ago) in opened {
+            db.visits.insert(name.into(), vec![now - ago]);
+        }
+        let boost = |name: &str| {
+            Project {
+                frecency: frecency(&db, name, now),
+                ..Project::default()
+            }
+            .search_boost()
+        };
+        let mut ranked: Vec<(crate::fuzzy::Rank, &str)> = opened
+            .iter()
+            .map(|&(name, _)| {
+                let (rank, _) = crate::fuzzy::rank_item("examp", name, "", boost(name)).unwrap();
+                (rank, name)
+            })
+            .collect();
+        ranked.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+        let names: Vec<&str> = ranked.iter().map(|(_, name)| *name).collect();
+        assert_eq!(names, ["example-v2 + sample-sdk", "example-v2", "example"]);
     }
 }

@@ -71,6 +71,14 @@ With nothing typed, the projects with an editor window open come first: the one 
 in when you pressed the shortcut, then the others, the one used last first. Then the rest,
 the one opened last first, under a line.
 
+Searching uses fzf's way of matching (through [nucleo](https://github.com/helix-editor/nucleo),
+as Helix and Zed do): letters at the start of words and next to each other count most, and
+each word you type matches on its own, in any order (`sdk shared` finds `shared-sdk`).
+The best matches come first, and among matches about as good, the projects
+you open more, and more lately: each of the last ten opens counts, less the older it is. So
+`examp` puts the `example-v2` you opened minutes ago above the `example` from an hour
+ago, though its name is longer. A group is an entry of its own, with its own opens.
+
 **f2** renames a project; renaming to an empty name goes back to the folder name.
 **shift-delete** removes it, only from the list, as the folder isn't touched. The footer
 then offers **Undo** (or ctrl-z) for a few seconds.
@@ -109,8 +117,8 @@ copies its path. Nothing you browse is added to the project list.
 ### Finding files
 
 Type **`$`** and then part of a file's name (`$button`) to search every listed project's files
-at once. Words before the name narrow it by the folders it's in, the project's included,
-split by spaces or either slash: `$palette files`, `$src/main`, `$web\src\index`. A folder's
+at once. Words before the name narrow it by the folders it's in, the project's included, in
+any order, split by spaces or either slash: `$palette files`, `$src/main`, `$web\src\index`. A folder's
 name alone (`$components`) lists what's in it, after any files named like it. Files whose
 name matches come first, the ones nearer the top of their project before deeper ones. Enter
 opens the file in its project's editor and window, as in browsing; **ctrl-e**, **ctrl-t** and
@@ -171,11 +179,11 @@ on screen, so not ones with only minimized windows or windows on other Spaces.
 
 ### Groups: opening projects together
 
-Several projects can open in one editor window: `zed interactive-v2 shared-sdk`, and the
+Several projects can open in one editor window: `zed example-v2 sample-sdk`, and the
 same for VS Code. Folders are passed in the order they were ticked.
 
 **Once:** press **tab** on a project to mark it (marks stay while you change the search), and
-**enter** opens all the marked ones together. For example: type `inter`, tab, type `shared`,
+**enter** opens all the marked ones together. For example: type `exam`, tab, type `sample`,
 tab, enter. Nothing is saved. Esc clears the marks.
 
 **To keep:** ctrl-k on a project → **Open together with…** opens a page listing your projects

@@ -49,7 +49,7 @@ pub fn run(args: &[String]) -> i32 {
                 eprintln!("proj: could not open {}: {err}", project.name);
                 return 1;
             }
-            db.opened.insert(project.key(), store::now());
+            store::record_open(&mut db, project.key());
             println!("opened {}", project.name);
         }
         "add" => {
@@ -178,17 +178,17 @@ pub fn run(args: &[String]) -> i32 {
 
 /// The entry the dialog would put first for `query`.
 fn best_match<'a>(query: &str, projects: &'a [Project]) -> Option<&'a Project> {
-    let mut best: Option<(i32, &Project)> = None;
+    let mut best: Option<(fuzzy::Rank, &Project)> = None;
     for project in projects.iter().filter(|p| !p.missing) {
-        let m = fuzzy::score_item(
+        let ranked = fuzzy::rank_item(
             query,
             &project.name,
             &project.location(),
             project.search_boost(),
         );
         // Strictly greater, so ties go to the earlier (recent) entry.
-        if let Some(m) = m.filter(|m| best.is_none_or(|(score, _)| m.score > score)) {
-            best = Some((m.score, project));
+        if let Some((rank, _)) = ranked.filter(|(rank, _)| best.is_none_or(|(b, _)| *rank > b)) {
+            best = Some((rank, project));
         }
     }
     best.map(|(_, project)| project)
@@ -210,13 +210,13 @@ mod tests {
     #[test]
     fn open_picks_the_best_match() {
         let mut projects = vec![
-            project("advertising", "/r/advertising"),
+            project("reviews", "/r/reviews"),
             project("api", "/r/api"),
-            project("Client", "/r/interactive-v2"),
+            project("Client", "/r/example-v2"),
         ];
         assert_eq!(best_match("api", &projects).unwrap().name, "api");
         assert_eq!(
-            best_match("inter", &projects).unwrap().name,
+            best_match("exam", &projects).unwrap().name,
             "Client",
             "a renamed entry is still found by its folder"
         );

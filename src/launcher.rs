@@ -684,7 +684,7 @@ fn switch_to_number(ix: usize, cx: &mut App) {
     }
     // Recently used, like switching from the list.
     if let Some(project) = projects_of[target] {
-        db.opened.insert(projects[project].key(), store::now());
+        store::record_open(&mut db, projects[project].key());
         if let Err(err) = store::save_db(&db) {
             eprintln!("proj: could not save: {err}");
         }

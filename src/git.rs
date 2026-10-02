@@ -144,7 +144,7 @@ pub fn git_remote_url(path: &Path) -> Option<String> {
 }
 
 /// Web page of the repository's `origin` remote (or its first remote), e.g.
-/// `https://git.tomiworld.com/web/interactive-v2`.
+/// `https://git.example.com/web/example-v2`.
 pub fn git_web_url(path: &Path) -> Option<String> {
     remote_web_url(&git_remote_url(path)?)
 }
@@ -444,13 +444,10 @@ mod tests {
         let cases = [
             ("https://github.com/lmsebastiao/proj", "proj"),
             ("https://github.com/lmsebastiao/proj.git", "proj"),
+            ("https://git.example.com/web/example-v2/", "example-v2"),
             (
-                "https://git.tomiworld.com/web/interactive-v2/",
-                "interactive-v2",
-            ),
-            (
-                "ssh://git@git.tomiworld.com:222/web/interactive-v2.git",
-                "interactive-v2",
+                "ssh://git@git.example.com:222/web/example-v2.git",
+                "example-v2",
             ),
             ("git@github.com:owner/repo.git", "repo"),
             ("git@ssh.dev.azure.com:v3/org/project/repo", "repo"),
@@ -459,7 +456,7 @@ mod tests {
             assert_eq!(clone_name(url).as_deref(), Some(name), "{url}");
         }
         for text in [
-            "interactive",
+            "example",
             "app:v2",
             r"C:\repos\app",
             "https://github.com",
@@ -521,16 +518,16 @@ mod tests {
     fn git_remotes_become_web_urls() {
         let cases = [
             (
-                "ssh://git@git.tomiworld.com:222/web/interactive-v2.git",
-                "https://git.tomiworld.com/web/interactive-v2",
+                "ssh://git@git.example.com:222/web/example-v2.git",
+                "https://git.example.com/web/example-v2",
             ),
             (
                 "https://github.com/lmsebastiao/proj.git",
                 "https://github.com/lmsebastiao/proj",
             ),
             (
-                "https://user:token@git.tomiworld.com/tomi/shared-sdk.git",
-                "https://git.tomiworld.com/tomi/shared-sdk",
+                "https://user:token@git.example.com/team/sample-sdk.git",
+                "https://git.example.com/team/sample-sdk",
             ),
             (
                 "git@github.com:owner/repo.git",
@@ -597,9 +594,9 @@ mod tests {
             "https://dev.azure.com/org/project/_build"
         );
         // Self-hosted sites with no telling name: from `forges` in config.toml.
-        let own = "https://git.tomiworld.com/web/interactive-v2";
+        let own = "https://git.example.com/web/example-v2";
         assert_eq!(forge(own), None);
-        let forges = BTreeMap::from([("git.tomiworld.com".to_string(), "Forgejo".to_string())]);
+        let forges = BTreeMap::from([("git.example.com".to_string(), "Forgejo".to_string())]);
         assert_eq!(Forge::for_url(own, &forges), Some(Forge::Gitea));
         assert_eq!(
             url_host("http://gitea.local:3000/team/app"),

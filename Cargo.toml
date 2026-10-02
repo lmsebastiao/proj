@@ -30,6 +30,8 @@ global-hotkey = "0.8.0"
 gpui = "0.2.2"
 # The pixel buffer type gpui images are made of.
 image = { version = "0.25", default-features = false }
+# Fuzzy matching for the searches: fzf's algorithm, as Helix and Zed use it.
+nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 serde = { version = "1.0.229", features = ["derive"] }
 # package.json scripts, listed in the file's order.
 serde_json = { version = "1", features = ["preserve_order"] }

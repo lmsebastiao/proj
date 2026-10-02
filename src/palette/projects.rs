@@ -166,12 +166,10 @@ impl Palette {
                 if self.is_unsaved(&key) {
                     // Not a group: each of its projects was opened.
                     for path in project.paths() {
-                        self.db
-                            .opened
-                            .insert(store::entry_key(&[path]), store::now());
+                        store::record_open(&mut self.db, store::entry_key(&[path]));
                     }
                 } else {
-                    self.db.opened.insert(key, store::now());
+                    store::record_open(&mut self.db, key);
                 }
                 self.save(cx);
                 window.remove_window();

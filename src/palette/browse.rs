@@ -66,7 +66,7 @@ impl Browse {
         };
     }
 
-    /// Where we are, e.g. "interactive-v2 › src › components".
+    /// Where we are, e.g. "example-v2 › src › components".
     pub(super) fn breadcrumb(&self) -> String {
         match self.stack.last() {
             Some(dir) => self.relative(dir).replace(['\\', '/'], " › "),

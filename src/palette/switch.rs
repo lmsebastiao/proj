@@ -366,9 +366,7 @@ impl Palette {
         // Before closing, while proj is still in front and allowed to hand over focus.
         platform::focus_window(self.windows[ix].window);
         if let Some(project) = self.window_projects[ix] {
-            self.db
-                .opened
-                .insert(self.projects[project].key(), store::now());
+            store::record_open(&mut self.db, self.projects[project].key());
             self.save(cx);
         }
         window.remove_window();

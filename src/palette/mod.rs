@@ -672,17 +672,19 @@ impl Palette {
             }));
         } else {
             let query = text;
-            let mut scored: Vec<(i32, Match)> = candidates
+            let mut scored: Vec<(fuzzy::Rank, Match)> = candidates
                 .into_iter()
                 .filter_map(|ix| {
                     let (title, subtitle) = self.item_text(ix);
+                    // Projects: the ones used more, and more lately, first
+                    // among matches as good.
                     let boost = match list {
                         List::Projects => self.projects[ix].search_boost(),
-                        _ => 0,
+                        _ => 0.,
                     };
-                    let m = fuzzy::score_item(&query, &title, &subtitle, boost)?;
+                    let (rank, m) = fuzzy::rank_item(&query, &title, &subtitle, boost)?;
                     Some((
-                        m.score,
+                        rank,
                         Match {
                             ix,
                             title_hl: m.title_hl,
@@ -691,7 +693,7 @@ impl Palette {
                     ))
                 })
                 .collect();
-            scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+            scored.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
             self.matches.extend(scored.into_iter().map(|(_, m)| m));
         }
 

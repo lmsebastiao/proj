@@ -17,7 +17,12 @@ use std::{
 
 use gpui::Context;
 
-use crate::{fuzzy, git, store::Project, templates::SKIPPED};
+use crate::{
+    fuzzy::{Query, Text},
+    git,
+    store::Project,
+    templates::SKIPPED,
+};
 
 use super::{
     Palette,
@@ -41,10 +46,11 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 /// The files in a project's folder.
 pub(super) struct FolderFiles {
     root: PathBuf,
-    /// The folder's name, in front of the paths shown.
-    name: String,
-    /// From the folder, with `/` between the parts.
-    files: Vec<String>,
+    /// Each file as shown and searched: the folder's name, then its path in
+    /// it, with `/` between the parts ("proj/src/main.rs").
+    places: Vec<String>,
+    /// Where the path in the folder starts in each place, past the "/".
+    rel_at: usize,
 }
 
 /// A file `$` found.
@@ -81,13 +87,14 @@ impl FolderFiles {
                 .collect(),
             None => walk(&root),
         };
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.to_string_lossy().into_owned());
         Self {
-            name: root
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| root.to_string_lossy().into_owned()),
+            places: files.iter().map(|rel| format!("{name}/{rel}")).collect(),
+            rel_at: name.len() + 1,
             root,
-            files,
         }
     }
 }
@@ -140,21 +147,6 @@ fn read_and_cache(root: PathBuf) -> Arc<FolderFiles> {
     files
 }
 
-/// Whether the characters of `needle` (lowercase) come in this order in
-/// `text`: cheap, so most files are passed over without scoring.
-fn is_subsequence(needle: &[char], text: impl Iterator<Item = char>) -> bool {
-    let mut want = needle.iter().peekable();
-    for c in text {
-        let Some(&&next) = want.peek() else {
-            break;
-        };
-        if c.to_lowercase().next() == Some(next) {
-            want.next();
-        }
-    }
-    want.peek().is_none()
-}
-
 /// The query's words: split at spaces and at `/` or `\`, so a path typed
 /// either way works.
 fn words(query: &str) -> Vec<&str> {
@@ -164,71 +156,69 @@ fn words(query: &str) -> Vec<&str> {
         .collect()
 }
 
-/// A file's score, and the matched byte offsets in its name and in where it
-/// is. The last word goes against its name and the ones before it against
-/// the folders it's in, in order: "palette files", `src\main`. Failing that,
-/// all of them anywhere along its path ("srcmain", or just a folder's name),
-/// which ranks lower. Between equals, the shallower file.
-fn score_file(words: &[&str], name: &str, place: &str) -> Option<(i32, Vec<usize>, Vec<usize>)> {
-    let (last, before) = words.split_last()?;
-    let depth = place.matches('/').count() as i32;
-    if let Some((name_score, name_hl)) = fuzzy::score(last, name) {
-        let folders = &place[..place.len() - name.len()];
-        let in_folders = if before.is_empty() {
-            Some((0, Vec::new()))
-        } else {
-            fuzzy::score(&before.concat(), folders)
-        };
-        if let Some((folders_score, folders_hl)) = in_folders {
-            return Some((
-                1000 + name_score + folders_score - depth,
-                name_hl,
-                folders_hl,
-            ));
-        }
-    }
-    let (score, hl) = fuzzy::score(&words.concat(), place)?;
-    Some((score - depth, Vec::new(), hl))
+/// A `$` query, ready to match every file with.
+struct FileQuery {
+    /// The last word: for the file's name.
+    name: Query,
+    /// The words before it: for the folders it's in. `None` if there are none.
+    folders: Option<Query>,
+    /// All of them: for anywhere along its path.
+    anywhere: Query,
 }
 
-/// The best `MAX_RESULTS` files for `query`, best first.
-fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match>) {
-    let words = words(query);
-    let needle: Vec<char> = words
-        .concat()
-        .chars()
-        .flat_map(char::to_lowercase)
-        .collect();
-    if needle.is_empty() {
-        return Default::default();
+impl FileQuery {
+    fn new(query: &str) -> Option<Self> {
+        let words = words(query);
+        let (last, before) = words.split_last()?;
+        Some(Self {
+            name: Query::new(last),
+            folders: (!before.is_empty()).then(|| Query::new(&before.join(" "))),
+            anywhere: Query::new(&words.join(" ")),
+        })
     }
-    let mut found: Vec<(i32, FileHit, Vec<usize>, Vec<usize>)> = Vec::new();
-    for folder in folders {
-        for rel in &folder.files {
-            if !is_subsequence(&needle, folder.name.chars().chain(rel.chars())) {
-                continue;
+
+    /// A file's score, and with `positions`, the matched byte offsets in its
+    /// name and in its place. The last word goes against its name and the
+    /// ones before it against the folders it's in: "palette files",
+    /// `src\main`. Failing that, all of them anywhere along its path (just a
+    /// folder's name, say), which ranks lower. Between equals, the shallower
+    /// file.
+    fn score(&self, place: &str, positions: bool) -> Option<(i32, Vec<usize>, Vec<usize>)> {
+        let (folders, name) = place.split_at(place.rfind('/').map_or(0, |slash| slash + 1));
+        let depth = place.matches('/').count() as i32;
+        if let Some((name_score, name_hl)) = self.name.score(name, Text::Name, positions) {
+            let in_folders = match &self.folders {
+                Some(query) => query.score(folders, Text::Path, positions),
+                None => Some((0, Vec::new())),
+            };
+            if let Some((folders_score, folders_hl)) = in_folders {
+                let score = 1000 + name_score + folders_score - depth;
+                return Some((score, name_hl, folders_hl));
             }
-            let name = rel.rsplit('/').next().unwrap_or(rel);
-            let subtitle = format!("{}/{rel}", folder.name);
-            let Some((score, title_hl, subtitle_hl)) = score_file(&words, name, &subtitle) else {
-                continue;
-            };
-            let path = rel
-                .split('/')
-                .fold(folder.root.clone(), |path, part| path.join(part));
-            let hit = FileHit {
-                root: folder.root.clone(),
-                path,
-                title: name.to_string(),
-                subtitle,
-            };
-            found.push((score, hit, title_hl, subtitle_hl));
         }
+        let (score, hl) = self.anywhere.score(place, Text::Path, positions)?;
+        Some((score - depth, Vec::new(), hl))
     }
-    let best = |a: &(i32, FileHit, Vec<usize>, Vec<usize>),
-                b: &(i32, FileHit, Vec<usize>, Vec<usize>)| {
-        b.0.cmp(&a.0)
-            .then_with(|| a.1.subtitle.len().cmp(&b.1.subtitle.len()))
+}
+
+/// The best `MAX_RESULTS` files for `query`, best first. Every file is
+/// scored, and only those that show get their highlights worked out.
+fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match>) {
+    let Some(query) = FileQuery::new(query) else {
+        return Default::default();
+    };
+    let mut found: Vec<(i32, &FolderFiles, &str)> = folders
+        .iter()
+        .flat_map(|folder| {
+            let query = &query;
+            folder.places.iter().filter_map(move |place| {
+                let (score, ..) = query.score(place, false)?;
+                Some((score, folder.as_ref(), place.as_str()))
+            })
+        })
+        .collect();
+    let best = |a: &(i32, &FolderFiles, &str), b: &(i32, &FolderFiles, &str)| {
+        b.0.cmp(&a.0).then_with(|| a.2.len().cmp(&b.2.len()))
     };
     if found.len() > MAX_RESULTS {
         found.select_nth_unstable_by(MAX_RESULTS, best);
@@ -238,7 +228,17 @@ fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match
     found
         .into_iter()
         .enumerate()
-        .map(|(ix, (_, hit, title_hl, subtitle_hl))| {
+        .map(|(ix, (_, folder, place))| {
+            let (_, title_hl, subtitle_hl) = query.score(place, true).unwrap_or_default();
+            let path = place[folder.rel_at..]
+                .split('/')
+                .fold(folder.root.clone(), |path, part| path.join(part));
+            let hit = FileHit {
+                root: folder.root.clone(),
+                path,
+                title: place.rsplit('/').next().unwrap_or(place).to_string(),
+                subtitle: place.to_string(),
+            };
             let row = Match {
                 ix,
                 title_hl,
@@ -385,8 +385,8 @@ mod tests {
     fn folder(name: &str, files: &[&str]) -> Arc<FolderFiles> {
         Arc::new(FolderFiles {
             root: PathBuf::from("/repos").join(name),
-            name: name.to_string(),
-            files: files.iter().map(|f| f.to_string()).collect(),
+            places: files.iter().map(|f| format!("{name}/{f}")).collect(),
+            rel_at: name.len() + 1,
         })
     }
 
@@ -406,10 +406,9 @@ mod tests {
     }
 
     #[test]
-    fn subsequence_ignores_case() {
-        let needle: Vec<char> = "mrs".chars().collect();
-        assert!(is_subsequence(&needle, "src/Main.RS".chars()));
-        assert!(!is_subsequence(&needle, "src/lib.rs".chars()));
+    fn case_doesnt_matter() {
+        let folders = [folder("app", &["src/Main.RS", "src/lib.rs"])];
+        assert_eq!(places(&folders, "mrs"), ["app/src/Main.RS"]);
     }
 
     #[test]
@@ -458,12 +457,16 @@ mod tests {
         // The highlights: the name in the title, the folders in the path.
         let (_, matches) = search(&folders, "palette files");
         assert_eq!(matches[0].title_hl, [0, 1, 2, 3, 4]);
-        assert_eq!(matches[0].subtitle_hl.len(), "palette".len());
-        assert!(
-            matches[0]
-                .subtitle_hl
-                .iter()
-                .all(|&i| i < "proj/src/palette/".len())
+        // The word together, not the "p" of "proj" and the rest later.
+        assert_eq!(matches[0].subtitle_hl, (9..16).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn words_before_the_name_go_in_any_order() {
+        let folders = [folder("proj", &["src/palette/files.rs", "src/files.rs"])];
+        assert_eq!(
+            places(&folders, "palette src files")[0],
+            "proj/src/palette/files.rs"
         );
     }
 

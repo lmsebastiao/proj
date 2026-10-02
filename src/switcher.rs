@@ -160,7 +160,7 @@ fn stem(path: &Path) -> String {
 
 /// The project a window shows, going by its title: editors put the
 /// folder name there ("proj — main.rs", "main.rs - proj - Visual Studio Code"),
-/// Zed lists a workspace's folders ("app, shared-sdk"), and Visual Studio shows
+/// Zed lists a workspace's folders ("app, sample-sdk"), and Visual Studio shows
 /// the solution name.
 impl EditorWindow {
     /// Index of the project in `projects` this window shows.
@@ -177,7 +177,7 @@ fn project_for(title: &str, process: &str, projects: &[Project]) -> Option<usize
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    // Workspaces first, so "app, shared-sdk" isn't taken for "app" alone.
+    // Workspaces first, so "app, sample-sdk" isn't taken for "app" alone.
     let workspace = projects.iter().position(|project| {
         project.is_workspace()
             && parts.iter().any(|part| {
@@ -255,8 +255,8 @@ mod tests {
             ["main.rs", "api-v2", "Visual Studio Code"]
         );
         assert_eq!(
-            title_parts("TomiManager (Running) - Microsoft Visual Studio"),
-            ["TomiManager", "Microsoft Visual Studio"]
+            title_parts("ExampleManager (Running) - Microsoft Visual Studio"),
+            ["ExampleManager", "Microsoft Visual Studio"]
         );
     }
 
@@ -264,14 +264,14 @@ mod tests {
     fn matches_windows_to_projects() {
         let projects = vec![
             project("app", &["/r/app"]),
-            project("Client", &["/r/interactive-v2"]),
-            project("app + shared-sdk", &["/r/app", "/r/shared-sdk"]),
+            project("Client", &["/r/example-v2"]),
+            project("app + sample-sdk", &["/r/app", "/r/sample-sdk"]),
         ];
         let find = |title: &str| project_for(title, "zed", &projects);
         assert_eq!(find("app — main.rs"), Some(0));
-        assert_eq!(find("interactive-v2 — main.rs"), Some(1), "by folder");
+        assert_eq!(find("example-v2 — main.rs"), Some(1), "by folder");
         assert_eq!(find("Client"), Some(1), "by its custom name");
-        assert_eq!(find("shared-sdk, app — lib.rs"), Some(2), "a Zed workspace");
+        assert_eq!(find("sample-sdk, app — lib.rs"), Some(2), "a Zed workspace");
         assert_eq!(find("main.rs - app - Visual Studio Code"), Some(0));
         assert_eq!(find("empty project"), None);
     }
