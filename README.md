@@ -239,7 +239,10 @@ A folder that is a git repository is copied as git would commit it, so without w
 `.gitignore` leaves out; other folders are copied whole, but for `node_modules`, `target` and
 the like. A git URL is cloned without its history.
 
-Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add project** row; press enter.
+Typing or pasting a folder path (`C:\…`, `~/…`, `/…`) shows an **Add and open** row: enter adds
+it to the list and opens it in the default editor; ctrl-enter (cmd-enter on macOS) just opens it.
+A file path shows an **Open** row: the file opens in the editor of the listed project it's in (so
+it lands in that project's window), or in the default editor.
 
 Pasting a git URL (`https://…`, `ssh://…`, `git@host:owner/repo.git`) shows a **Clone** row.
 Enter runs `git clone` into the first `scan_dirs` folder (or asks for a folder if there are none),

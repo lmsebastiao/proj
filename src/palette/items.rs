@@ -91,6 +91,16 @@ pub(super) enum ProjectAction {
     Remove,
 }
 
+/// A path typed or pasted into the search, to open.
+#[derive(Clone)]
+pub(super) enum PastedPath {
+    /// A folder that isn't listed: enter lists it and opens it, ctrl-enter
+    /// just opens it.
+    Folder(PathBuf),
+    /// A file: it opens, with the listed project it's in, if any.
+    File(PathBuf),
+}
+
 /// A git URL pasted into the search.
 #[derive(Clone)]
 pub(super) struct CloneTarget {

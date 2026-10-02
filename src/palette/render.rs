@@ -729,10 +729,7 @@ impl Palette {
 
     pub(super) fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = self.theme;
-        if self.add_candidate.is_some()
-            || self.clone_candidate.is_some()
-            || self.list() == List::Text
-        {
+        if self.pasted.is_some() || self.clone_candidate.is_some() || self.list() == List::Text {
             return div().flex_1().into_any_element();
         }
         let centered = || {
@@ -1265,11 +1262,20 @@ impl Render for Palette {
             self.render_empty(cx)
         };
 
-        // A pasted folder path or git URL gets a row of its own above the matches.
+        // A pasted path or git URL gets a row of its own above the matches.
+        // A folder that isn't listed yet also says ctrl-enter opens it unlisted.
+        let open_only = matches!(self.pasted, Some(PastedPath::Folder(_)));
+        let icon = match self.pasted {
+            Some(PastedPath::File(_)) => icons::FILE,
+            _ => icons::ADD,
+        };
         let action = self
-            .add_candidate
+            .pasted
             .as_ref()
-            .map(|path| ("Add project", paths::display_path(path)))
+            .map(|pasted| match pasted {
+                PastedPath::Folder(path) => ("Add and open", paths::display_path(path)),
+                PastedPath::File(path) => ("Open", paths::display_path(path)),
+            })
             .or_else(|| {
                 self.clone_candidate.as_ref().map(|target| {
                     let into = match &target.into {
@@ -1302,7 +1308,7 @@ impl Render for Palette {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(glyph(icons::ADD, t.accent)),
+                        .child(glyph(icon, t.accent)),
                 )
                 .child(div().flex_none().text_color(rgb(t.accent)).child(label))
                 .child(
@@ -1315,6 +1321,19 @@ impl Render for Palette {
                         .child(detail),
                 )
                 .child(div().flex_1())
+                .when(open_only, |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(px(SMALL_FONT_SIZE))
+                            .text_color(rgb(t.muted))
+                            .child("Just open")
+                            .child(keycaps(&format!("{}-↵", secondary()), t)),
+                    )
+                })
                 .child(keycaps("↵", t))
         });
 
@@ -1488,7 +1507,9 @@ impl Render for Palette {
                 cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
                     List::OpenWith => this.toggle_project_default(window, cx),
                     List::Group => this.save_ticked(cx),
-                    List::Projects if !this.menu_open() => this.open_with_selected(cx),
+                    List::Projects if this.menu_open() => {}
+                    List::Projects if this.pasted.is_some() => this.open_pasted(false, window, cx),
+                    List::Projects => this.open_with_selected(cx),
                     _ => {}
                 }),
             )

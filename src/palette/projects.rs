@@ -18,7 +18,7 @@ use crate::{
 
 use super::{
     Palette,
-    items::{CloneTarget, List, Mode, PaletteCommand, Target},
+    items::{CloneTarget, List, Mode, PaletteCommand, PastedPath, Target},
     keymap::{AddProjects, CopyPath, OpenRemote, UndoRemove},
 };
 
@@ -616,6 +616,63 @@ impl Palette {
         self.pick(options, window, cx, |this, paths, _, cx| {
             this.add_paths(paths, cx)
         });
+    }
+
+    /// Enter (`add`) or ctrl-enter on a pasted path. A folder opens in the
+    /// default editor, listed first unless it's ctrl-enter; a file opens
+    /// with the listed project it's in, if any, so it lands in its window.
+    pub(super) fn open_pasted(&mut self, add: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pasted) = self.pasted.clone() else {
+            return;
+        };
+        let (path, folders, project) = match pasted {
+            PastedPath::Folder(path) if add => {
+                store::add_manual(&mut self.db, path.clone());
+                self.save(cx);
+                self.reload_projects();
+                self.refilter(cx);
+                let listed = self
+                    .projects
+                    .iter()
+                    .find(|p| !p.is_workspace() && p.path == path)
+                    .cloned();
+                if let Some(project) = listed {
+                    self.open_entry(project, window, cx);
+                }
+                return;
+            }
+            PastedPath::Folder(path) => (path, Vec::new(), None),
+            PastedPath::File(path) => {
+                // The innermost, if projects are inside one another.
+                let project = self
+                    .projects
+                    .iter()
+                    .filter(|p| !p.is_workspace() && path.starts_with(&p.path))
+                    .max_by_key(|p| p.path.components().count())
+                    .cloned();
+                let folders = project.as_ref().map(Project::paths).unwrap_or_default();
+                (path, folders, project)
+            }
+        };
+        let editor = match &project {
+            Some(project) => project.default_editor(&self.config),
+            None => self.config.editor.clone().unwrap_or_default(),
+        };
+        let result = if path.is_dir() {
+            open::open_with(&self.config, &editor, std::slice::from_ref(&path))
+        } else {
+            open::open_file(&self.config, &editor, &folders, &path)
+        };
+        match (project, result) {
+            (Some(project), result) => {
+                self.finish_launch(&project, &Target::Editor(editor), result, window, cx);
+            }
+            (None, Ok(())) => window.remove_window(),
+            (None, Err(err)) => {
+                let program = self.name_of(&editor);
+                self.problem(format!("Failed to launch {program}: {err}"), cx);
+            }
+        }
     }
 
     pub(super) fn add_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {

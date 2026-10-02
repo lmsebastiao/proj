@@ -48,7 +48,9 @@ use crate::{
     update,
 };
 
-use items::{CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, ProjectAction, Target};
+use items::{
+    CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, PastedPath, ProjectAction, Target,
+};
 use keymap::{Confirm, Dismiss};
 use theme::{ROW_GAP, ROW_HEIGHT, Theme};
 
@@ -138,8 +140,8 @@ pub struct Palette {
     update: UpdateState,
     matches: Vec<Match>,
     selected: usize,
-    /// Set when the query is a path to an existing, not-yet-listed folder.
-    add_candidate: Option<PathBuf>,
+    /// Set when the query is a path to a file or a not-yet-listed folder.
+    pasted: Option<PastedPath>,
     /// Set when the query is a git URL.
     clone_candidate: Option<CloneTarget>,
     /// A native file dialog is open; don't treat the lost focus as a dismissal.
@@ -261,7 +263,7 @@ impl Palette {
                 .map_or(UpdateState::Unchecked, |u| u.state.clone()),
             matches: Vec::new(),
             selected: 0,
-            add_candidate: None,
+            pasted: None,
             clone_candidate: None,
             picking: false,
             cloning: false,
@@ -677,15 +679,22 @@ impl Palette {
             self.matches.extend(scored.into_iter().map(|(_, m)| m));
         }
 
-        self.add_candidate = (list == List::Projects && looks_like_path(&query))
+        self.pasted = (list == List::Projects && looks_like_path(&query))
             .then(|| paths::normalize(&query))
             .flatten()
-            .filter(|path| {
-                path.is_dir()
+            .and_then(|path| {
+                if path.is_file() {
+                    Some(PastedPath::File(path))
+                } else if path.is_dir()
                     && !self
                         .projects
                         .iter()
-                        .any(|p| !p.is_workspace() && &p.path == path)
+                        .any(|p| !p.is_workspace() && p.path == path)
+                {
+                    Some(PastedPath::Folder(path))
+                } else {
+                    None
+                }
             });
         self.clone_candidate = (list == List::Projects)
             .then(|| git::clone_name(&query))
@@ -780,9 +789,9 @@ impl Palette {
         if self.menu_open() {
             return self.confirm_menu(window, cx);
         }
-        // A pasted folder or git URL takes enter over the matches below it.
-        if let Some(path) = self.add_candidate.take() {
-            return self.add_paths(vec![path], cx);
+        // A pasted path or git URL takes enter over the matches below it.
+        if self.pasted.is_some() {
+            return self.open_pasted(true, window, cx);
         }
         if let Some(target) = self.clone_candidate.clone() {
             return self.clone_repo(target, window, cx);
