@@ -162,6 +162,10 @@ pub(super) const FONT_SIZE: f32 = 16.;
 pub(super) const SMALL_FONT_SIZE: f32 = 13.5;
 pub(super) const INPUT_FONT_SIZE: f32 = 19.;
 pub(super) const ROW_HEIGHT: f32 = 54.;
+/// The space between two rows of the list.
+pub(super) const ROW_GAP: f32 = 4.;
+/// What the line between the open projects and the rest adds to `ROW_GAP`.
+pub(super) const SECTION_GAP: f32 = 6.;
 pub(super) const FOOTER_HEIGHT: f32 = 40.;
 pub(super) const SEARCH_HEIGHT: f32 = 58.;
 /// The icon at the start of every row, so titles line up from list to list.

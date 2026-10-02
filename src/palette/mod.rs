@@ -12,6 +12,7 @@ mod items;
 mod keymap;
 mod projects;
 mod render;
+mod scrollbar;
 mod shortcuts;
 mod switch;
 mod theme;
@@ -28,8 +29,8 @@ use git::GitStatus;
 use global_hotkey::hotkey::Modifiers;
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, Global, ScrollHandle, ScrollStrategy,
-    SharedString, Subscription, UniformListScrollHandle, Window, prelude::*,
+    App, Context, Entity, FocusHandle, Focusable, Global, ListAlignment, ListState, ScrollHandle,
+    SharedString, Subscription, Window, prelude::*, px,
 };
 
 use crate::{
@@ -49,7 +50,7 @@ use crate::{
 
 use items::{CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, ProjectAction, Target};
 use keymap::{Confirm, Dismiss};
-use theme::{ROW_HEIGHT, Theme};
+use theme::{ROW_GAP, ROW_HEIGHT, Theme};
 
 pub use keymap::bind_keys;
 
@@ -179,7 +180,12 @@ pub struct Palette {
     /// nine projects show their number.
     ctrl_down: bool,
     numbers_shown: bool,
-    scroll: UniformListScrollHandle,
+    list_state: ListState,
+    /// The row the projects without a window open start at, under a line,
+    /// as the list was last told its rows' heights.
+    section: Option<usize>,
+    /// Where on the scrollbar's thumb the mouse took hold of it.
+    scrollbar_grab: Option<f32>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -274,7 +280,10 @@ impl Palette {
             undo: None,
             ctrl_down: false,
             numbers_shown: false,
-            scroll: UniformListScrollHandle::new(),
+            // Every row measured, so wheel scrolling knows the list's full height.
+            list_state: ListState::new(0, ListAlignment::Top, px(ROW_HEIGHT * 4.)).measure_all(),
+            section: None,
+            scrollbar_grab: None,
             _subscriptions: subscriptions,
         };
         // Re-read everything on each open so edits made by hand or via the CLI show up.
@@ -688,7 +697,7 @@ impl Palette {
             });
 
         self.selected = 0;
-        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.reset_list();
         cx.notify();
     }
 
@@ -714,8 +723,10 @@ impl Palette {
             return self.select_in_menu(delta * 6, cx);
         }
         // One less than the list shows, so the row at the edge stays in sight.
-        let height = f32::from(self.scroll.0.borrow().base_handle.bounds().size.height);
-        let page = ((height / ROW_HEIGHT) as usize).saturating_sub(1).max(1);
+        let height = f32::from(self.list_state.viewport_bounds().size.height);
+        let page = ((height / (ROW_HEIGHT + ROW_GAP)) as usize)
+            .saturating_sub(1)
+            .max(1);
         let row = if delta < 0 {
             self.selected.saturating_sub(page)
         } else {
@@ -731,8 +742,7 @@ impl Palette {
             return;
         }
         self.selected = row.min(len - 1);
-        self.scroll
-            .scroll_to_item(self.selected, ScrollStrategy::Center);
+        self.scroll_to_row(self.selected);
         cx.notify();
     }
 
@@ -740,7 +750,7 @@ impl Palette {
     fn select_where(&mut self, f: impl Fn(&Self, usize) -> bool) {
         if let Some(row) = self.matches.iter().position(|m| f(self, m.ix)) {
             self.selected = row;
-            self.scroll.scroll_to_item(row, ScrollStrategy::Center);
+            self.scroll_to_row(row);
         }
     }
 

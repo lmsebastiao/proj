@@ -4,8 +4,7 @@ use std::{cmp::Ordering, ops::Range, path::PathBuf};
 
 use gpui::{
     AnyElement, Context, Div, Focusable, FontWeight, HighlightStyle, KeyDownEvent,
-    ModifiersChangedEvent, MouseButton, StyledText, Window, div, prelude::*, px, rgb, rgba,
-    uniform_list,
+    ModifiersChangedEvent, MouseButton, StyledText, Window, div, list, prelude::*, px, rgb, rgba,
 };
 
 use crate::{input, paths, store, templates::Template};
@@ -16,6 +15,7 @@ use super::{
     app_icon::{self, app_icon},
     items::*,
     keymap::*,
+    scrollbar::LIST_PADDING,
     secondary,
     shortcuts::Shortcut,
     switch::DraggedWindow,
@@ -406,23 +406,24 @@ impl Palette {
                 .children(parts)
         });
         // A line between the projects with a window open and the rest, while
-        // the list shows them all in order.
-        let after_open = is_projects
-            && self.filter_query().is_empty()
-            && row > 0
-            && self.is_open(self.matches[row - 1].ix)
-            && !self.is_open(m.ix);
+        // the list shows them all in order, with a little more space.
+        let starts_section = self.starts_section(row);
 
-        // uniform_list lays each row out on its own, so both levels need an explicit width.
+        // The list lays each row out on its own, so both levels need an explicit width.
+        // Its height is `row_height`'s, which the scrollbar goes by.
         div()
             .w_full()
             .px_2()
+            .pt(px(
+                ROW_GAP / 2. + if starts_section { SECTION_GAP } else { 0. }
+            ))
+            .pb(px(ROW_GAP / 2.))
             .relative()
-            .when(after_open, |d| {
+            .when(starts_section, |d| {
                 d.child(
                     div()
                         .absolute()
-                        .top_0()
+                        .top(px(SECTION_GAP / 2.))
                         .left(px(20.))
                         .right(px(20.))
                         .h(px(1.))
@@ -1241,19 +1242,25 @@ impl Render for Palette {
         if !focus.is_focused(window) && window.is_window_active() {
             window.focus(&focus);
         }
-        let list = if !self.matches.is_empty() {
+        self.sync_list();
+        let rows = if !self.matches.is_empty() {
             let now = store::now();
-            uniform_list(
-                "items",
-                self.matches.len(),
-                cx.processor(move |this, range: Range<usize>, _, cx| {
-                    range.map(|row| this.render_row(row, now, cx)).collect()
-                }),
-            )
-            .track_scroll(self.scroll.clone())
-            .flex_1()
-            .py_1()
-            .into_any_element()
+            div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .child(
+                    list(
+                        self.list_state.clone(),
+                        cx.processor(move |this, row: usize, _, cx| {
+                            this.render_row(row, now, cx).into_any_element()
+                        }),
+                    )
+                    .size_full()
+                    .py(px(LIST_PADDING)),
+                )
+                .children(self.render_scrollbar(cx))
+                .into_any_element()
         } else {
             self.render_empty(cx)
         };
@@ -1540,7 +1547,7 @@ impl Render for Palette {
             .child(self.render_search_bar(cx))
             .children(self.render_banner())
             .children(add_row)
-            .child(list)
+            .child(rows)
             .children(self.render_problem())
             .child(footer)
             .children(backdrop)
