@@ -126,7 +126,7 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.list() == List::Browse {
+        if matches!(self.list(), List::Browse | List::Files) {
             self.launch_entry(target, window, cx);
         } else if let Some(project) = self.selected_project().cloned() {
             self.launch(&project, target, window, cx);
@@ -447,8 +447,8 @@ impl Palette {
     }
 
     pub(super) fn copy_path(&mut self, _: &CopyPath, window: &mut Window, cx: &mut Context<Self>) {
-        let paths: Vec<PathBuf> = match (self.selected_entry(), self.selected_project()) {
-            (Some(entry), _) => vec![entry.path.clone()],
+        let paths: Vec<PathBuf> = match (self.selected_file(), self.selected_project()) {
+            (Some((_, path, _)), _) => vec![path],
             (None, Some(project)) => project.paths(),
             (None, None) => return,
         };

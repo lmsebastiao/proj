@@ -196,6 +196,23 @@ impl Palette {
             .map(|m| &browse.entries[m.ix])
     }
 
+    /// The selected file or folder, while browsing or after `$`: the project
+    /// it's in, its path, and whether it's a folder.
+    pub(super) fn selected_file(&self) -> Option<(Project, PathBuf, bool)> {
+        match self.list() {
+            List::Browse => {
+                let browse = self.browse.as_ref()?;
+                let entry = self.selected_entry()?;
+                Some((browse.project.clone(), entry.path.clone(), entry.is_dir))
+            }
+            List::Files => {
+                let hit = self.selected_hit()?;
+                Some((self.project_of(&hit.root)?, hit.path.clone(), hit.is_dir))
+            }
+            _ => None,
+        }
+    }
+
     /// Opens the selected entry: files in the project's window, folders as their
     /// own workspace; the file manager and terminal use the entry's folder.
     pub(super) fn launch_entry(
@@ -204,11 +221,9 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (Some(browse), Some(entry)) = (self.browse.as_ref(), self.selected_entry()) else {
+        let Some((project, path, is_dir)) = self.selected_file() else {
             return;
         };
-        let project = browse.project.clone();
-        let (path, is_dir) = (entry.path.clone(), entry.is_dir);
         let folder = if is_dir {
             path.as_path()
         } else {

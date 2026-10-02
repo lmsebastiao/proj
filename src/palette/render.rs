@@ -13,6 +13,7 @@ use super::{
     Palette,
     actions::{ActionEntry, MenuKind},
     app_icon::{self, app_icon},
+    files,
     items::*,
     keymap::*,
     scrollbar::{LIST_PADDING, SCROLLBAR_WIDTH, Scrolled},
@@ -215,8 +216,11 @@ impl Palette {
                     }
                 }
             }
-            List::Browse => {
-                let is_dir = self.browse.as_ref().is_some_and(|b| b.entries[ix].is_dir);
+            List::Browse | List::Files => {
+                let is_dir = match self.list() {
+                    List::Browse => self.browse.as_ref().is_some_and(|b| b.entries[ix].is_dir),
+                    _ => self.files.hits[ix].is_dir,
+                };
                 glyph(if is_dir { icons::FOLDER } else { icons::FILE }, t.muted).into_any_element()
             }
             List::Editors | List::OpenWith => match &self.editors[ix] {
@@ -818,11 +822,19 @@ impl Palette {
                 .into_any_element();
         }
         let empty = match self.list() {
-            List::Switch if self.windows.is_empty() => {
-                crate::platform::window_access_hint().unwrap_or("No editor windows are open")
+            List::Switch if self.windows.is_empty() => crate::platform::window_access_hint()
+                .unwrap_or("No editor windows are open")
+                .to_string(),
+            List::Commands => "No commands match".into(),
+            // Still reading: what's missing may be in a folder not read yet.
+            List::Files if self.files.reading > 0 => {
+                format!("Reading the files of {} projects…", self.files.reading)
             }
-            List::Commands => "No commands match",
-            _ => "No matches",
+            List::Files if self.filter_query().is_empty() => {
+                "Type a file or folder name to find it in any project".into()
+            }
+            List::Files => "No files or folders match".into(),
+            _ => "No matches".into(),
         };
         div()
             .flex_1()
@@ -969,6 +981,7 @@ impl Palette {
         let top_level = page.is_none();
         let scope = match self.list() {
             List::Commands => Some("Commands"),
+            List::Files => Some("Files"),
             List::Switch if self.mode == Mode::Projects && self.expanded.is_none() => {
                 Some("Windows")
             }
@@ -1063,6 +1076,15 @@ impl Palette {
             }
             List::Projects => format!("{} projects", self.projects.len()),
             List::Browse => format!("{} items", self.item_count()),
+            List::Files if self.files.reading > 0 => {
+                format!("Reading the files of {} projects…", self.files.reading)
+            }
+            List::Files if self.files.hits.len() >= files::MAX_RESULTS => {
+                format!("The best {} · type more to narrow it", files::MAX_RESULTS)
+            }
+            List::Files if !self.files.hits.is_empty() => {
+                format!("{} found", self.files.hits.len())
+            }
             List::Switch if self.hold.is_some() => "Let go to switch".into(),
             List::Switch => format!("{} windows", self.windows.len()),
             _ => return None,

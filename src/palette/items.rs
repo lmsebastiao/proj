@@ -50,6 +50,8 @@ pub(super) enum List {
     OpenWith,
     Browse,
     Commands,
+    /// `$`: files and folders in every project (`FileSearch::hits`).
+    Files,
     /// Nothing: the search box holds what's being typed (a name, tags, a command).
     Text,
     /// The switcher's rows (`Palette::switch_rows`).
@@ -227,6 +229,10 @@ impl Palette {
                 ),
             },
             List::Commands => self.command_text(self.commands[ix]),
+            List::Files => {
+                let hit = &self.files.hits[ix];
+                (hit.title.clone(), hit.subtitle.clone())
+            }
             // The project's name over the window's title ("proj — main.rs"), or
             // over all its windows' titles; windows of no known project show
             // just their title. A project's own windows, once → opens them up,
@@ -688,7 +694,7 @@ impl Palette {
                 bottom: None,
                 tip: None,
             },
-            List::Commands | List::Text | List::Forges => Meta::NONE,
+            List::Commands | List::Files | List::Text | List::Forges => Meta::NONE,
         }
     }
 
@@ -753,6 +759,7 @@ impl Palette {
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
             List::Commands => self.commands.len(),
+            List::Files => self.files.hits.len(),
             List::Switch => self.switch_rows.len(),
             List::Templates => self.templates.len(),
             List::Forges => super::forges::CHOICES.len(),

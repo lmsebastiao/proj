@@ -258,6 +258,18 @@ impl Palette {
                 ),
                 s(&["esc", "backspace"], "Back to the projects").run(Dismiss),
             ],
+            List::Files => vec![
+                s(&["↵"], "Open in the project's editor (files in its window)")
+                    .footer("Open")
+                    .run(Confirm),
+                s(&["mod-e"], reveal)
+                    .footer(reveal_short)
+                    .run(ShowInFileManager),
+                s(&["mod-t"], "Open a terminal there").run(OpenTerminal),
+                s(&["mod-c"], "Copy the path").run(CopyPath),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc"], "Back to the projects").run(Dismiss),
+            ],
             List::Commands => vec![
                 s(&["↵"], "Run").footer("Run").run(Confirm),
                 s(&["esc"], "Back to the projects")

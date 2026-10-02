@@ -16,7 +16,7 @@ pub enum Template {
 
 /// Folders the copy of a folder that isn't a git repository leaves out: build
 /// output and installed packages. Repositories copy what git would commit.
-const SKIPPED: &[&str] = &[
+pub(crate) const SKIPPED: &[&str] = &[
     ".git",
     "node_modules",
     "target",

@@ -6,6 +6,7 @@ mod actions;
 mod app_icon;
 mod browse;
 mod editor_choice;
+mod files;
 mod forges;
 mod groups;
 mod items;
@@ -48,6 +49,7 @@ use crate::{
     update,
 };
 
+use files::{FILES_PREFIX, FileSearch};
 use items::{
     CloneTarget, EditorOption, List, Match, Mode, PaletteCommand, PastedPath, ProjectAction, Target,
 };
@@ -131,6 +133,8 @@ pub struct Palette {
     git_status: HashMap<PathBuf, GitStatus>,
     /// Projects marked with tab, to open together as one workspace.
     marked: Vec<PathBuf>,
+    /// `$`: the projects' files, as read so far, and what was found in them.
+    files: FileSearch,
     autostart: bool,
     /// The colours in use, from `config.theme` and the system setting.
     theme: Theme,
@@ -255,6 +259,7 @@ impl Palette {
             unsaved: None,
             git_status: HashMap::new(),
             marked: Vec::new(),
+            files: FileSearch::default(),
             autostart: autostart::is_enabled(),
             theme: theme::DARK,
             commands: Vec::new(),
@@ -540,7 +545,9 @@ impl Palette {
         let placeholder = match mode {
             // The rest (pasting a path or git URL…) is under F1.
             Mode::Projects => {
-                format!("Search projects…   > commands · {SWITCH_PREFIX} windows · # tags")
+                format!(
+                    "Search projects…   > commands · {SWITCH_PREFIX} windows · {FILES_PREFIX} files · # tags"
+                )
             }
             Mode::Editors if self.config.editor.is_none() => {
                 "Choose the editor to open projects with…".into()
@@ -600,6 +607,7 @@ impl Palette {
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             // The switcher's list, searchable, without opening it by its shortcut.
             Mode::Projects if self.query.starts_with(SWITCH_PREFIX) => List::Switch,
+            Mode::Projects if self.query.starts_with(FILES_PREFIX) => List::Files,
             Mode::Projects => List::Projects,
         }
     }
@@ -615,10 +623,11 @@ impl Palette {
         self.projects.iter().find(|p| &p.key() == key)
     }
 
-    /// What the list is filtered by: the query without a `>` or `@` in front.
+    /// What the list is filtered by: the query without a `>`, `@` or `$` in front.
     fn filter_query(&self) -> &str {
         match self.list() {
             List::Commands => self.query[1..].trim(),
+            List::Files => self.query[FILES_PREFIX.len_utf8()..].trim(),
             List::Switch if self.mode == Mode::Projects => {
                 self.query[SWITCH_PREFIX.len_utf8()..].trim()
             }
@@ -632,6 +641,13 @@ impl Palette {
         if list != List::Switch && self.expanded.take().is_some() {
             self.arrange_rows();
         }
+        if list == List::Files {
+            self.pasted = None;
+            self.clone_candidate = None;
+            return self.search_files(cx);
+        }
+        // `matches` is about to be another list's.
+        self.files.hits.clear();
         let query = self.filter_query().to_string();
         // Projects: `#tag` words keep the ones tagged with them, by the start of
         // the tag ("#wo" for "work"); the rest of the text is searched as usual.
@@ -821,9 +837,9 @@ impl Palette {
                 self.set_mode(Mode::NewProject, cx);
             }
             List::Forges => self.choose_forge(ix, window, cx),
-            List::Browse => {
-                if let Some(browse) = &self.browse {
-                    let editor = browse.project.default_editor(&self.config);
+            List::Browse | List::Files => {
+                if let Some((project, ..)) = self.selected_file() {
+                    let editor = project.default_editor(&self.config);
                     self.launch_entry(Target::Editor(editor), window, cx);
                 }
             }
@@ -851,7 +867,7 @@ impl Palette {
             return self.close_menu(cx);
         }
         match self.list() {
-            List::Commands => self.set_query("", cx),
+            List::Commands | List::Files => self.set_query("", cx),
             // A project's windows: back to every project's.
             List::Switch if self.expanded.is_some() => {
                 self.leave(cx);
