@@ -1,5 +1,6 @@
-//! `$`: finding a file or folder in every listed project by its name, as
-//! ctrl-p does in an editor, then opening it in its project's editor.
+//! `$`: finding a file in every listed project by its name and the folders
+//! it's in, as ctrl-p does in an editor, then opening it in its project's
+//! editor.
 //!
 //! Each project folder's files come from `git ls-files` (so what `.gitignore`
 //! leaves out stays out), or else a walk that skips build output and
@@ -7,8 +8,8 @@
 //! typed and kept between openings, read again when old.
 
 use std::{
-    collections::{HashMap, HashSet},
-    fs, iter,
+    collections::HashMap,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
@@ -27,7 +28,7 @@ pub(super) const FILES_PREFIX: char = '$';
 /// The most rows a search shows: the best matches.
 pub(super) const MAX_RESULTS: usize = 200;
 /// Where the walk of a folder that isn't a git repository stops.
-const MAX_ENTRIES: usize = 100_000;
+const MAX_FILES: usize = 100_000;
 /// A folder's list is read again after this; the old one shows meanwhile.
 const FRESH_FOR: Duration = Duration::from_secs(60);
 
@@ -37,27 +38,21 @@ type Cache = HashMap<PathBuf, (Arc<FolderFiles>, Instant)>;
 /// Kept between openings of the palette.
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
-/// The files and folders in a project's folder.
+/// The files in a project's folder.
 pub(super) struct FolderFiles {
     root: PathBuf,
     /// The folder's name, in front of the paths shown.
     name: String,
-    entries: Vec<FileEntry>,
-}
-
-struct FileEntry {
     /// From the folder, with `/` between the parts.
-    rel: String,
-    is_dir: bool,
+    files: Vec<String>,
 }
 
-/// A file or folder `$` found.
+/// A file `$` found.
 pub(super) struct FileHit {
     /// The project folder it's in.
     pub(super) root: PathBuf,
     pub(super) path: PathBuf,
-    pub(super) is_dir: bool,
-    /// Its name ("components/" for a folder).
+    /// Its name.
     pub(super) title: String,
     /// Where it is: "proj/src/palette/files.rs".
     pub(super) subtitle: String,
@@ -79,8 +74,11 @@ pub(super) struct FileSearch {
 
 impl FolderFiles {
     fn read(root: PathBuf) -> Self {
-        let entries = match git::listed_files(&root) {
-            Some(files) => with_folders(files),
+        let files = match git::listed_files(&root) {
+            Some(files) => files
+                .into_iter()
+                .map(|file| file.to_string_lossy().replace('\\', "/"))
+                .collect(),
             None => walk(&root),
         };
         Self {
@@ -89,68 +87,39 @@ impl FolderFiles {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.to_string_lossy().into_owned()),
             root,
-            entries,
+            files,
         }
     }
 }
 
-/// Git lists files only: the folders they're in go in too.
-fn with_folders(files: Vec<PathBuf>) -> Vec<FileEntry> {
-    let mut folders: HashSet<String> = HashSet::new();
-    let mut entries = Vec::with_capacity(files.len());
-    for file in files {
-        let rel = file.to_string_lossy().replace('\\', "/");
-        let mut end = rel.len();
-        // Up from the file, until a folder that's in already: so are its parents.
-        while let Some(slash) = rel[..end].rfind('/') {
-            if !folders.insert(rel[..slash].to_string()) {
-                break;
-            }
-            end = slash;
-        }
-        entries.push(FileEntry { rel, is_dir: false });
-    }
-    entries.extend(
-        folders
-            .into_iter()
-            .map(|rel| FileEntry { rel, is_dir: true }),
-    );
-    entries
-}
-
-/// A folder that isn't a repository: everything but build output and
-/// installed packages, up to `MAX_ENTRIES`. Links to folders aren't followed.
-fn walk(root: &Path) -> Vec<FileEntry> {
-    let mut entries = Vec::new();
+/// A folder that isn't a repository: its files but for build output and
+/// installed packages, up to `MAX_FILES`. Links to folders aren't followed.
+fn walk(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            if entries.len() >= MAX_ENTRIES {
-                return entries;
+            if files.len() >= MAX_FILES {
+                return files;
             }
-            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-            let name = entry.file_name();
-            if is_dir
-                && SKIPPED
-                    .iter()
-                    .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s))
-            {
-                continue;
-            }
-            let path = entry.path();
-            let Ok(rel) = path.strip_prefix(root) else {
+            let Ok(kind) = entry.file_type() else {
                 continue;
             };
-            entries.push(FileEntry {
-                rel: rel.to_string_lossy().replace('\\', "/"),
-                is_dir,
-            });
-            if is_dir {
-                dirs.push(path);
+            let path = entry.path();
+            if kind.is_dir() {
+                let name = entry.file_name();
+                if !SKIPPED
+                    .iter()
+                    .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s))
+                {
+                    dirs.push(path);
+                }
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                files.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
     }
-    entries
+    files
 }
 
 /// A folder's list as last read, if it was, and whether it's time to read it again.
@@ -171,8 +140,8 @@ fn read_and_cache(root: PathBuf) -> Arc<FolderFiles> {
     files
 }
 
-/// Whether the characters of `needle` (lowercase, no spaces) come in this
-/// order in `text`: cheap, so most entries are passed over without scoring.
+/// Whether the characters of `needle` (lowercase) come in this order in
+/// `text`: cheap, so most files are passed over without scoring.
 fn is_subsequence(needle: &[char], text: impl Iterator<Item = char>) -> bool {
     let mut want = needle.iter().peekable();
     for c in text {
@@ -186,47 +155,78 @@ fn is_subsequence(needle: &[char], text: impl Iterator<Item = char>) -> bool {
     want.peek().is_none()
 }
 
-/// The best `MAX_RESULTS` matches of `query`: by name first, then by where
-/// they are; between equal names, the shallower one.
+/// The query's words: split at spaces and at `/` or `\`, so a path typed
+/// either way works.
+fn words(query: &str) -> Vec<&str> {
+    query
+        .split(|c: char| c == '/' || c == '\\' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// A file's score, and the matched byte offsets in its name and in where it
+/// is. The last word goes against its name and the ones before it against
+/// the folders it's in, in order: "palette files", `src\main`. Failing that,
+/// all of them anywhere along its path ("srcmain", or just a folder's name),
+/// which ranks lower. Between equals, the shallower file.
+fn score_file(words: &[&str], name: &str, place: &str) -> Option<(i32, Vec<usize>, Vec<usize>)> {
+    let (last, before) = words.split_last()?;
+    let depth = place.matches('/').count() as i32;
+    if let Some((name_score, name_hl)) = fuzzy::score(last, name) {
+        let folders = &place[..place.len() - name.len()];
+        let in_folders = if before.is_empty() {
+            Some((0, Vec::new()))
+        } else {
+            fuzzy::score(&before.concat(), folders)
+        };
+        if let Some((folders_score, folders_hl)) = in_folders {
+            return Some((
+                1000 + name_score + folders_score - depth,
+                name_hl,
+                folders_hl,
+            ));
+        }
+    }
+    let (score, hl) = fuzzy::score(&words.concat(), place)?;
+    Some((score - depth, Vec::new(), hl))
+}
+
+/// The best `MAX_RESULTS` files for `query`, best first.
 fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match>) {
-    let needle: Vec<char> = query
+    let words = words(query);
+    let needle: Vec<char> = words
+        .concat()
         .chars()
-        .filter(|c| !c.is_whitespace())
         .flat_map(char::to_lowercase)
         .collect();
-    let mut found: Vec<(i32, FileHit, fuzzy::ItemMatch)> = Vec::new();
+    if needle.is_empty() {
+        return Default::default();
+    }
+    let mut found: Vec<(i32, FileHit, Vec<usize>, Vec<usize>)> = Vec::new();
     for folder in folders {
-        for entry in &folder.entries {
-            let place = folder.name.chars().chain(iter::once('/'));
-            if !is_subsequence(&needle, place.chain(entry.rel.chars())) {
+        for rel in &folder.files {
+            if !is_subsequence(&needle, folder.name.chars().chain(rel.chars())) {
                 continue;
             }
-            let name = entry.rel.rsplit('/').next().unwrap_or(&entry.rel);
-            let title = if entry.is_dir {
-                format!("{name}/")
-            } else {
-                name.to_string()
-            };
-            let subtitle = format!("{}/{}", folder.name, entry.rel);
-            let depth = entry.rel.matches('/').count() as i32;
-            let Some(m) = fuzzy::score_item(query, &title, &subtitle, -depth) else {
+            let name = rel.rsplit('/').next().unwrap_or(rel);
+            let subtitle = format!("{}/{rel}", folder.name);
+            let Some((score, title_hl, subtitle_hl)) = score_file(&words, name, &subtitle) else {
                 continue;
             };
-            let path = entry
-                .rel
+            let path = rel
                 .split('/')
                 .fold(folder.root.clone(), |path, part| path.join(part));
             let hit = FileHit {
                 root: folder.root.clone(),
                 path,
-                is_dir: entry.is_dir,
-                title,
+                title: name.to_string(),
                 subtitle,
             };
-            found.push((m.score, hit, m));
+            found.push((score, hit, title_hl, subtitle_hl));
         }
     }
-    let best = |a: &(i32, FileHit, _), b: &(i32, FileHit, _)| {
+    let best = |a: &(i32, FileHit, Vec<usize>, Vec<usize>),
+                b: &(i32, FileHit, Vec<usize>, Vec<usize>)| {
         b.0.cmp(&a.0)
             .then_with(|| a.1.subtitle.len().cmp(&b.1.subtitle.len()))
     };
@@ -238,11 +238,11 @@ fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match
     found
         .into_iter()
         .enumerate()
-        .map(|(ix, (_, hit, m))| {
+        .map(|(ix, (_, hit, title_hl, subtitle_hl))| {
             let row = Match {
                 ix,
-                title_hl: m.title_hl,
-                subtitle_hl: m.subtitle_hl,
+                title_hl,
+                subtitle_hl,
             };
             (hit, row)
         })
@@ -382,31 +382,27 @@ impl Palette {
 mod tests {
     use super::*;
 
-    fn folder(name: &str, entries: &[(&str, bool)]) -> Arc<FolderFiles> {
+    fn folder(name: &str, files: &[&str]) -> Arc<FolderFiles> {
         Arc::new(FolderFiles {
             root: PathBuf::from("/repos").join(name),
             name: name.to_string(),
-            entries: entries
-                .iter()
-                .map(|&(rel, is_dir)| FileEntry {
-                    rel: rel.to_string(),
-                    is_dir,
-                })
-                .collect(),
+            files: files.iter().map(|f| f.to_string()).collect(),
         })
     }
 
+    fn places(folders: &[Arc<FolderFiles>], query: &str) -> Vec<String> {
+        search(folders, query)
+            .0
+            .into_iter()
+            .map(|hit| hit.subtitle)
+            .collect()
+    }
+
     #[test]
-    fn git_files_bring_their_folders() {
-        let entries = with_folders(vec!["src/palette/files.rs".into(), "src/main.rs".into()]);
-        let mut folders: Vec<&str> = entries
-            .iter()
-            .filter(|e| e.is_dir)
-            .map(|e| e.rel.as_str())
-            .collect();
-        folders.sort();
-        assert_eq!(folders, ["src", "src/palette"]);
-        assert_eq!(entries.iter().filter(|e| !e.is_dir).count(), 2);
+    fn words_split_at_either_slash() {
+        assert_eq!(words(r"src\palette  files"), ["src", "palette", "files"]);
+        assert_eq!(words("src/main.rs"), ["src", "main.rs"]);
+        assert!(words(r" / \ ").is_empty());
     }
 
     #[test]
@@ -420,36 +416,60 @@ mod tests {
     fn names_rank_above_paths_and_shallow_above_deep() {
         let folders = [folder(
             "app",
-            &[
-                ("src/deep/inner/main.rs", false),
-                ("src/main.rs", false),
-                ("main", true),
-                ("main/other.rs", false),
-            ],
+            &["src/deep/inner/main.rs", "src/main.rs", "main/other.rs"],
         )];
-        let (hits, matches) = search(&folders, "main");
-        let places: Vec<&str> = hits.iter().map(|h| h.subtitle.as_str()).collect();
         assert_eq!(
-            places,
+            places(&folders, "main"),
             [
-                "app/main",
                 "app/src/main.rs",
                 "app/src/deep/inner/main.rs",
                 "app/main/other.rs"
             ]
         );
-        assert_eq!(hits[0].title, "main/");
+        let (hits, matches) = search(&folders, "main");
+        assert_eq!(hits[0].title, "main.rs");
         assert_eq!(matches[0].ix, 0);
-        assert_eq!(hits[1].path, PathBuf::from("/repos/app/src/main.rs"));
+        assert_eq!(hits[0].path, PathBuf::from("/repos/app/src/main.rs"));
+    }
+
+    #[test]
+    fn words_before_the_name_match_its_folders() {
+        let folders = [folder(
+            "proj",
+            &["src/palette/files.rs", "src/files.rs", "docs/palette.md"],
+        )];
+        for query in [
+            "palette files",
+            "palette/files",
+            r"palette\files",
+            r"src\pal\fil",
+        ] {
+            assert_eq!(
+                places(&folders, query)[0],
+                "proj/src/palette/files.rs",
+                "{query}"
+            );
+        }
+        // A folder's name alone finds what's in it, after files named so.
+        assert_eq!(
+            places(&folders, "palette"),
+            ["proj/docs/palette.md", "proj/src/palette/files.rs"]
+        );
+        // The highlights: the name in the title, the folders in the path.
+        let (_, matches) = search(&folders, "palette files");
+        assert_eq!(matches[0].title_hl, [0, 1, 2, 3, 4]);
+        assert_eq!(matches[0].subtitle_hl.len(), "palette".len());
+        assert!(
+            matches[0]
+                .subtitle_hl
+                .iter()
+                .all(|&i| i < "proj/src/palette/".len())
+        );
     }
 
     #[test]
     fn searches_by_project_name_too() {
-        let folders = [
-            folder("web", &[("index.ts", false)]),
-            folder("api", &[("index.ts", false)]),
-        ];
-        let (hits, _) = search(&folders, "api index");
-        assert_eq!(hits[0].subtitle, "api/index.ts");
+        let folders = [folder("web", &["index.ts"]), folder("api", &["index.ts"])];
+        assert_eq!(places(&folders, "api index"), ["api/index.ts"]);
     }
 }

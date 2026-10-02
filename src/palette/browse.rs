@@ -196,8 +196,8 @@ impl Palette {
             .map(|m| &browse.entries[m.ix])
     }
 
-    /// The selected file or folder, while browsing or after `$`: the project
-    /// it's in, its path, and whether it's a folder.
+    /// The selected file or folder while browsing, or file after `$`: the
+    /// project it's in, its path, and whether it's a folder.
     pub(super) fn selected_file(&self) -> Option<(Project, PathBuf, bool)> {
         match self.list() {
             List::Browse => {
@@ -207,7 +207,7 @@ impl Palette {
             }
             List::Files => {
                 let hit = self.selected_hit()?;
-                Some((self.project_of(&hit.root)?, hit.path.clone(), hit.is_dir))
+                Some((self.project_of(&hit.root)?, hit.path.clone(), false))
             }
             _ => None,
         }

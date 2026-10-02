@@ -216,13 +216,11 @@ impl Palette {
                     }
                 }
             }
-            List::Browse | List::Files => {
-                let is_dir = match self.list() {
-                    List::Browse => self.browse.as_ref().is_some_and(|b| b.entries[ix].is_dir),
-                    _ => self.files.hits[ix].is_dir,
-                };
+            List::Browse => {
+                let is_dir = self.browse.as_ref().is_some_and(|b| b.entries[ix].is_dir);
                 glyph(if is_dir { icons::FOLDER } else { icons::FILE }, t.muted).into_any_element()
             }
+            List::Files => glyph(icons::FILE, t.muted).into_any_element(),
             List::Editors | List::OpenWith => match &self.editors[ix] {
                 EditorOption::Detected(editor) => {
                     program_icon(editor.app.clone(), icons::PROGRAM, t)
@@ -831,9 +829,9 @@ impl Palette {
                 format!("Reading the files of {} projects…", self.files.reading)
             }
             List::Files if self.filter_query().is_empty() => {
-                "Type a file or folder name to find it in any project".into()
+                "Type part of a file's name, and of its folders if you like (src/main)".into()
             }
-            List::Files => "No files or folders match".into(),
+            List::Files => "No files match".into(),
             _ => "No matches".into(),
         };
         div()

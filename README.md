@@ -90,8 +90,8 @@ the default editor, theme, open the config file, remove missing projects (when s
 check for updates / install update (installed copies), quit.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
 keep typing to filter it, enter switches, esc goes back to the projects.
-Type `$` and part of a file or folder name to find it in any of your projects, as ctrl-p
-does in an editor (see Finding files).
+Type `$` and part of a file's name to find it in any of your projects, as ctrl-p does in an
+editor (see Finding files).
 
 The dialog follows Windows' light/dark app setting, switching live when Windows does. `>`
 **Theme** goes through system → light → dark and saves the choice as `theme` in config.toml.
@@ -108,11 +108,13 @@ copies its path. Nothing you browse is added to the project list.
 
 ### Finding files
 
-Type **`$`** and then part of a name (`$button`, `$api index`) to search every listed project's
-files and folders at once. Names that match come first, the ones nearer the top of their
-project before deeper ones; the project's name works in the search too (`$web readme`). Enter
-opens it as in browsing: a file in its project's editor and window, a folder as its own
-workspace. **ctrl-e**, **ctrl-t** and **ctrl-c** work there too.
+Type **`$`** and then part of a file's name (`$button`) to search every listed project's files
+at once. Words before the name narrow it by the folders it's in, the project's included,
+split by spaces or either slash: `$palette files`, `$src/main`, `$web\src\index`. A folder's
+name alone (`$components`) lists what's in it, after any files named like it. Files whose
+name matches come first, the ones nearer the top of their project before deeper ones. Enter
+opens the file in its project's editor and window, as in browsing; **ctrl-e**, **ctrl-t** and
+**ctrl-c** work there too.
 
 Repositories list what git does, so what `.gitignore` leaves out (build output, packages)
 stays out. Other folders leave out `node_modules`, `target` and the like. The lists are read
