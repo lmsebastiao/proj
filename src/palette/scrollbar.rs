@@ -1,21 +1,41 @@
-//! Where the list's rows sit, and its scrollbar.
+//! Where the list's rows sit, and the scrollbars of the list and the menu.
 
 use gpui::{
-    Context, DragMoveEvent, Empty, ListOffset, MouseButton, MouseDownEvent, Render, Window, div,
-    prelude::*, px, rgb,
+    Context, DragMoveEvent, Empty, ListOffset, MouseButton, MouseDownEvent, Pixels, Render, Window,
+    div, point, prelude::*, px, rgb,
 };
 
 use super::{Palette, items::List, theme::*};
 
 /// The list's padding above its first row and below its last.
 pub(super) const LIST_PADDING: f32 = 2.;
+/// The space a scrollbar takes at the right edge.
+pub(super) const SCROLLBAR_WIDTH: f32 = THUMB_WIDTH + 2.;
 const THUMB_WIDTH: f32 = 6.;
 const MIN_THUMB_HEIGHT: f32 = 24.;
-/// The space between the scrollbar and the list's top and bottom.
+/// The space between a scrollbar and the top and bottom of what it scrolls.
 const INSET: f32 = 4.;
 
-/// A drag of the scrollbar. Where the thumb was taken hold of is on the palette.
-pub(super) struct ScrollbarDrag;
+/// What a scrollbar scrolls.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Scrolled {
+    /// The main list.
+    List,
+    /// The actions menu (ctrl-k).
+    Menu,
+}
+
+impl Scrolled {
+    fn name(self) -> &'static str {
+        match self {
+            Scrolled::List => "list-scrollbar",
+            Scrolled::Menu => "menu-scrollbar",
+        }
+    }
+}
+
+/// A drag of a scrollbar. Where the thumb was taken hold of is on the palette.
+pub(super) struct ScrollbarDrag(Scrolled);
 
 impl Render for ScrollbarDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -23,7 +43,21 @@ impl Render for ScrollbarDrag {
     }
 }
 
-/// The scrollbar's thumb, down its track.
+/// How much there is to scroll, how much shows, and how far it's scrolled.
+#[derive(Clone, Copy, PartialEq)]
+struct Extent {
+    viewport: f32,
+    content: f32,
+    scroll: f32,
+}
+
+impl Extent {
+    fn max_scroll(self) -> f32 {
+        (self.content - self.viewport).max(0.)
+    }
+}
+
+/// A scrollbar's thumb, down its track.
 struct Thumb {
     top: f32,
     height: f32,
@@ -126,17 +160,57 @@ impl Palette {
         self.scroll_list_to(middle - self.viewport_height() / 2.);
     }
 
-    /// None while every row fits.
-    fn thumb(&self) -> Option<Thumb> {
-        let viewport = self.viewport_height();
-        let content = self.content_height();
+    fn extent(&self, of: Scrolled) -> Extent {
+        match of {
+            Scrolled::List => Extent {
+                viewport: self.viewport_height(),
+                content: self.content_height(),
+                scroll: self.scroll_top(),
+            },
+            Scrolled::Menu => {
+                let handle = &self.actions_scroll;
+                let viewport = f32::from(handle.bounds().size.height);
+                Extent {
+                    viewport,
+                    content: viewport + f32::from(handle.max_offset().height),
+                    scroll: -f32::from(handle.offset().y),
+                }
+            }
+        }
+    }
+
+    /// The top of what `of` scrolls, in the window.
+    fn scrolled_top(&self, of: Scrolled) -> Pixels {
+        match of {
+            Scrolled::List => self.list_state.viewport_bounds().top(),
+            Scrolled::Menu => self.actions_scroll.bounds().top(),
+        }
+    }
+
+    fn scroll_to_y(&self, of: Scrolled, y: f32) {
+        match of {
+            Scrolled::List => self.scroll_list_to(y),
+            Scrolled::Menu => {
+                let y = y.clamp(0., self.extent(of).max_scroll());
+                self.actions_scroll.set_offset(point(px(0.), px(-y)));
+            }
+        }
+    }
+
+    /// None while everything fits.
+    fn thumb(&self, of: Scrolled) -> Option<Thumb> {
+        let Extent {
+            viewport,
+            content,
+            scroll,
+        } = self.extent(of);
         if viewport <= 0. || content <= viewport {
             return None;
         }
         let track = viewport - 2. * INSET;
         let height = (track * viewport / content).clamp(MIN_THUMB_HEIGHT.min(track), track);
         let travel = track - height;
-        let top = travel * (self.scroll_top() / self.max_scroll()).clamp(0., 1.);
+        let top = travel * (scroll / (content - viewport)).clamp(0., 1.);
         Some(Thumb {
             top,
             height,
@@ -144,50 +218,80 @@ impl Palette {
         })
     }
 
+    /// Whether `of` has a scrollbar, so what it scrolls can keep clear of it.
+    pub(super) fn has_scrollbar(&self, of: Scrolled) -> bool {
+        self.thumb(of).is_some()
+    }
+
     /// Puts the point of the thumb held by the mouse at `y` down the track.
-    fn drag_scrollbar(&mut self, y: f32, cx: &mut Context<Self>) {
-        let (Some(grab), Some(thumb)) = (self.scrollbar_grab, self.thumb()) else {
+    fn drag_scrollbar(&mut self, of: Scrolled, y: f32, cx: &mut Context<Self>) {
+        let (Some(grab), Some(thumb)) = (self.scrollbar_grab, self.thumb(of)) else {
             return;
         };
         if thumb.travel > 0. {
-            self.scroll_list_to((y - grab) / thumb.travel * self.max_scroll());
+            let max = self.extent(of).max_scroll();
+            self.scroll_to_y(of, (y - grab) / thumb.travel * max);
             cx.notify();
         }
     }
 
-    /// Over the right edge of the list, in the space beside the rows.
-    pub(super) fn render_scrollbar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    /// Over the right edge of what `of` scrolls, which keeps that space clear.
+    pub(super) fn render_scrollbar(
+        &self,
+        of: Scrolled,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
+        // The scrollbar goes by the last layout; when the one about to be
+        // done changes it (new rows, the menu just opened), draw it again.
+        let drawn = self.extent(of);
+        let this = cx.entity().downgrade();
+        window.on_next_frame(move |_, cx| {
+            this.update(cx, |this, cx| {
+                if this.extent(of) != drawn {
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+
         let t = self.theme;
-        let thumb = self.thumb()?;
+        let thumb = self.thumb(of)?;
         let (top, height) = (thumb.top, thumb.height);
+        let group = of.name();
         Some(
             div()
-                .id("scrollbar")
-                .group("scrollbar")
+                .id(group)
+                .group(group)
                 .absolute()
                 .top(px(INSET))
                 .bottom(px(INSET))
                 .right_0()
-                .w(px(THUMB_WIDTH + 2.))
+                .w(px(SCROLLBAR_WIDTH))
                 // On the thumb: it moves with the mouse from where it was
                 // taken hold of. Elsewhere: its middle jumps there first.
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        let track_top = this.list_state.viewport_bounds().top() + px(INSET);
+                        let track_top = this.scrolled_top(of) + px(INSET);
                         let y = f32::from(event.position.y - track_top);
                         let on_thumb = (top..top + height).contains(&y);
                         this.scrollbar_grab = Some(if on_thumb { y - top } else { height / 2. });
-                        this.drag_scrollbar(y, cx);
+                        this.drag_scrollbar(of, y, cx);
                     }),
                 )
-                .on_drag(ScrollbarDrag, |_, _, _, cx| cx.new(|_| ScrollbarDrag))
-                .on_drag_move(
-                    cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, _, cx| {
-                        let y = f32::from(event.event.position.y - event.bounds.top());
-                        this.drag_scrollbar(y, cx);
-                    }),
-                )
+                .on_drag(ScrollbarDrag(of), move |_, _, _, cx| {
+                    cx.new(|_| ScrollbarDrag(of))
+                })
+                // Every scrollbar hears every drag; each moves for its own.
+                .on_drag_move(cx.listener(
+                    move |this, event: &DragMoveEvent<ScrollbarDrag>, _, cx| {
+                        if event.drag(cx).0 == of {
+                            let y = f32::from(event.event.position.y - event.bounds.top());
+                            this.drag_scrollbar(of, y, cx);
+                        }
+                    },
+                ))
                 .child(
                     div()
                         .absolute()
@@ -197,7 +301,7 @@ impl Palette {
                         .h(px(height))
                         .rounded_full()
                         .bg(rgb(t.border))
-                        .group_hover("scrollbar", |s| s.bg(rgb(t.muted))),
+                        .group_hover(group, |s| s.bg(rgb(t.muted))),
                 ),
         )
     }

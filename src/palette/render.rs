@@ -15,7 +15,7 @@ use super::{
     app_icon::{self, app_icon},
     items::*,
     keymap::*,
-    scrollbar::LIST_PADDING,
+    scrollbar::{LIST_PADDING, SCROLLBAR_WIDTH, Scrolled},
     secondary,
     shortcuts::Shortcut,
     switch::DraggedWindow,
@@ -563,12 +563,18 @@ impl Palette {
     /// PowerToys' Command Palette: its own search box, then one-line rows
     /// with an icon under section headings. A plain list rather than a
     /// `uniform_list`, as the headings make rows differ in height.
-    fn render_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let t = self.theme;
         let highlight = HighlightStyle {
             color: Some(rgb(t.accent).into()),
             font_weight: Some(FontWeight::BOLD),
             ..Default::default()
+        };
+        // Rows stop short of the scrollbar, when there is one.
+        let right = if self.has_scrollbar(Scrolled::Menu) {
+            SCROLLBAR_WIDTH
+        } else {
+            4.
         };
         let mut entries: Vec<AnyElement> = self
             .action_entries()
@@ -607,7 +613,8 @@ impl Palette {
                     div()
                         .id(("action", row))
                         .relative()
-                        .mx_1()
+                        .ml_1()
+                        .mr(px(right))
                         .px_3()
                         .h(px(32.))
                         .flex_none()
@@ -715,15 +722,24 @@ impl Palette {
             )
             .child(
                 div()
-                    .id("actions")
+                    .relative()
                     .flex_shrink()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.actions_scroll)
-                    .py_1()
                     .flex()
                     .flex_col()
-                    .children(entries),
+                    .child(
+                        div()
+                            .id("actions")
+                            .flex_shrink()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.actions_scroll)
+                            .py_1()
+                            .flex()
+                            .flex_col()
+                            .children(entries),
+                    )
+                    .children(self.render_scrollbar(Scrolled::Menu, window, cx)),
             )
     }
 
@@ -1256,7 +1272,7 @@ impl Render for Palette {
                     .size_full()
                     .py(px(LIST_PADDING)),
                 )
-                .children(self.render_scrollbar(cx))
+                .children(self.render_scrollbar(Scrolled::List, window, cx))
                 .into_any_element()
         } else {
             self.render_empty(cx)
@@ -1363,7 +1379,7 @@ impl Render for Palette {
                         MouseButton::Right,
                         cx.listener(|this, _, _, cx| this.close_menu(cx)),
                     ),
-                self.render_menu(cx),
+                self.render_menu(window, cx),
             )
         });
         let (backdrop, menu) = match menu {
