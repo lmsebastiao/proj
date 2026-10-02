@@ -389,6 +389,74 @@ pub fn listed_files(dir: &Path) -> Option<Vec<PathBuf>> {
     )
 }
 
+/// A repository's files for searching, relative to `dir`: `listed_files`,
+/// but with the repositories inside it (submodules, and ones never added)
+/// listed file by file under their folder, which git lists as one entry
+/// each. Those `skip` says are searched on their own are left out; so is
+/// a submodule that isn't checked out. `None` if `dir` isn't a repository.
+pub fn searched_files(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> Option<Vec<PathBuf>> {
+    git_dir(dir)?;
+    let tracked = ls_files(dir, &["--stage"])?;
+    let untracked = ls_files(dir, &["--others", "--exclude-standard"])?;
+    let (mut files, repositories) = split_repositories(&tracked, &untracked);
+    for repository in repositories {
+        let inside = dir.join(&repository);
+        if skip(&inside) {
+            continue;
+        }
+        if let Some(theirs) = searched_files(&inside, skip) {
+            files.extend(theirs.into_iter().map(|file| repository.join(file)));
+        }
+    }
+    Some(files)
+}
+
+/// What `git ls-files -z` with `options` prints in `dir`.
+fn ls_files(dir: &Path, options: &[&str]) -> Option<String> {
+    let mut command = Command::new("git");
+    command
+        .args(["ls-files", "-z"])
+        .args(options)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    hide_window(&mut command);
+    let output = command.output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Files and repositories from `ls-files --stage` (`tracked`: "mode hash
+/// stage\tpath", a submodule's mode being 160000) and `--others`
+/// (`untracked`: a repository inside ends with "/").
+fn split_repositories(tracked: &str, untracked: &str) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut repositories = Vec::new();
+    for entry in tracked.split('\0').filter(|e| !e.is_empty()) {
+        let Some((info, path)) = entry.split_once('\t') else {
+            continue;
+        };
+        if info.starts_with("160000 ") {
+            repositories.push(PathBuf::from(path));
+        // A file with a merge conflict is listed once per side.
+        } else if files
+            .last()
+            .is_none_or(|last| last.as_path() != Path::new(path))
+        {
+            files.push(PathBuf::from(path));
+        }
+    }
+    for path in untracked.split('\0').filter(|e| !e.is_empty()) {
+        match path.strip_suffix('/') {
+            Some(repository) => repositories.push(PathBuf::from(repository)),
+            None => files.push(PathBuf::from(path)),
+        }
+    }
+    (files, repositories)
+}
+
 fn run_clone(url: &str, dest: &Path, options: &[&str]) -> io::Result<()> {
     let mut command = Command::new("git");
     command
@@ -438,6 +506,51 @@ fn clone_error(stderr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repositories_inside_are_told_from_files() {
+        let tracked = "100644 aa 0\tsrc/main.rs\0\
+                       160000 bb 0\tcrates/shared-sdk-rs\0\
+                       100644 cc 1\tconflict.rs\0\
+                       100644 dd 2\tconflict.rs\0\
+                       100644 ee 3\tconflict.rs\0";
+        let untracked = "notes.md\0vendor/lib/\0";
+        let (files, repositories) = split_repositories(tracked, untracked);
+        let files: Vec<&str> = files.iter().map(|f| f.to_str().unwrap()).collect();
+        assert_eq!(files, ["src/main.rs", "conflict.rs", "notes.md"]);
+        let repositories: Vec<&str> = repositories.iter().map(|r| r.to_str().unwrap()).collect();
+        assert_eq!(repositories, ["crates/shared-sdk-rs", "vendor/lib"]);
+    }
+
+    /// With git installed: a repository inside another lists its files
+    /// under its folder, unless it's skipped.
+    #[test]
+    fn searched_files_go_into_repositories_inside() {
+        let git = |dir: &Path, args: &[&str]| {
+            Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        };
+        let root = std::env::temp_dir().join(format!("proj-searched-{}", std::process::id()));
+        let inner = root.join("crates").join("inner");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&inner).unwrap();
+        if !git(&root, &["init", "-q"]) || !git(&inner, &["init", "-q"]) {
+            return; // No git here.
+        }
+        fs::write(root.join("main.rs"), "").unwrap();
+        fs::write(inner.join("lib.rs"), "").unwrap();
+
+        let mut found = searched_files(&root, &|_| false).unwrap();
+        found.sort();
+        let lib = PathBuf::from("crates/inner").join("lib.rs");
+        assert_eq!(found, [lib, PathBuf::from("main.rs")]);
+        let skipped = searched_files(&root, &|path| path == inner).unwrap();
+        assert_eq!(skipped, [PathBuf::from("main.rs")]);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn clone_urls_and_folder_names() {

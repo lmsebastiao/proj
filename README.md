@@ -125,7 +125,10 @@ opens the file in its project's editor and window, as in browsing; **ctrl-e**, *
 **ctrl-c** work there too.
 
 Repositories list what git does, so what `.gitignore` leaves out (build output, packages)
-stays out. Other folders leave out `node_modules`, `target` and the like. The lists are read
+stays out. Other folders leave out `node_modules`, `target` and the like. Submodules, and
+repositories inside a project that were never added to it, are searched as part of it. A
+project inside another one that's in your list too (a submodule, or just a folder) keeps its
+files to itself, so each file shows once, under the innermost project. The lists are read
 in the background the first time you type `$`, and kept, then read again when a minute old.
 The best 200 matches show.
 
@@ -193,7 +196,11 @@ ticked ones together once; **ctrl-enter** saves them as a group, a row of its ow
 with its own history, editor, tags and commands, so next time you just search for it.
 Ticking the same projects in another order finds the same group.
 
-A group's row has a folder icon with how many folders it has, and its folders' names under
+A group is named after its first folder, `example-v2 Workspace`, as everything it does goes
+by that folder (its repository pages, terminal, file manager). Groups that start with the same
+folder add their others: `example-v2 Workspace (sample-sdk)`. So searching `sample` finds the
+`sample-sdk` project first, above the groups it's in, which follow since their folders still
+match. A group's row has a folder icon with how many folders it has, and its folders' names under
 its name, each with a green dot when that project has a window of its own open. Its branches
 show on the right; hovering them lists each folder's branch and changes. ctrl-k on a group →
 **Folders…** opens the same page with its folders ticked, to add, take out or reorder them;

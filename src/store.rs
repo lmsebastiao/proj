@@ -48,7 +48,8 @@ pub struct Db {
 #[derive(Debug, Clone, Default)]
 pub struct Project {
     /// Folder name (plus its parent when several projects share it), or
-    /// "a + b" for a workspace.
+    /// "a Workspace" for a workspace (plus its other folders when several
+    /// start with the same one).
     pub name: String,
     /// The folder, or a workspace's first folder.
     pub path: PathBuf,
@@ -275,13 +276,16 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-/// A group's name until it's renamed: "app + sample-sdk".
+/// A group's name until it's renamed: its first folder's, as everything it
+/// does goes by that folder (its git pages, terminal…): "app Workspace".
+/// Not the other folders', so that
+/// searching for one of those finds that project before each group it's in;
+/// they show under the name, and the search still finds them there.
 fn group_name(paths: &[PathBuf]) -> String {
     paths
-        .iter()
-        .map(|p| folder_name(p))
-        .collect::<Vec<_>>()
-        .join(" + ")
+        .first()
+        .map(|first| format!("{} Workspace", folder_name(first)))
+        .unwrap_or_default()
 }
 
 /// The folders' key whatever their order, to tell groups apart.
@@ -304,17 +308,31 @@ pub fn saved_group<'a>(db: &'a Db, paths: &[PathBuf]) -> Option<&'a Vec<PathBuf>
     db.workspaces.iter().find(|group| set_key(group) == key)
 }
 
-/// Appends the parent folder to names shared by several projects: "app (client)".
+/// Tells apart names shared by several entries: a project gets its parent
+/// folder, "app (client)"; a group its other folders, "app Workspace
+/// (shared-sdk)", when several start with the same folder.
 fn disambiguate(projects: &mut [Project]) {
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    for project in projects.iter().filter(|p| !p.is_workspace()) {
-        *counts.entry(project.name.to_lowercase()).or_default() += 1;
+    let mut counts: HashMap<(bool, String), usize> = HashMap::new();
+    for project in projects.iter() {
+        let name = (project.is_workspace(), project.name.to_lowercase());
+        *counts.entry(name).or_default() += 1;
     }
-    for project in projects.iter_mut().filter(|p| !p.is_workspace()) {
-        if counts[&project.name.to_lowercase()] > 1
-            && let Some(parent) = project.path.parent().and_then(Path::file_name)
-        {
-            project.name = format!("{} ({})", project.name, parent.to_string_lossy());
+    for project in projects.iter_mut() {
+        if counts[&(project.is_workspace(), project.name.to_lowercase())] < 2 {
+            continue;
+        }
+        let tell = if project.is_workspace() {
+            let others: Vec<String> = project.extra.iter().map(|p| folder_name(p)).collect();
+            Some(others.join(" + "))
+        } else {
+            project
+                .path
+                .parent()
+                .and_then(Path::file_name)
+                .map(|parent| parent.to_string_lossy().into_owned())
+        };
+        if let Some(tell) = tell {
+            project.name = format!("{} ({tell})", project.name);
         }
     }
 }
@@ -647,7 +665,7 @@ mod tests {
         let projects = collect(&config, &db);
         assert_eq!(projects.len(), 3);
         let workspace = &projects[0];
-        assert_eq!(workspace.name, "example-v2 + sample-sdk");
+        assert_eq!(workspace.name, "example-v2 Workspace");
         assert_eq!(workspace.paths(), [app.clone(), sdk.clone()]);
         assert_eq!(workspace.key(), key);
         assert!(workspace.is_workspace());
@@ -746,6 +764,39 @@ mod tests {
         app.manual = false;
         forget_entry(&mut db, &app);
         assert!(db.hidden.contains(&PathBuf::from("/a/app")));
+    }
+
+    /// Groups go by their first folder, so searching for a folder they share
+    /// finds that project first; those starting alike add their others.
+    #[test]
+    fn groups_are_named_after_their_first_folder() {
+        let group = |paths: &[&str]| {
+            let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+            unsaved_group(paths, &Db::default())
+        };
+        let mut entries = vec![
+            group(&["/r/web", "/r/shared-sdk"]),
+            group(&["/r/web", "/r/docs", "/r/shared-sdk"]),
+            group(&["/r/api", "/r/shared-sdk"]),
+            Project {
+                name: "web".into(),
+                path: "/r/web".into(),
+                ..Project::default()
+            },
+        ];
+        assert_eq!(entries[2].name, "api Workspace");
+        disambiguate(&mut entries);
+        let names: Vec<&str> = entries.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "web Workspace (shared-sdk)",
+                "web Workspace (docs + shared-sdk)",
+                "api Workspace",
+                // A project and a group don't clash.
+                "web",
+            ]
+        );
     }
 
     #[test]

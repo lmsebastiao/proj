@@ -79,13 +79,25 @@ pub(super) struct FileSearch {
 }
 
 impl FolderFiles {
-    fn read(root: PathBuf) -> Self {
-        let files = match git::listed_files(&root) {
-            Some(files) => files
-                .into_iter()
-                .map(|file| file.to_string_lossy().replace('\\', "/"))
-                .collect(),
-            None => walk(&root),
+    /// `nested`: the listed projects inside `root`. Their files are theirs,
+    /// shown once under their own name, so they're left out here, whether
+    /// they're submodules, repositories never added, or plain folders.
+    fn read(root: PathBuf, nested: &[PathBuf]) -> Self {
+        let is_nested = |path: &Path| nested.iter().any(|n| n == path);
+        let files = match git::searched_files(&root, &is_nested) {
+            Some(files) => {
+                let inside: Vec<&Path> = nested
+                    .iter()
+                    .filter_map(|n| n.strip_prefix(&root).ok())
+                    .collect();
+                files
+                    .into_iter()
+                    // A folder of this repository that's listed on its own.
+                    .filter(|file| !inside.iter().any(|n| file.starts_with(n)))
+                    .map(|file| file.to_string_lossy().replace('\\', "/"))
+                    .collect()
+            }
+            None => walk(&root, &is_nested),
         };
         let name = root
             .file_name()
@@ -99,9 +111,10 @@ impl FolderFiles {
     }
 }
 
-/// A folder that isn't a repository: its files but for build output and
-/// installed packages, up to `MAX_FILES`. Links to folders aren't followed.
-fn walk(root: &Path) -> Vec<String> {
+/// A folder that isn't a repository: its files but for build output,
+/// installed packages and the folders `skip` says are searched on their
+/// own, up to `MAX_FILES`. Links to folders aren't followed.
+fn walk(root: &Path, skip: &dyn Fn(&Path) -> bool) -> Vec<String> {
     let mut files = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
@@ -115,10 +128,10 @@ fn walk(root: &Path) -> Vec<String> {
             let path = entry.path();
             if kind.is_dir() {
                 let name = entry.file_name();
-                if !SKIPPED
+                let skipped = SKIPPED
                     .iter()
-                    .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s))
-                {
+                    .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s));
+                if !skipped && !skip(&path) {
                     dirs.push(path);
                 }
             } else if let Ok(rel) = path.strip_prefix(root) {
@@ -138,8 +151,8 @@ fn cached(root: &Path) -> (Option<Arc<FolderFiles>>, bool) {
     }
 }
 
-fn read_and_cache(root: PathBuf) -> Arc<FolderFiles> {
-    let files = Arc::new(FolderFiles::read(root.clone()));
+fn read_and_cache(root: PathBuf, nested: Vec<PathBuf>) -> Arc<FolderFiles> {
+    let files = Arc::new(FolderFiles::read(root.clone(), &nested));
     CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -272,20 +285,27 @@ impl Palette {
             return;
         }
         self.files.started = true;
+        let roots = self.search_roots();
         let mut due = Vec::new();
-        for root in self.search_roots() {
-            let (files, stale) = cached(&root);
+        for root in &roots {
+            let (files, stale) = cached(root);
             self.files.folders.extend(files);
             if stale {
-                due.push(root);
+                // Each file goes with the innermost project it's in.
+                let nested: Vec<PathBuf> = roots
+                    .iter()
+                    .filter(|other| *other != root && other.starts_with(root))
+                    .cloned()
+                    .collect();
+                due.push((root.clone(), nested));
             }
         }
         self.files.reading = due.len();
         let reads: Vec<_> = due
             .into_iter()
-            .map(|root| {
+            .map(|(root, nested)| {
                 cx.background_executor()
-                    .spawn(async move { read_and_cache(root) })
+                    .spawn(async move { read_and_cache(root, nested) })
             })
             .collect();
         cx.spawn(async move |this, cx| {
@@ -468,6 +488,44 @@ mod tests {
             places(&folders, "palette src files")[0],
             "proj/src/palette/files.rs"
         );
+    }
+
+    /// A project inside another shows its files once, under its own name:
+    /// the outer one leaves them out, in a repository or not.
+    #[test]
+    fn projects_inside_keep_their_own_files() {
+        let root = std::env::temp_dir().join(format!("proj-nested-{}", std::process::id()));
+        let inner = root.join("packages").join("app");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(root.join("README.md"), "").unwrap();
+        fs::write(inner.join("index.ts"), "").unwrap();
+        let rels = |files: &FolderFiles| -> Vec<String> {
+            let mut rels: Vec<String> = files
+                .places
+                .iter()
+                .map(|place| place[files.rel_at..].to_string())
+                .collect();
+            rels.sort();
+            rels
+        };
+
+        // Not a repository: walked.
+        let alone = FolderFiles::read(root.clone(), &[]);
+        assert_eq!(rels(&alone), ["README.md", "packages/app/index.ts"]);
+        let outer = FolderFiles::read(root.clone(), std::slice::from_ref(&inner));
+        assert_eq!(rels(&outer), ["README.md"]);
+
+        // A repository, the inner project a plain folder of it.
+        let git_init = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status();
+        if git_init.is_ok_and(|s| s.success()) {
+            let outer = FolderFiles::read(root.clone(), std::slice::from_ref(&inner));
+            assert_eq!(rels(&outer), ["README.md"]);
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
