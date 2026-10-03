@@ -21,6 +21,10 @@ use super::{
     theme::{FONT_SIZE, ROW_HEIGHT, Theme},
 };
 
+/// How long a quick tap waits for the switcher to come to the front before
+/// switching anyway: 20 polls of 15 ms.
+const MAX_EARLY_POLLS: u32 = 20;
+
 /// A switcher row being dragged to another place in the list, drawn under the
 /// mouse as a copy of the row.
 #[derive(Clone)]
@@ -144,6 +148,9 @@ impl Palette {
         // Letting go of the modifier is a key event for whichever window has focus,
         // and can happen before this one gets it, so poll the keyboard instead.
         cx.spawn_in(window, async move |this, cx| {
+            // Polls since the modifiers were let go while this window wasn't
+            // in front yet.
+            let mut early = 0;
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(15))
@@ -153,15 +160,24 @@ impl Palette {
                     // on whatever list is showing now.
                     let (Some(mods), Mode::Switch) = (this.hold, this.mode) else {
                         this.hold = None;
-                        return true;
+                        return Some(true);
                     };
                     if platform::modifiers_held(mods) {
-                        return false;
+                        return Some(false);
                     }
                     // Let go while dragging a row: keep the list open to drop it.
                     if cx.has_active_drag() {
                         this.keep_open(cx);
-                        return true;
+                        return Some(true);
+                    }
+                    // A quick tap, let go before this window came to the front.
+                    // Windows only lets the app in front hand focus to another
+                    // one, and until then that's the app the tap came from,
+                    // which may refuse it when the window to switch to belongs
+                    // to another app (the only editor window, say). So wait for
+                    // it, a moment at most.
+                    if !window.is_window_active() && early < MAX_EARLY_POLLS {
+                        return None;
                     }
                     this.hold = None;
                     if this.matches.is_empty() {
@@ -169,10 +185,12 @@ impl Palette {
                     } else {
                         this.confirm(&Confirm, window, cx);
                     }
-                    true
+                    Some(true)
                 });
-                if done.unwrap_or(true) {
-                    break;
+                match done {
+                    Ok(Some(false)) => {}
+                    Ok(None) => early += 1,
+                    Ok(Some(true)) | Err(_) => break,
                 }
             }
         })
