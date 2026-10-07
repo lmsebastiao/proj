@@ -7,7 +7,7 @@ mod windows;
 
 use std::rc::Rc;
 
-use gpui::{App, PlatformDisplay, Window};
+use gpui::{App, Bounds, DisplayId, Pixels, PlatformDisplay, Window};
 
 use crate::config::MonitorSetting;
 
@@ -28,6 +28,15 @@ pub fn launcher_display(monitor: MonitorSetting, cx: &App) -> Option<Rc<dyn Plat
     #[cfg(not(windows))]
     let _ = monitor;
     cx.primary_display()
+}
+
+/// Moves the new `window` to `bounds` on `display`, where gpui may misplace it
+/// (Windows, with monitors at different scales).
+pub fn place(window: &Window, display: DisplayId, bounds: Bounds<Pixels>) {
+    #[cfg(windows)]
+    windows::place(window, display, bounds);
+    #[cfg(not(windows))]
+    let _ = (window, display, bounds);
 }
 
 /// Brings `window` to the front with keyboard focus (and, on Windows, above

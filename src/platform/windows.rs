@@ -1,6 +1,6 @@
 //! Win32 window and process behaviour gpui doesn't expose.
 
-use gpui::{App, PlatformDisplay, Window};
+use gpui::{App, Bounds, DisplayId, Pixels, PlatformDisplay, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::rc::Rc;
 use windows_sys::Win32::{
@@ -8,8 +8,12 @@ use windows_sys::Win32::{
     Graphics::Gdi::{
         EnumDisplayMonitors, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
     },
-    UI::WindowsAndMessaging::{
-        GetCursorPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos,
+    UI::{
+        HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI},
+        WindowsAndMessaging::{
+            GetCursorPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            SetForegroundWindow, SetWindowPos, USER_DEFAULT_SCREEN_DPI,
+        },
     },
 };
 
@@ -42,6 +46,53 @@ pub fn display_of_foreground(cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
 }
 
 fn display_of_monitor(target: HMONITOR, cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
+    let index = monitors().iter().position(|&m| m == target)? as u32;
+    cx.displays()
+        .into_iter()
+        .find(|display| u32::from(display.id()) == index)
+}
+
+/// Moves `window` to `bounds`, in the logical pixels of `display`.
+///
+/// gpui converts a new window's bounds to physical pixels at the scale of the
+/// monitor it's created on (the primary), not the target's. So with mixed
+/// scaling, e.g. a 150% primary and a 100% second monitor, the launcher lands
+/// off-centre and partly off the second one.
+pub fn place(window: &Window, display: DisplayId, bounds: Bounds<Pixels>) {
+    let Some(hwnd) = hwnd(window) else {
+        return;
+    };
+    let Some(&monitor) = monitors().get(u32::from(display) as usize) else {
+        return;
+    };
+    let (mut dpi, mut dpi_y) = (0, 0);
+    if unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y) } != 0 {
+        return;
+    }
+    let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+    let device = |pixels: Pixels| (f32::from(pixels) * scale).round() as i32;
+    let set_position = || unsafe {
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            device(bounds.origin.x),
+            device(bounds.origin.y),
+            device(bounds.size.width),
+            device(bounds.size.height),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+    // Arriving on a monitor with another scale, Windows resizes the window
+    // for it; placing it again undoes that.
+    let changes_scale = unsafe { GetDpiForWindow(hwnd) } != dpi;
+    set_position();
+    if changes_scale {
+        set_position();
+    }
+}
+
+/// The monitors in `EnumDisplayMonitors` order, which gpui's `DisplayId` indexes.
+fn monitors() -> Vec<HMONITOR> {
     let mut monitors: Vec<HMONITOR> = Vec::new();
     unsafe extern "system" fn collect(
         monitor: HMONITOR,
@@ -60,24 +111,26 @@ fn display_of_monitor(target: HMONITOR, cx: &App) -> Option<Rc<dyn PlatformDispl
             &mut monitors as *mut _ as LPARAM,
         )
     };
-    let index = monitors.iter().position(|&m| m == target)? as u32;
-    cx.displays()
-        .into_iter()
-        .find(|display| u32::from(display.id()) == index)
+    monitors
 }
 
 /// Keeps the launcher above fullscreen/topmost apps and takes keyboard focus.
 /// Allowed because we are handling the hotkey, the most recent input event.
 pub fn raise(window: &Window) {
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(hwnd) = hwnd(window) else {
         return;
     };
-    if let RawWindowHandle::Win32(handle) = handle.as_raw() {
-        let hwnd = handle.hwnd.get() as HWND;
-        unsafe {
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            SetForegroundWindow(hwnd);
-        }
+    unsafe {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        SetForegroundWindow(hwnd);
+    }
+}
+
+fn hwnd(window: &Window) -> Option<HWND> {
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    match handle.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as HWND),
+        _ => None,
     }
 }
 

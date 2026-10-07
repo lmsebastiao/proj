@@ -738,9 +738,10 @@ fn show_palette(
         }
         None => Bounds::centered(None, window_size, cx),
     };
+    let display_id = display.map(|d| d.id());
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        display_id: display.map(|d| d.id()),
+        display_id,
         titlebar: None,
         focus: true,
         show: true,
@@ -756,6 +757,9 @@ fn show_palette(
         Ok(handle) => {
             handle
                 .update(cx, |palette, window, cx| {
+                    if let Some(display_id) = display_id {
+                        platform::place(window, display_id, bounds);
+                    }
                     window.focus(&palette.focus_handle(cx));
                     platform::raise(window);
                     cx.activate(true);
