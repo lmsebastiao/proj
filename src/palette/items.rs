@@ -40,6 +40,8 @@ pub(super) enum Mode {
     /// Ticking projects to open together, or a group's folders
     /// (`Palette::group_page`).
     Group,
+    /// Ticking other editors' recent projects to add (`Palette::import`).
+    Import,
 }
 
 /// What the list currently shows. Commands appear when the query starts with `>`.
@@ -61,6 +63,8 @@ pub(super) enum List {
     Forges,
     /// The projects to tick (indexes into `Palette::projects`, groups left out).
     Group,
+    /// Other editors' recent projects (`ImportPage::found`).
+    Import,
 }
 
 /// An entry in a project's actions (ctrl-k) or commands (ctrl-r) menu, as
@@ -123,6 +127,8 @@ pub(super) enum EditorOption {
 pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
+    /// Other editors' recent projects (`Mode::Import`).
+    ImportRecent,
     NewFromTemplate,
     ChangeEditor,
     /// Go through system → light → dark.
@@ -141,6 +147,7 @@ pub(super) fn commands(updates: bool, missing: bool) -> Vec<PaletteCommand> {
     [
         PaletteCommand::Autostart,
         PaletteCommand::AddProjects,
+        PaletteCommand::ImportRecent,
         PaletteCommand::NewFromTemplate,
         PaletteCommand::ChangeEditor,
         PaletteCommand::Theme,
@@ -260,6 +267,13 @@ impl Palette {
                 let template = &self.templates[ix];
                 (template.name(), template.source())
             }
+            List::Import => {
+                let found = &self.found_projects()[ix];
+                let names: Vec<String> = found.paths.iter().map(|p| member_name(p, None)).collect();
+                let places: Vec<String> =
+                    found.paths.iter().map(|p| paths::display_path(p)).collect();
+                (names.join(" + "), places.join(" + "))
+            }
             List::Forges => {
                 let (label, _, what) = super::forges::CHOICES[ix];
                 (label.into(), what.into())
@@ -284,6 +298,10 @@ impl Palette {
             PaletteCommand::AddProjects => (
                 "Add projects…".into(),
                 format!("Pick one or more project folders · {m}-o"),
+            ),
+            PaletteCommand::ImportRecent => (
+                "Import recent projects…".into(),
+                "The folders you opened lately in Zed, VS Code, Cursor, JetBrains IDEs…".into(),
             ),
             PaletteCommand::NewFromTemplate => (
                 "New project from a template…".into(),
@@ -681,6 +699,15 @@ impl Palette {
                 bottom: None,
                 tip: None,
             },
+            // The editors it was found in, and when it was last opened there.
+            List::Import => {
+                let found = &self.found_projects()[ix];
+                Meta {
+                    top: Some((found.editors.join(", "), self.theme.muted)),
+                    bottom: found.at.map(|at| store::ago(at, now)),
+                    tip: found.at.map(|at| format!("Opened {}", store::date_of(at))),
+                }
+            }
             // Its branch, as in the project list.
             List::Group => Meta {
                 top: self
@@ -759,6 +786,7 @@ impl Palette {
             List::Templates => self.templates.len(),
             List::Forges => super::forges::CHOICES.len(),
             List::Group => self.projects.len(),
+            List::Import => self.found_projects().len(),
             List::Text => 0,
         }
     }

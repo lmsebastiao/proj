@@ -29,6 +29,9 @@ impl Palette {
         if self.list() == List::Group {
             return self.toggle_tick(delta, cx);
         }
+        if self.list() == List::Import {
+            return self.toggle_import(delta, cx);
+        }
         if self.list() != List::Projects {
             return self.select(delta, cx);
         }
@@ -547,6 +550,7 @@ impl Palette {
                 self.set_query("", cx);
                 self.add_projects(&AddProjects, window, cx);
             }
+            PaletteCommand::ImportRecent => self.import_page(false, window, cx),
             PaletteCommand::NewFromTemplate => self.set_mode(Mode::Templates, cx),
             PaletteCommand::RemoveMissing => {
                 let missing: Vec<Project> = self

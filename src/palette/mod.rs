@@ -9,6 +9,7 @@ mod editor_choice;
 mod files;
 mod forges;
 mod groups;
+mod import;
 mod items;
 mod keymap;
 mod projects;
@@ -126,6 +127,8 @@ pub struct Palette {
     forge_pick: Option<forges::ForgePick>,
     /// The "Open together" page, or a group's "Folders…" (`Mode::Group`).
     group_page: Option<groups::GroupPage>,
+    /// The page importing other editors' recent projects (`Mode::Import`).
+    import: Option<import::ImportPage>,
     /// Projects being opened together without being saved as a group: in
     /// `projects` too, until the list shows again.
     unsaved: Option<Project>,
@@ -256,6 +259,7 @@ impl Palette {
             new_from: None,
             forge_pick: None,
             group_page: None,
+            import: None,
             unsaved: None,
             git_status: HashMap::new(),
             marked: Vec::new(),
@@ -485,6 +489,7 @@ impl Palette {
                 self.new_from = None;
                 self.forge_pick = None;
                 self.group_page = None;
+                self.import = None;
                 self.expanded = None;
                 // An unsaved group goes from the list again.
                 if let Some(group) = self.unsaved.take() {
@@ -501,7 +506,8 @@ impl Palette {
             | Mode::NewProject
             | Mode::Switch
             | Mode::Forges
-            | Mode::Group => {}
+            | Mode::Group
+            | Mode::Import => {}
             Mode::Templates => {
                 self.templates = self
                     .config
@@ -563,6 +569,7 @@ impl Palette {
             Mode::AddCommand => "A command to run in the project's folder, e.g. npm run dev".into(),
             Mode::Templates => "New project from…".into(),
             Mode::Group => "Search projects to tick… (#tag works too)".into(),
+            Mode::Import => "Search the projects to import…".into(),
             Mode::Forges => match &self.forge_pick {
                 Some(pick) => format!("What does {} run?", pick.host),
                 None => String::new(),
@@ -603,6 +610,7 @@ impl Palette {
             Mode::Templates => List::Templates,
             Mode::Forges => List::Forges,
             Mode::Group => List::Group,
+            Mode::Import => List::Import,
             Mode::Switch => List::Switch,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
             // The switcher's list, searchable, without opening it by its shortcut.
@@ -825,6 +833,9 @@ impl Palette {
         if self.list() == List::Group {
             return self.confirm_group(window, cx);
         }
+        if self.list() == List::Import {
+            return self.confirm_import(cx);
+        }
         let Some(ix) = self.matches.get(self.selected).map(|m| m.ix) else {
             return;
         };
@@ -855,7 +866,7 @@ impl Palette {
                     self.open_entry(entry, window, cx);
                 }
             }
-            List::Text | List::Group => {}
+            List::Text | List::Group | List::Import => {}
         }
     }
 
@@ -876,7 +887,12 @@ impl Palette {
             }
             List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Text | List::Templates | List::Forges | List::Group => {
+            List::OpenWith
+            | List::Text
+            | List::Templates
+            | List::Forges
+            | List::Group
+            | List::Import => {
                 self.back_to_projects(cx);
             }
             List::Projects if !self.marked.is_empty() => {
@@ -918,6 +934,7 @@ impl Palette {
                 None => "Open together".into(),
             },
             Mode::NewProject => format!("New from {}", self.new_from.as_ref()?.name()),
+            Mode::Import => "Import recent projects".into(),
             Mode::Editors if self.config.editor.is_some() => "Default editor".into(),
             Mode::Projects | Mode::Editors | Mode::Switch => return None,
         })

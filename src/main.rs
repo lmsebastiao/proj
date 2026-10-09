@@ -13,6 +13,8 @@ mod open;
 mod palette;
 mod paths;
 mod platform;
+mod recent;
+mod sqlite;
 mod store;
 mod switcher;
 mod tasks;

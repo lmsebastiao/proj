@@ -258,6 +258,17 @@ impl Palette {
                 ),
                 s(&["esc", "backspace"], "Back to the projects").run(Dismiss),
             ],
+            List::Import => vec![
+                s(&["↵"], "Add the ticked projects")
+                    .footer("Add")
+                    .run(Confirm),
+                s(&["tab", "space"], "Tick or untick one").run(ToggleMark),
+                s(&["mod-↵"], "Tick them all, or none")
+                    .footer("All or none")
+                    .run(ConfirmSecondary),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "backspace"], "Back, adding nothing").run(Dismiss),
+            ],
             List::Files => vec![
                 s(&["↵"], "Open in the project's editor (files in its window)")
                     .footer("Open")

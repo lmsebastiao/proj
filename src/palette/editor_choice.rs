@@ -10,7 +10,6 @@ use crate::{
 use super::{
     Palette,
     items::{EditorOption, Mode, Target},
-    keymap::AddProjects,
 };
 
 impl Palette {
@@ -177,9 +176,10 @@ impl Palette {
             n => format!("Projects now open in {label}, except {n} with their own editor"),
         };
         self.notice(status, cx);
-        // First run: go straight on to picking projects.
+        // First run: go straight on to importing the projects other editors
+        // opened, or picking folders if there are none.
         if self.projects.is_empty() {
-            self.add_projects(&AddProjects, window, cx);
+            self.import_page(true, window, cx);
         }
     }
 }

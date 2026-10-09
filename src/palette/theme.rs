@@ -119,6 +119,8 @@ pub(super) mod icons {
         pub const SETTINGS: &str = "\u{E713}";
         pub const UPDATE: &str = "\u{E896}";
         pub const QUIT: &str = "\u{E711}";
+        pub const IMPORT: &str = "\u{E8B5}";
+        pub const CHECK: &str = "\u{E73E}";
     }
     #[cfg(not(windows))]
     mod glyphs {
@@ -152,6 +154,8 @@ pub(super) mod icons {
         pub const SETTINGS: &str = "⚙";
         pub const UPDATE: &str = "↓";
         pub const QUIT: &str = "✕";
+        pub const IMPORT: &str = "⇩";
+        pub const CHECK: &str = "✓";
     }
     pub use glyphs::*;
 }

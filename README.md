@@ -18,7 +18,20 @@ PowerToys Run uses it too; if another app has it, the dialog says so and you can
 
 On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
 finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
-then opens a folder picker where you can select one or more projects at once.
+then lists the folders you opened lately in other editors (see Importing), all ticked, to add
+at once. If it finds none, it opens a folder picker where you can select one or more projects.
+
+### Importing other editors' recent projects
+
+Type `>` and pick **Import recent projects** (or `proj recent add` in a terminal) to list
+the folders you opened lately in Zed, VS Code, VS Code Insiders, Cursor, Windsurf, VSCodium,
+JetBrains IDEs and Android Studio that aren't in your list yet, the latest first, with the
+editors they were found in. **tab** or **space** unticks one, **ctrl-enter** ticks all or none,
+**enter** adds the ticked ones. A Zed workspace of several folders adds each folder and a
+group of them (see Groups). Home, app data and temp folders are left out.
+
+proj reads the editors' own files: Zed's database (`workspaces`, read without locking it), VS
+Code's `storage.json`, JetBrains' `recentProjects.xml`.
 
 | Key                     | Action                                     |
 | ----------------------- | ------------------------------------------ |
@@ -93,7 +106,7 @@ If the dialog closes without opening anything (esc, the shortcut again, or a cli
 elsewhere), opening it again within 30 seconds brings back what you'd typed, selected so that
 typing replaces it.
 
-Type `>` to list commands: start on login, add projects, new project from a template, change
+Type `>` to list commands: start on login, add projects, import recent projects, new project from a template, change
 the default editor, theme, open the config file, remove missing projects (when some are),
 check for updates / install update (installed copies), quit.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
@@ -289,6 +302,7 @@ proj open QUERY     # open the best match, as if you'd typed QUERY and pressed e
 proj add [PATH]     # add a project (default: current directory)
 proj remove PATH    # remove / hide a project
 proj list           # list projects
+proj recent [add]   # list the projects other editors opened lately; add: add them
 proj paths          # where the config and database live
 proj autostart [on|off]  # start proj when you log in
 proj path [add|remove]   # put proj's folder on your user PATH (Windows)

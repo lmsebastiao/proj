@@ -345,6 +345,29 @@ pub fn add_manual(db: &mut Db, path: PathBuf) {
     }
 }
 
+/// Every folder the list has as a project of its own (not groups' folders
+/// that aren't), and the ones taken off it, for leaving them out of what
+/// can be imported.
+pub fn listed_folders(config: &Config, db: &Db) -> Vec<PathBuf> {
+    collect(config, db)
+        .into_iter()
+        .filter(|p| !p.is_workspace())
+        .map(|p| p.path)
+        .chain(db.hidden.iter().cloned())
+        .collect()
+}
+
+/// Adds a project found in another editor: its folder, or a workspace's
+/// folders and the group of them.
+pub fn add_found(db: &mut Db, paths: Vec<PathBuf>) {
+    for path in &paths {
+        add_manual(db, path.clone());
+    }
+    if paths.len() > 1 {
+        save_group(db, paths);
+    }
+}
+
 /// Names an entry; an empty name goes back to the folder name(s).
 pub fn rename(db: &mut Db, key: &str, name: &str) {
     let name = name.trim();

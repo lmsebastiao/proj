@@ -114,6 +114,30 @@ fn check_box(position: Option<usize>, t: Theme) -> AnyElement {
         .into_any_element()
 }
 
+/// A check box with a tick when `ticked`.
+fn tick_box(ticked: bool, t: Theme) -> AnyElement {
+    div()
+        .size(px(18.))
+        .rounded_sm()
+        .border_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+        .text_size(px(11.))
+        .map(|d| {
+            if ticked {
+                d.bg(rgb(t.accent))
+                    .border_color(rgb(t.accent))
+                    .text_color(rgb(t.bg))
+                    .child(icons::CHECK)
+            } else {
+                d.border_color(rgb(t.muted))
+            }
+        })
+        .into_any_element()
+}
+
 /// A group's icon: folders, with how many on a badge.
 fn group_icon(count: usize, t: Theme) -> AnyElement {
     div()
@@ -160,6 +184,7 @@ impl PaletteCommand {
         match self {
             Self::Autostart => icons::POWER,
             Self::AddProjects => icons::ADD,
+            Self::ImportRecent => icons::IMPORT,
             Self::NewFromTemplate => icons::NEW_PROJECT,
             Self::ChangeEditor => icons::EDIT,
             Self::Theme => icons::THEME,
@@ -239,6 +264,7 @@ impl Palette {
                 Template::Git(_) => glyph(icons::GLOBE, t.muted).into_any_element(),
             },
             List::Forges => glyph(icons::GLOBE, t.muted).into_any_element(),
+            List::Import => tick_box(self.is_ticked(ix), t),
             List::Text => div().into_any_element(),
         };
         slot.child(content).into_any_element()
@@ -797,9 +823,23 @@ impl Palette {
                 .into_any_element();
         }
         if self.list() == List::Projects && self.projects.is_empty() {
+            let import = div()
+                .id("import")
+                .px_3()
+                .h(px(32.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .text_size(px(SMALL_FONT_SIZE))
+                .text_color(rgb(t.text))
+                .cursor_pointer()
+                .hover(|d| d.bg(rgb(t.hover)))
+                .on_click(cx.listener(|this, _, window, cx| this.import_page(false, window, cx)))
+                .child("Import the ones other editors opened…");
             return centered()
                 .child("No projects yet")
                 .child(add_button(cx))
+                .child(import)
                 .child(
                     div()
                         .text_size(px(SMALL_FONT_SIZE))
@@ -832,6 +872,10 @@ impl Palette {
                 "Type part of a file's name, and of its folders if you like (src/main)".into()
             }
             List::Files => "No files match".into(),
+            List::Import if self.import_loading() => "Looking through the editors' recent projects…".into(),
+            List::Import if self.filter_query().is_empty() => {
+                "No recent projects in Zed, VS Code, Cursor, Windsurf, VSCodium or JetBrains IDEs that aren't listed already".into()
+            }
             _ => "No matches".into(),
         };
         div()
@@ -850,6 +894,13 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Import => (
+                None,
+                vec![format!(
+                    "Folders you opened lately in other editors that aren't listed yet. Untick the ones that \n                     aren't projects (tab or space; {}-↵ all or none), then ↵ adds the ticked ones.",
+                    secondary()
+                )],
+            ),
             Mode::Group if self.group_page.as_ref()?.editing.is_some() => (
                 None,
                 vec!["Tick or untick folders (tab or space); alt-↑/↓ moves the highlighted one in the order they open in. ↵ saves.".into()],
@@ -1060,6 +1111,7 @@ impl Palette {
     fn footer_context(&self) -> Option<String> {
         Some(match self.list() {
             List::Group => return self.ticked_names(),
+            List::Import => return self.import_summary(),
             List::Projects if !self.marked.is_empty() => {
                 let names: Vec<String> = self
                     .marked
@@ -1416,11 +1468,15 @@ impl Render for Palette {
                     return;
                 }
                 // Space ticks on the group page (no spaces in project names to type).
-                if this.list() == List::Group
+                if matches!(this.list(), List::Group | List::Import)
                     && event.keystroke.key == "space"
                     && !event.keystroke.modifiers.modified()
                 {
-                    this.toggle_tick(0, cx);
+                    if this.list() == List::Import {
+                        this.toggle_import(0, cx);
+                    } else {
+                        this.toggle_tick(0, cx);
+                    }
                     cx.stop_propagation();
                     return;
                 }
@@ -1543,6 +1599,7 @@ impl Render for Palette {
                 cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
                     List::OpenWith => this.toggle_project_default(window, cx),
                     List::Group => this.save_ticked(cx),
+                    List::Import => this.toggle_all_imports(cx),
                     List::Projects if this.menu_open() => {}
                     List::Projects if this.pasted.is_some() => this.open_pasted(false, window, cx),
                     List::Projects => this.open_with_selected(cx),

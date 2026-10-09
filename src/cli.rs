@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    autostart, config, fuzzy, open, paths, platform,
+    autostart, config, fuzzy, open, paths, platform, recent,
     store::{self, Project},
     update,
 };
@@ -17,6 +17,7 @@ usage:
   proj add [PATH]          add a project (defaults to the current directory)
   proj remove PATH         remove / hide a project
   proj list                list known projects
+  proj recent [add]        list the projects other editors opened lately (add: add them)
   proj paths               show config and database locations
   proj autostart [on|off]  start proj when you log in
   proj path [add|remove]   put proj's folder on your PATH (Windows)
@@ -84,6 +85,33 @@ pub fn run(args: &[String]) -> i32 {
                 println!("{:<32} {}{missing}", project.name, project.path.display());
             }
             return 0;
+        }
+        "recent" => {
+            let add = match args.get(1).map(String::as_str) {
+                None => false,
+                Some("add") => true,
+                Some(_) => {
+                    eprintln!("usage: proj recent [add]");
+                    return 2;
+                }
+            };
+            let found = recent::found(&store::listed_folders(&config, &db));
+            if found.is_empty() {
+                println!("no recent projects that aren't listed yet");
+                return 0;
+            }
+            for item in &found {
+                let folders: Vec<String> =
+                    item.paths.iter().map(|p| paths::display_path(p)).collect();
+                println!("{:<56} {}", folders.join(" + "), item.editors.join(", "));
+            }
+            if !add {
+                println!("\nproj recent add  adds them");
+                return 0;
+            }
+            for item in found {
+                store::add_found(&mut db, item.paths);
+            }
         }
         "autostart" => {
             let result = match args.get(1).map(String::as_str) {
