@@ -154,10 +154,22 @@ impl Palette {
         });
     }
 
-    /// Scrolls `row` to the middle of the list, as far as its ends allow.
+    /// Scrolls just enough to show `row`, like PowerToys' Command Palette:
+    /// going down past the last row in sight brings the new one in at the
+    /// bottom, going up past the first brings it in at the top, and a row
+    /// already in sight doesn't move the list. The list's padding stays
+    /// around it, as at the list's ends.
     pub(super) fn scroll_to_row(&self, row: usize) {
-        let middle = LIST_PADDING + self.row_top(row) + self.row_height(row) / 2.;
-        self.scroll_list_to(middle - self.viewport_height() / 2.);
+        let top = self.row_top(row);
+        let bottom = top + self.row_height(row) + 2. * LIST_PADDING;
+        let viewport = self.viewport_height();
+        let scroll = self.scroll_top();
+        // Not laid out yet: there's no bottom to bring it to.
+        if viewport <= 0. || top < scroll {
+            self.scroll_list_to(top);
+        } else if bottom > scroll + viewport {
+            self.scroll_list_to(bottom - viewport);
+        }
     }
 
     fn extent(&self, of: Scrolled) -> Extent {
