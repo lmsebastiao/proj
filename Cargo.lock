@@ -4512,7 +4512,7 @@ dependencies = [
 
 [[package]]
 name = "proj"
-version = "1.0.15"
+version = "1.0.16"
 dependencies = [
  "async-channel 2.5.0",
  "dirs 7.0.0",
