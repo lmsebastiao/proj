@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    autostart, config, fuzzy, open, paths, platform, recent,
+    autostart, config, fuzzy, open, paths, platform, recent, remote,
     store::{self, Project},
     update,
 };
@@ -14,7 +14,8 @@ proj - project launcher
 usage:
   proj                     run the launcher in the background
   proj open QUERY          open the project that best matches QUERY
-  proj add [PATH]          add a project (defaults to the current directory)
+  proj add [PATH]          add a project (defaults to the current directory;
+                           ssh://[user@]host[:port]/path for one on another machine)
   proj remove PATH         remove / hide a project
   proj list                list known projects
   proj recent [add]        list the projects other editors opened lately (add: add them)
@@ -54,7 +55,10 @@ pub fn run(args: &[String]) -> i32 {
             println!("opened {}", project.name);
         }
         "add" => {
-            let Some(path) = path_arg(args.get(1)).filter(|p| p.is_dir()) else {
+            // A folder on another machine (ssh://me@box/home/me/app) isn't
+            // looked at; one here has to be there.
+            let remote = args.get(1).and_then(|a| remote::parse_ssh(a));
+            let Some(path) = remote.or_else(|| path_arg(args.get(1)).filter(|p| p.is_dir())) else {
                 eprintln!("proj: not a directory");
                 return 1;
             };

@@ -4,7 +4,7 @@
 use gpui::{Context, Window};
 
 use crate::{
-    fuzzy, git, open,
+    editors, fuzzy, git, open, remote,
     store::{self, Project},
     tasks,
     templates::Template,
@@ -63,6 +63,7 @@ impl ProjectAction {
             Self::OpenWith => icons::OPEN_WITH,
             Self::ShowInFileManager => icons::FOLDER,
             Self::Terminal => icons::TERMINAL,
+            Self::DevContainer => icons::CONTAINER,
             Self::Commands | Self::Run(_) => icons::RUN,
             Self::OpenTogether | Self::Folders => icons::GROUP,
             Self::AddCommand => icons::ADD,
@@ -150,9 +151,28 @@ impl Palette {
             self.actions = vec![A::Rename, A::Tags, A::CopyPath, A::Remove];
             return;
         }
+        // Over SSH: nothing of it here to look in or copy.
+        if project.is_ssh() {
+            self.actions = vec![
+                A::OpenWith,
+                A::Terminal,
+                A::Commands,
+                A::Rename,
+                A::Tags,
+                A::CopyPath,
+                A::Remove,
+            ];
+            return;
+        }
         let remote = git::git_remote_url(&project.path).is_some();
         let web = git::git_web_url(&project.path).is_some();
         let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal, A::Commands];
+        if !project.is_workspace()
+            && remote::devcontainer(&project.path).is_some()
+            && self.dev_container_editor().is_some()
+        {
+            actions.insert(3, A::DevContainer);
+        }
         if project.is_workspace() {
             actions.extend([A::Rename, A::Folders, A::Tags]);
         } else {
@@ -180,9 +200,12 @@ impl Palette {
     fn action_section(&self, action: ProjectAction) -> Section {
         use ProjectAction as A;
         match action {
-            A::OpenWith | A::OpenTogether | A::ShowInFileManager | A::Terminal | A::Commands => {
-                Section::Open
-            }
+            A::OpenWith
+            | A::OpenTogether
+            | A::ShowInFileManager
+            | A::Terminal
+            | A::DevContainer
+            | A::Commands => Section::Open,
             A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
             A::Run(_) => Section::Scripts,
             A::AddCommand => Section::AddNew,
@@ -365,6 +388,7 @@ impl Palette {
                 self.open_selected(Target::FileManager, window, cx);
             }
             ProjectAction::Terminal => self.open_selected(Target::Terminal, window, cx),
+            ProjectAction::DevContainer => self.open_dev_container(&project, window, cx),
             ProjectAction::Run(i) => {
                 let Some(task) = self.tasks.get(i).cloned() else {
                     return;
@@ -417,6 +441,38 @@ impl Palette {
             }
             ProjectAction::Remove => self.remove(cx),
         }
+    }
+
+    /// The editor that reopens projects in their dev container: the global
+    /// one if it's VS Code or a fork, else the first of those installed.
+    pub(super) fn dev_container_editor(&self) -> Option<String> {
+        let project = self.actions_project().and_then(|p| p.editor.clone());
+        project
+            .into_iter()
+            .chain(self.config.editor.clone())
+            .find(|e| remote::is_vs_code(e))
+            .or_else(|| {
+                editors::detected_editors(false)
+                    .into_iter()
+                    .map(|e| e.command)
+                    .find(|e| remote::is_vs_code(e))
+            })
+    }
+
+    fn open_dev_container(
+        &mut self,
+        project: &Project,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(editor), Some(container)) = (
+            self.dev_container_editor(),
+            remote::devcontainer(&project.path),
+        ) else {
+            return;
+        };
+        let result = open::open_dev_container(&self.config, &editor, &project.path, &container);
+        self.finish_launch(project, &Target::Editor(editor), result, window, cx);
     }
 
     /// The ⋯ on a project row, or right-clicking it: that row's actions.

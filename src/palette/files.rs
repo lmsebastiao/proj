@@ -264,10 +264,10 @@ fn search(folders: &[Arc<FolderFiles>], query: &str) -> (Vec<FileHit>, Vec<Match
 
 impl Palette {
     /// Every listed project's folders, groups' too, once each; not the
-    /// ones that are gone.
+    /// ones that are gone, or on another machine.
     fn search_roots(&self) -> Vec<PathBuf> {
         let mut roots: Vec<PathBuf> = Vec::new();
-        for project in self.projects.iter().filter(|p| !p.missing) {
+        for project in self.projects.iter().filter(|p| !p.missing && !p.is_ssh()) {
             for path in project.paths() {
                 if !roots.contains(&path) {
                     roots.push(path);

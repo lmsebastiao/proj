@@ -6,7 +6,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::config::Config;
+use crate::{
+    config::Config,
+    remote::{self, Remote},
+};
 
 /// Opens `path` with the global editor, or the file manager if none is set.
 pub fn open_project(config: &Config, path: &Path) -> io::Result<()> {
@@ -32,6 +35,11 @@ pub fn open_with(config: &Config, editor: &str, paths: &[PathBuf]) -> io::Result
     if config.editor.as_deref().map(str::trim) == Some(editor) {
         command.args(&config.editor_args);
     }
+    // In WSL or over SSH: the editor's own way, if it has one.
+    if let Some(args) = remote::editor_args(editor, paths).map_err(io::Error::other)? {
+        command.args(args);
+        return spawn(command);
+    }
     if opens_solutions(editor) {
         // Visual Studio and Rider open one solution, not folders.
         let solution = first
@@ -43,9 +51,29 @@ pub fn open_with(config: &Config, editor: &str, paths: &[PathBuf]) -> io::Result
     } else {
         command.args(paths);
     }
-    if first.is_dir() {
+    if Remote::of(first).is_none() && first.is_dir() {
         command.current_dir(first);
     }
+    spawn(command)
+}
+
+/// Reopens the local folder `dir` in its dev container (`config`), with VS
+/// Code or a fork of it and its Dev Containers extension.
+pub fn open_dev_container(
+    config: &Config,
+    editor: &str,
+    dir: &Path,
+    container: &Path,
+) -> io::Result<()> {
+    let editor = editor.trim();
+    let mut command = command_for(editor)?;
+    if config.editor.as_deref().map(str::trim) == Some(editor) {
+        command.args(&config.editor_args);
+    }
+    command
+        .arg("--folder-uri")
+        .arg(remote::devcontainer_uri(dir, container))
+        .current_dir(dir);
     spawn(command)
 }
 
@@ -66,11 +94,25 @@ pub fn open_file(
     if config.editor.as_deref().map(str::trim) == Some(editor) {
         command.args(&config.editor_args);
     }
+    // In WSL, with VS Code: through its WSL extension, folder and file.
+    let remote_file = Remote::of(file)
+        .filter(|_| remote::is_vs_code(editor))
+        .map(|remote| remote.vs_code_uri());
+    if let Some(uri) = remote_file {
+        if let Some(args) = remote::editor_args(editor, folders).map_err(io::Error::other)? {
+            command.args(args);
+        }
+        command.arg("--file-uri").arg(uri);
+        return spawn(command);
+    }
     if !opens_solutions(editor) {
         command.args(folders);
     }
     command.arg(file);
-    if let Some(dir) = folders.first().filter(|d| d.is_dir()) {
+    if let Some(dir) = folders
+        .first()
+        .filter(|d| Remote::of(d).is_none() && d.is_dir())
+    {
         command.current_dir(dir);
     }
     spawn(command)
@@ -124,6 +166,10 @@ pub(crate) fn find_solution(dir: &Path) -> Option<PathBuf> {
 
 /// Opens a terminal in `path`.
 pub fn open_terminal(path: &Path) -> io::Result<()> {
+    if let Some(remote) = Remote::of(path) {
+        let (program, args) = remote.shell(None);
+        return terminal_running(&program, &args);
+    }
     #[cfg(windows)]
     {
         if which("wt").is_some() {
@@ -168,6 +214,10 @@ pub fn open_terminal(path: &Path) -> io::Result<()> {
 
 /// Opens a terminal in `path` that runs `command` and stays open after it ends.
 pub fn run_in_terminal(path: &Path, command: &str) -> io::Result<()> {
+    if let Some(remote) = Remote::of(path) {
+        let (program, args) = remote.shell(Some(command));
+        return terminal_running(&program, &args);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -221,6 +271,59 @@ pub fn run_in_terminal(path: &Path, command: &str) -> io::Result<()> {
     }
 }
 
+/// Opens a terminal running `program` with `args`: a shell in WSL or over SSH.
+fn terminal_running(program: &str, args: &[String]) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if which("wt").is_some() {
+            let mut wt = Command::new("wt");
+            // wt reads `;` as its next command.
+            wt.arg(program)
+                .args(args.iter().map(|a| a.replace(';', "\\;")));
+            return spawn(wt);
+        }
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        Command::new(program)
+            .args(args)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(drop)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let line: Vec<String> = std::iter::once(program)
+            .chain(args.iter().map(String::as_str))
+            .map(shell_quote)
+            .collect();
+        let script = line.join(" ").replace('\\', "\\\\").replace('"', "\\\"");
+        let mut osascript = Command::new("osascript");
+        osascript
+            .arg("-e")
+            .arg(format!(
+                "tell application \"Terminal\" to do script \"{script}\""
+            ))
+            .args(["-e", "tell application \"Terminal\" to activate"]);
+        spawn(osascript)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let terminal = ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]
+            .into_iter()
+            .find(|t| which(t).is_some())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no terminal found"))?;
+        let mut run = Command::new(terminal);
+        run.arg(if terminal == "gnome-terminal" {
+            "--"
+        } else {
+            "-e"
+        })
+        .arg(program)
+        .args(args);
+        spawn(run)
+    }
+}
+
 /// `text` in single quotes for a POSIX shell.
 #[cfg(target_os = "macos")]
 fn shell_quote(text: &str) -> String {
@@ -229,6 +332,11 @@ fn shell_quote(text: &str) -> String {
 
 /// Opens `path` in the system file manager.
 pub fn reveal(path: &Path) -> io::Result<()> {
+    if Remote::of(path).is_some_and(|r| r.is_ssh()) {
+        return Err(io::Error::other(
+            "an SSH project has no folder on this computer",
+        ));
+    }
     system_open(path.as_os_str())
 }
 

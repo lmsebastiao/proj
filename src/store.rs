@@ -12,6 +12,7 @@ use crate::{
     config::Config,
     git,
     paths::{app_dir, display_path, write_atomic},
+    remote::Remote,
 };
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
@@ -108,6 +109,18 @@ impl Project {
     }
 
     /// The editor Enter uses: the entry's own default, else the global one.
+    /// In WSL or on another machine, by its (first) folder.
+    pub fn remote(&self) -> Option<Remote> {
+        Remote::of(&self.path)
+    }
+
+    /// Over SSH: no folder of it on this computer to look in.
+    pub fn is_ssh(&self) -> bool {
+        self.paths()
+            .iter()
+            .any(|p| Remote::of(p).is_some_and(|r| r.is_ssh()))
+    }
+
     pub fn default_editor(&self, config: &Config) -> String {
         self.editor
             .as_ref()
@@ -249,12 +262,16 @@ fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
 /// about it.
 fn entry(paths: Vec<PathBuf>, name: String, manual: bool, db: &Db) -> Project {
     let key = entry_key(&paths);
-    let missing = !paths.iter().all(|p| p.is_dir());
+    // In WSL or over SSH: not looked at, which would start WSL or can't be done.
+    let remote = paths.iter().any(|p| Remote::of(p).is_some());
+    let missing = !remote && !paths.iter().all(|p| p.is_dir());
     let mut paths = paths.into_iter();
     let path = paths.next().expect("at least one folder");
     Project {
         name,
-        branch: (!missing).then(|| git::git_branch(&path)).flatten(),
+        branch: (!missing && !remote)
+            .then(|| git::git_branch(&path))
+            .flatten(),
         editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
         last_opened: db.opened.get(&key).copied().unwrap_or(0),
         frecency: frecency(db, &key, now()),

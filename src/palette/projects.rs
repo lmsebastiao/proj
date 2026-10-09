@@ -13,6 +13,7 @@ use crate::{
     autostart, config, git,
     launcher::{self, UpdateState},
     open, paths, platform,
+    remote::Remote,
     store::{self, Db, Project},
 };
 
@@ -628,7 +629,7 @@ impl Palette {
             return;
         };
         let (path, folders, project) = match pasted {
-            PastedPath::Folder(path) if add => {
+            PastedPath::Folder(path) | PastedPath::Remote(path) if add => {
                 store::add_manual(&mut self.db, path.clone());
                 self.save(cx);
                 self.reload_projects();
@@ -643,7 +644,7 @@ impl Palette {
                 }
                 return;
             }
-            PastedPath::Folder(path) => (path, Vec::new(), None),
+            PastedPath::Folder(path) | PastedPath::Remote(path) => (path, Vec::new(), None),
             PastedPath::File(path) => {
                 // The innermost, if projects are inside one another.
                 let project = self
@@ -660,7 +661,7 @@ impl Palette {
             Some(project) => project.default_editor(&self.config),
             None => self.config.editor.clone().unwrap_or_default(),
         };
-        let result = if path.is_dir() {
+        let result = if path.is_dir() || Remote::of(&path).is_some() {
             open::open_with(&self.config, &editor, std::slice::from_ref(&path))
         } else {
             open::open_file(&self.config, &editor, &folders, &path)

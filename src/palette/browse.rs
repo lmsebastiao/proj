@@ -130,6 +130,13 @@ impl Palette {
                 if self.say_if_missing(&project, cx) {
                     return true;
                 }
+                if project.is_ssh() {
+                    self.problem(
+                        "Its files are on another machine: open it, or a terminal there",
+                        cx,
+                    );
+                    return true;
+                }
                 self.browse = Some(Browse::new(project));
                 self.set_mode(Mode::Browse, cx);
                 true

@@ -74,6 +74,8 @@ pub(super) enum ProjectAction {
     OpenWith,
     ShowInFileManager,
     Terminal,
+    /// Reopens it in its dev container, with VS Code or a fork.
+    DevContainer,
     /// Opens its commands menu (ctrl-r).
     Commands,
     /// Ticks other projects to open in the same window (`Mode::Group`).
@@ -105,6 +107,9 @@ pub(super) enum PastedPath {
     Folder(PathBuf),
     /// A file: it opens, with the listed project it's in, if any.
     File(PathBuf),
+    /// An `ssh://` URL to a folder on another machine: enter lists it and
+    /// opens it, ctrl-enter just opens it.
+    Remote(PathBuf),
 }
 
 /// A git URL pasted into the search.
@@ -370,6 +375,15 @@ impl Palette {
                 "Open a terminal there".into(),
                 "Windows Terminal if it's installed".into(),
             ),
+            ProjectAction::DevContainer => (
+                "Reopen in its dev container".into(),
+                format!(
+                    "In {}, with the Dev Containers extension",
+                    self.dev_container_editor()
+                        .map(|e| self.name_of(&e))
+                        .unwrap_or_default()
+                ),
+            ),
             ProjectAction::Run(i) => {
                 let task = &self.tasks[i];
                 let from = if task.added {
@@ -599,6 +613,8 @@ impl Palette {
                         )),
                     };
                 }
+                // In WSL or over SSH, where its branch would be.
+                let remote = project.remote().map(|r| (r.label(), self.theme.muted));
                 // Only projects with their own default name it; the rest use the global one.
                 let editor = project.editor.as_deref().map(|c| self.name_of(c));
                 let opened =
@@ -607,7 +623,8 @@ impl Palette {
                 Meta {
                     top: self
                         .entry_branch_label(project)
-                        .map(|b| (b, self.theme.branch)),
+                        .map(|b| (b, self.theme.branch))
+                        .or(remote),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
                     // The marks after the branch, and when exactly "3d ago" was.
                     tip: {

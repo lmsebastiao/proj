@@ -8,7 +8,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::sqlite;
+use crate::{
+    remote::{self, Remote},
+    sqlite,
+};
 
 /// A recent project found in another editor's history.
 #[derive(Clone, Debug, PartialEq)]
@@ -89,6 +92,11 @@ fn keep(found: Vec<Found>, listed: &[PathBuf], skip: &[PathBuf]) -> Vec<Found> {
     for mut item in found {
         item.paths.dedup();
         let ok = |path: &Path| {
+            // In WSL or over SSH: not looked at, which would start WSL or
+            // can't be done from here.
+            if Remote::of(path).is_some() {
+                return true;
+            }
             path.parent().is_some()
                 && home.as_deref() != Some(path)
                 && !skip.iter().any(|dir| path.starts_with(dir))
@@ -136,7 +144,8 @@ fn set_key(paths: &[PathBuf]) -> Vec<String> {
 
 /// Zed's workspaces: the `paths` of each (one folder per line) and when it
 /// was last used, from its database. Remote ones (`remote_connection_id`)
-/// aren't folders here.
+/// are on the connection that row of `remote_connections` says: in WSL, or
+/// over SSH.
 fn zed(db: &Path) -> Vec<Found> {
     let Ok(mut database) = sqlite::Database::open(db) else {
         return Vec::new();
@@ -144,23 +153,25 @@ fn zed(db: &Path) -> Vec<Found> {
     let Ok(Some(table)) = database.table("workspaces") else {
         return Vec::new();
     };
+    let connections = database.table("remote_connections").ok().flatten();
     let mut found = Vec::new();
     for row in &table.rows {
-        let remote = table
+        let connection = table
             .get(row, "remote_connection_id")
-            .is_some_and(|v| *v != sqlite::Value::Null);
+            .and_then(sqlite::Value::as_int);
         let Some(paths) = table.get(row, "paths").and_then(sqlite::Value::as_text) else {
             continue;
         };
-        if remote {
-            continue;
-        }
-        let paths: Vec<PathBuf> = paths
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(PathBuf::from)
-            .collect();
+        let lines = paths.lines().map(str::trim).filter(|l| !l.is_empty());
+        let paths: Vec<PathBuf> = match connection {
+            None => lines.map(PathBuf::from).collect(),
+            Some(id) => {
+                let Some(on) = connections.as_ref().and_then(|c| zed_connection(c, id)) else {
+                    continue;
+                };
+                lines.filter_map(&on).collect()
+            }
+        };
         let at = table
             .get(row, "timestamp")
             .and_then(sqlite::Value::as_text)
@@ -172,6 +183,33 @@ fn zed(db: &Path) -> Vec<Found> {
         });
     }
     found
+}
+
+/// Turns a folder on Zed's remote connection `id` into a project path.
+fn zed_connection(table: &sqlite::Table, id: i64) -> Option<impl Fn(&str) -> Option<PathBuf>> {
+    let row = table
+        .rows
+        .iter()
+        .find(|r| table.get(r, "id").and_then(sqlite::Value::as_int) == Some(id))?;
+    let text = |column: &str| {
+        table
+            .get(row, column)
+            .and_then(sqlite::Value::as_text)
+            .map(str::to_string)
+    };
+    let kind = text("kind").unwrap_or_else(|| "ssh".into());
+    let (host, user, distro) = (text("host"), text("user"), text("distro"));
+    let port = table.get(row, "port").and_then(sqlite::Value::as_int);
+    Some(move |path: &str| {
+        remote::from_zed(
+            &kind,
+            host.as_deref(),
+            user.as_deref(),
+            port,
+            distro.as_deref(),
+            path,
+        )
+    })
 }
 
 /// "2026-10-09 14:12:05" (UTC, as SQLite's CURRENT_TIMESTAMP) in unix seconds.
@@ -217,7 +255,7 @@ fn vs_code(text: &str, editor: &'static str) -> Vec<Found> {
         uris.extend(open.iter().filter_map(|w| w["folder"].as_str()));
     }
     uris.into_iter()
-        .filter_map(file_uri_path)
+        .filter_map(|uri| file_uri_path(uri).or_else(|| remote::from_vs_code(uri)))
         .map(|path| Found {
             paths: vec![path],
             editors: vec![editor],
@@ -376,7 +414,15 @@ mod tests {
             .map(|f| f.paths[0].to_string_lossy().replace('\\', "/"))
             .collect();
         if cfg!(windows) {
-            assert_eq!(paths, ["C:/repos/app", "C:/repos/web", "C:/repos/app"]);
+            assert_eq!(
+                paths,
+                [
+                    "C:/repos/app",
+                    "ssh://box/home/me/x",
+                    "C:/repos/web",
+                    "C:/repos/app"
+                ]
+            );
         }
         assert!(found.iter().all(|f| f.editors == ["VS Code"]));
         assert!(vs_code("not json", "VS Code").is_empty());

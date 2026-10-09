@@ -1352,7 +1352,10 @@ impl Render for Palette {
 
         // A pasted path or git URL gets a row of its own above the matches.
         // A folder that isn't listed yet also says ctrl-enter opens it unlisted.
-        let open_only = matches!(self.pasted, Some(PastedPath::Folder(_)));
+        let open_only = matches!(
+            self.pasted,
+            Some(PastedPath::Folder(_) | PastedPath::Remote(_))
+        );
         let icon = match self.pasted {
             Some(PastedPath::File(_)) => icons::FILE,
             _ => icons::ADD,
@@ -1361,7 +1364,9 @@ impl Render for Palette {
             .pasted
             .as_ref()
             .map(|pasted| match pasted {
-                PastedPath::Folder(path) => ("Add and open", paths::display_path(path)),
+                PastedPath::Folder(path) | PastedPath::Remote(path) => {
+                    ("Add and open", paths::display_path(path))
+                }
                 PastedPath::File(path) => ("Open", paths::display_path(path)),
             })
             .or_else(|| {

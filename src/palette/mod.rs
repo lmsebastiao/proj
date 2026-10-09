@@ -42,7 +42,7 @@ use crate::{
     fuzzy, git,
     input::{self, TextInput},
     launcher::{UpdateState, Updates},
-    paths,
+    paths, remote,
     store::{self, Db, Project},
     switcher::EditorWindow,
     tasks::Task,
@@ -722,7 +722,18 @@ impl Palette {
                     None
                 }
             });
-        self.clone_candidate = (list == List::Projects)
+        // An ssh:// URL to a folder on another machine, rather than to clone.
+        if self.pasted.is_none()
+            && list == List::Projects
+            && let Some(path) = remote::parse_ssh(&query)
+            && !self
+                .projects
+                .iter()
+                .any(|p| !p.is_workspace() && p.path == path)
+        {
+            self.pasted = Some(PastedPath::Remote(path));
+        }
+        self.clone_candidate = (list == List::Projects && self.pasted.is_none())
             .then(|| git::clone_name(&query))
             .flatten()
             .map(|name| CloneTarget {

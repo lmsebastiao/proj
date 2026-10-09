@@ -164,7 +164,7 @@ impl Palette {
                     s(&["#tag"], "Just the projects with that tag (set in mod-k)"),
                     s(
                         &["paste"],
-                        "A folder path to add it, or a git URL to clone it",
+                        "A folder path to add it, a git URL to clone it, or ssh://host/path to add a folder there",
                     ),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["pgup", "pgdn"], "Move a page at a time").run(SelectPageDown),

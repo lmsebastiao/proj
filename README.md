@@ -248,6 +248,27 @@ A project you added whose folder is gone (moved, deleted, or on a drive that isn
 connected) stays listed at the end, dimmed and marked **missing**, instead of vanishing. Type
 `>` and pick **Remove missing projects** to forget them all, or remove one with shift-delete.
 
+### WSL, SSH and dev containers
+
+A project in WSL is listed by its Windows path, `\\wsl.localhost\Ubuntu\home\me\app` (or
+`\\wsl$\…`): paste it, pick it in the folder picker, or import it. VS Code and its forks open
+it through their WSL extension (`--folder-uri vscode-remote://wsl+Ubuntu/home/me/app`), other
+editors through that path. Its terminal (ctrl-t) and commands (ctrl-r) run inside the
+distribution (`wsl.exe -d Ubuntu --cd /home/me/app`). proj doesn't look inside it to show the
+branch or whether it's missing, which would start WSL when it isn't running.
+
+A folder on another machine is an `ssh://[user@]host[:port]/path` URL: paste one into the
+search (a URL whose user is `git`, or that ends in `.git`, is cloned instead) or run
+`proj add ssh://me@box/home/me/app`. VS Code and its forks open it with Remote - SSH, Zed with
+its own SSH support; other editors can't. Its terminal is `ssh -t` into the folder, and its
+commands run there too. There's nothing of it on this computer, so browsing, `$` and the
+repository's pages don't cover it. Zed's and VS Code's remote workspaces are imported too.
+
+A project with a dev container (`.devcontainer/devcontainer.json` or `.devcontainer.json`)
+gets **Reopen in its dev container** in ctrl-k, when VS Code or a fork of it is installed: it
+opens the folder in the container (`/workspaces/<name>`, or its `workspaceFolder`), with the
+Dev Containers extension.
+
 ### Tags
 
 ctrl-k → **Tags…** on a project, type words like `work oss` and press enter. Tags show after
@@ -299,7 +320,7 @@ CLI:
 
 ```sh
 proj open QUERY     # open the best match, as if you'd typed QUERY and pressed enter
-proj add [PATH]     # add a project (default: current directory)
+proj add [PATH]     # add a project (default: current directory; or ssh://host/path)
 proj remove PATH    # remove / hide a project
 proj list           # list projects
 proj recent [add]   # list the projects other editors opened lately; add: add them
