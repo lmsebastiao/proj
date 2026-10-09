@@ -647,12 +647,7 @@ impl Palette {
             List::Switch => {
                 let row = &self.switch_rows[ix];
                 let project = self.window_projects[row[0]].map(|p| &self.projects[p]);
-                let mut editors: Vec<&str> = Vec::new();
-                for &w in row {
-                    if !editors.contains(&self.windows[w].editor.as_str()) {
-                        editors.push(&self.windows[w].editor);
-                    }
-                }
+                let editor = &self.windows[row[0]].editor;
                 let expanded = self.expanded.is_some();
                 Meta {
                     top: project
@@ -661,12 +656,12 @@ impl Palette {
                     // A project's several windows: → shows them.
                     bottom: (project.is_some() && !expanded).then(|| {
                         let more = if row.len() > 1 { " · →" } else { "" };
-                        format!("{}{more}", editors.join(", "))
+                        format!("{editor}{more}")
                     }),
                     tip: match project {
                         Some(p) if row.len() > 1 && !expanded => Some(format!(
-                            "{} windows of {}: ↵ switches to the one you used last, → lists \
-                             them",
+                            "{} {editor} windows of {}: ↵ switches to the one you used last, → \
+                             lists them",
                             row.len(),
                             p.name
                         )),

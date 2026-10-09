@@ -166,12 +166,12 @@ pub struct Palette {
     windows: Vec<EditorWindow>,
     /// The project each of `windows` shows, as an index into `projects`.
     window_projects: Vec<Option<usize>>,
-    /// The switcher's rows, as indexes into `windows`: one per project (the
-    /// window to switch to first), or each of `expanded`'s windows.
+    /// The switcher's rows, as indexes into `windows`: one per project and
+    /// editor (the window to switch to first), or each of `expanded`'s windows.
     switch_rows: Vec<Vec<usize>>,
-    /// The project (index into `projects`) whose windows the switcher lists
-    /// one by one, after → on its row.
-    expanded: Option<usize>,
+    /// The project (index into `projects`) and editor whose windows the
+    /// switcher lists one by one, after → on its row.
+    expanded: Option<(usize, String)>,
     /// Keys of the projects that have a window open.
     open_keys: HashSet<String>,
     /// The switcher's modifiers while they're held; letting go switches.
@@ -895,8 +895,11 @@ impl Palette {
     /// `None` on the project list and the lists that don't go back to it.
     fn page_title(&self) -> Option<String> {
         if self.list() == List::Switch {
-            let project = &self.projects[self.expanded?];
-            return Some(format!("{}'s windows", project.name));
+            let (project, editor) = self.expanded.as_ref()?;
+            return Some(format!(
+                "{}'s {editor} windows",
+                self.projects[*project].name
+            ));
         }
         Some(match self.mode {
             Mode::Browse => self.browse.as_ref()?.breadcrumb(),

@@ -1,7 +1,7 @@
 //! The window switcher: open editor windows, like Alt+Tab for your projects.
 //! It stays up while the shortcut's modifiers are held and letting go switches;
 //! typing while holding them keeps it up to search in instead. A project's
-//! windows share a row, which → opens up.
+//! windows in the same editor share a row, which → opens up.
 
 use std::time::Duration;
 
@@ -256,15 +256,21 @@ impl Palette {
         self.arrange_rows();
     }
 
-    /// The switcher's rows: a row per project, or `expanded`'s windows one by one.
+    /// The switcher's rows: a row per project and editor, or `expanded`'s
+    /// windows one by one.
     pub(super) fn arrange_rows(&mut self) {
-        self.switch_rows = match self.expanded {
-            Some(project) => (0..self.windows.len())
-                .filter(|&w| self.window_projects[w] == Some(project))
+        self.switch_rows = match &self.expanded {
+            Some(expanded) => (0..self.windows.len())
+                .filter(|&w| self.shows(w, expanded))
                 .map(|w| vec![w])
                 .collect(),
             None => switcher::rows(&self.windows, &self.window_projects),
         };
+    }
+
+    /// Whether `windows[w]` is one of the windows of `(project, editor)`.
+    fn shows(&self, w: usize, (project, editor): &(usize, String)) -> bool {
+        self.window_projects[w] == Some(*project) && self.windows[w].editor == *editor
     }
 
     /// →: a project row with several windows lists them one by one.
@@ -281,7 +287,8 @@ impl Palette {
         else {
             return false;
         };
-        self.expanded = self.window_projects[row[0]];
+        let editor = self.windows[row[0]].editor.clone();
+        self.expanded = self.window_projects[row[0]].map(|project| (project, editor));
         self.arrange_rows();
         self.clear_switch_query(cx);
         true
@@ -289,14 +296,12 @@ impl Palette {
 
     /// ←: back from one project's windows to every project's rows, on its row.
     pub(super) fn collapse_row(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(project) = self.expanded.take() else {
+        let Some(expanded) = self.expanded.take() else {
             return false;
         };
         self.arrange_rows();
         self.clear_switch_query(cx);
-        self.select_where(|this, ix| {
-            this.window_projects[this.switch_rows[ix][0]] == Some(project)
-        });
+        self.select_where(|this, ix| this.shows(this.switch_rows[ix][0], &expanded));
         cx.notify();
         true
     }
@@ -335,11 +340,9 @@ impl Palette {
         platform::close_window(closed.window);
         self.match_windows();
         // Down to one window: no list of them to show.
-        if let Some(project) = self.expanded
-            && self
-                .window_projects
-                .iter()
-                .filter(|&&p| p == Some(project))
+        if let Some(expanded) = &self.expanded
+            && (0..self.windows.len())
+                .filter(|&w| self.shows(w, expanded))
                 .count()
                 < 2
         {
