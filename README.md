@@ -171,9 +171,10 @@ ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 Each window is listed under its project, with the branch and the editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
-title. Projects with a window open get a green dot after their name in the normal list, and **enter** on
-one switches to its window instead of opening it again (**alt-↵** still opens it anew, in any
-editor).
+title. Projects with a window open get a green dot after their name in the normal list, and
+"window open · ↵ switches" on the right where "3d ago" would be. **Enter** on one brings its
+window to the front instead of opening it again, and the footer's button says **Switch to
+window** (**alt-↵** still opens it anew, in any editor).
 
 `switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`, or `""` turns the
 switcher off. Windows and macOS; on macOS proj needs to be allowed under System Settings ›

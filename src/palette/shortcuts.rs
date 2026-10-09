@@ -111,7 +111,7 @@ impl Palette {
                 let (open, open_short) = if self.marked.len() > 1 {
                     ("Open the marked projects in one window", "Open together")
                 } else if has_window {
-                    ("Switch to its open editor window", "Switch")
+                    ("Switch to its open editor window", "Switch to window")
                 } else {
                     ("Open in the editor", "Open")
                 };

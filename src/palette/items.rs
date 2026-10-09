@@ -583,21 +583,33 @@ impl Palette {
                 }
                 // Only projects with their own default name it; the rest use the global one.
                 let editor = project.editor.as_deref().map(|c| self.name_of(c));
-                let opened =
-                    (project.last_opened > 0).then(|| store::ago(project.last_opened, now));
+                // With a window open, that says more than when it was last
+                // opened: enter goes to that window rather than opening another.
+                let has_window = self.open_keys.contains(&project.key());
+                let opened = if has_window {
+                    Some("window open · ↵ switches".to_string())
+                } else {
+                    (project.last_opened > 0).then(|| store::ago(project.last_opened, now))
+                };
                 let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
                 Meta {
                     top: self
                         .entry_branch_label(project)
                         .map(|b| (b, self.theme.branch)),
                     bottom: (!bottom.is_empty()).then(|| bottom.join(" · ")),
-                    // The marks after the branch, and when exactly "3d ago" was.
+                    // The open window, the marks after the branch, and when
+                    // exactly "3d ago" was.
                     tip: {
+                        let window = has_window.then(|| {
+                            "An editor window is open: ↵ switches to it instead of opening \
+                             another (alt-↵ opens it again, in any editor)"
+                                .to_string()
+                        });
                         let opened = (project.last_opened > 0)
                             .then(|| format!("Opened {}", store::date_of(project.last_opened)));
-                        let lines: Vec<String> = self
-                            .entry_branch_tip(project)
+                        let lines: Vec<String> = window
                             .into_iter()
+                            .chain(self.entry_branch_tip(project))
                             .chain(opened)
                             .collect();
                         (!lines.is_empty()).then(|| lines.join("\n"))
