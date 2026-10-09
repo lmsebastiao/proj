@@ -168,12 +168,20 @@ fn stem(path: &Path) -> String {
 impl EditorWindow {
     /// Index of the project in `projects` this window shows.
     pub fn project(&self, projects: &[Project]) -> Option<usize> {
-        project_for(&self.title, &self.process, projects)
+        project_for(&self.title, &self.process, &self.editor, projects)
     }
 }
 
-fn project_for(title: &str, process: &str, projects: &[Project]) -> Option<usize> {
+fn project_for(title: &str, process: &str, editor: &str, projects: &[Project]) -> Option<usize> {
     let parts = title_parts(title);
+    // Titled just with the editor's name ("Zed"): one of its own windows, like
+    // Zed's settings or an empty window, not a project named after it (the
+    // folder of Zed's own settings, say).
+    if let [only] = parts.as_slice()
+        && (only.eq_ignore_ascii_case(editor) || only.eq_ignore_ascii_case(process))
+    {
+        return None;
+    }
     let has = |name: &str| parts.iter().any(|p| p.eq_ignore_ascii_case(name));
     let folder = |path: &Path| {
         path.file_name()
@@ -270,13 +278,19 @@ mod tests {
             project("Client", &["/r/example-v2"]),
             project("app + sample-sdk", &["/r/app", "/r/sample-sdk"]),
         ];
-        let find = |title: &str| project_for(title, "zed", &projects);
+        let find = |title: &str| project_for(title, "zed", "Zed", &projects);
         assert_eq!(find("app — main.rs"), Some(0));
         assert_eq!(find("example-v2 — main.rs"), Some(1), "by folder");
         assert_eq!(find("Client"), Some(1), "by its custom name");
         assert_eq!(find("sample-sdk, app — lib.rs"), Some(2), "a Zed workspace");
         assert_eq!(find("main.rs - app - Visual Studio Code"), Some(0));
         assert_eq!(find("empty project"), None);
+
+        // A project in a folder named after the editor, like Zed's own settings.
+        let projects = vec![project("Zed", &[r"C:\Users\me\AppData\Roaming\Zed"])];
+        let find = |title: &str| project_for(title, "zed", "Zed", &projects);
+        assert_eq!(find("Zed — settings.json"), Some(0));
+        assert_eq!(find("Zed"), None, "Zed's settings window");
     }
 
     #[test]
