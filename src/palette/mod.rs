@@ -102,8 +102,8 @@ pub struct Palette {
     open_with: Option<String>,
     /// The project being browsed in `Mode::Browse`.
     browse: Option<browse::Browse>,
-    /// Key of the entry being renamed, tagged or given a command
-    /// (`Mode::Rename`, `Mode::Tags`, `Mode::AddCommand`).
+    /// Key of the entry being renamed or given a command
+    /// (`Mode::Rename`, `Mode::AddCommand`).
     editing: Option<String>,
     /// Key of the entry whose actions (ctrl-k) or commands (ctrl-r) menu is
     /// open over the list, and which of the two.
@@ -294,26 +294,41 @@ impl Palette {
             _subscriptions: subscriptions,
         };
         // Re-read everything on each open so edits made by hand or via the CLI show up.
-        this.config = config::load_config();
+        let (config, config_problem) = config::load_config_checked();
+        this.config = config;
         this.db = store::load_db();
         this.windows = windows;
         this.reload_projects();
         this.refresh_git_status(cx);
-        let mode = if this.config.editor.is_none() {
+        // Not when the config can't be read: it may well have one.
+        let mode = if this.config.editor.is_none() && config_problem.is_none() {
             Mode::Editors
         } else {
             Mode::Projects
         };
         this.set_mode(mode, cx);
         this.apply_theme(window, cx);
-        this.status = cx
-            .try_global::<ShortcutNotice>()
-            .and_then(|notice| notice.0.clone())
-            .map(|text| Status {
-                text,
-                problem: true,
-                undo: false,
-            });
+        let problems: Vec<String> = [
+            config_problem.map(|problem| {
+                format!(
+                    "{problem}. Default settings apply until it's fixed ({}-, opens it)",
+                    secondary()
+                )
+            }),
+            store::db_problem()
+                .map(|problem| format!("{problem}. Nothing is saved until it's fixed or deleted")),
+            cx.try_global::<ShortcutNotice>()
+                .and_then(|notice| notice.0.as_ref())
+                .map(ToString::to_string),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        this.status = (!problems.is_empty()).then(|| Status {
+            text: problems.join("\n").into(),
+            problem: true,
+            undo: false,
+        });
         this
     }
 
@@ -496,7 +511,6 @@ impl Palette {
             }
             Mode::Browse
             | Mode::Rename
-            | Mode::Tags
             | Mode::AddCommand
             | Mode::NewProject
             | Mode::Switch
@@ -546,7 +560,7 @@ impl Palette {
             // The rest (pasting a path or git URL…) is under F1.
             Mode::Projects => {
                 format!(
-                    "Search projects…   > commands · {SWITCH_PREFIX} windows · {FILES_PREFIX} files · # tags"
+                    "Search projects…   > commands · {SWITCH_PREFIX} windows · {FILES_PREFIX} files"
                 )
             }
             Mode::Editors if self.config.editor.is_none() => {
@@ -559,10 +573,9 @@ impl Palette {
                 None => String::new(),
             },
             Mode::Rename => "Leave empty to use the folder name".into(),
-            Mode::Tags => "Tags, e.g. work oss; leave empty for none".into(),
             Mode::AddCommand => "A command to run in the project's folder, e.g. npm run dev".into(),
             Mode::Templates => "New project from…".into(),
-            Mode::Group => "Search projects to tick… (#tag works too)".into(),
+            Mode::Group => "Search projects to tick…".into(),
             Mode::Forges => match &self.forge_pick {
                 Some(pick) => format!("What does {} run?", pick.host),
                 None => String::new(),
@@ -572,10 +585,9 @@ impl Palette {
         };
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
-        // Start from the current name or tags, selected so typing replaces them.
+        // Start from the current name, selected so typing replaces it.
         let start = match mode {
             Mode::Rename => self.edited_project().map(|p| p.name.clone()),
-            Mode::Tags => self.edited_project().map(|p| p.tags.join(" ")),
             _ => None,
         };
         match start {
@@ -599,7 +611,7 @@ impl Palette {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
             Mode::Browse => List::Browse,
-            Mode::Rename | Mode::Tags | Mode::AddCommand | Mode::NewProject => List::Text,
+            Mode::Rename | Mode::AddCommand | Mode::NewProject => List::Text,
             Mode::Templates => List::Templates,
             Mode::Forges => List::Forges,
             Mode::Group => List::Group,
@@ -649,29 +661,21 @@ impl Palette {
         // `matches` is about to be another list's.
         self.files.hits.clear();
         let query = self.filter_query().to_string();
-        // Projects: `#tag` words keep the ones tagged with them, by the start of
-        // the tag ("#wo" for "work"); the rest of the text is searched as usual.
-        let (tags, text) = match list {
-            List::Projects | List::Group => split_tags(&query),
-            _ => (Vec::new(), query.clone()),
-        };
         let candidates: Vec<usize> = (0..self.item_count())
             // Groups don't go in groups, and a folder that's gone can't open.
             .filter(|&ix| {
                 list != List::Group
                     || !(self.projects[ix].is_workspace() || self.projects[ix].missing)
             })
-            .filter(|&ix| tags.is_empty() || self.projects[ix].has_tags(&tags))
             .collect();
         self.matches.clear();
-        if text.is_empty() {
+        if query.trim().is_empty() {
             self.matches.extend(candidates.into_iter().map(|ix| Match {
                 ix,
                 title_hl: Vec::new(),
                 subtitle_hl: Vec::new(),
             }));
         } else {
-            let query = text;
             let mut scored: Vec<(fuzzy::Rank, Match)> = candidates
                 .into_iter()
                 .filter_map(|ix| {
@@ -816,7 +820,6 @@ impl Palette {
         }
         if self.list() == List::Text {
             return match self.mode {
-                Mode::Tags => self.finish_tags(cx),
                 Mode::AddCommand => self.finish_add_command(cx),
                 Mode::NewProject => self.finish_new_project(window, cx),
                 _ => self.finish_rename(cx),
@@ -905,7 +908,6 @@ impl Palette {
             Mode::Browse => self.browse.as_ref()?.breadcrumb(),
             Mode::OpenWith => format!("Open {} with", self.open_with_project()?.name),
             Mode::Rename => format!("Rename {}", self.edited_project()?.name),
-            Mode::Tags => format!("Tags for {}", self.edited_project()?.name),
             Mode::AddCommand => format!("Command for {}", self.edited_project()?.name),
             Mode::Templates => "New project".into(),
             Mode::Forges => format!("What runs {}", self.forge_pick.as_ref()?.host),
@@ -1080,17 +1082,6 @@ fn secondary() -> &'static str {
     }
 }
 
-/// The `#tag` words of a search (lowercase, without the `#`), and the rest of it.
-fn split_tags(query: &str) -> (Vec<String>, String) {
-    let (tags, words): (Vec<&str>, Vec<&str>) = query
-        .split_whitespace()
-        .partition(|word| word.len() > 1 && word.starts_with('#'));
-    (
-        tags.iter().map(|t| t[1..].to_lowercase()).collect(),
-        words.join(" "),
-    )
-}
-
 /// Paths start with `~`, `/`, `\` or a drive letter (`C:`).
 fn looks_like_path(query: &str) -> bool {
     let bytes = query.as_bytes();
@@ -1101,29 +1092,5 @@ fn looks_like_path(query: &str) -> bool {
 impl Focusable for Palette {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.input.focus_handle(cx)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tags_in_the_search() {
-        let split = |query: &str| split_tags(query);
-        assert_eq!(
-            split("#Work api"),
-            (vec!["work".to_string()], "api".to_string())
-        );
-        assert_eq!(
-            split("client #oss #web"),
-            (
-                vec!["oss".to_string(), "web".to_string()],
-                "client".to_string()
-            )
-        );
-        // A lone `#` is searched for like any other character.
-        assert_eq!(split("# api"), (Vec::new(), "# api".to_string()));
-        assert_eq!(split("app"), (Vec::new(), "app".to_string()));
     }
 }

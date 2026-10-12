@@ -120,7 +120,7 @@ impl Palette {
                     s(&["↵"], open).footer(open_short).run(Confirm),
                     s(
                         &["mod-k", "shift-f10", "right-click"],
-                        "Actions: rename, tags, open with, the repository's pages, remove…",
+                        "Actions: rename, open with, the repository's pages, remove…",
                     )
                     .or_alt()
                     .footer("Actions")
@@ -161,7 +161,6 @@ impl Palette {
                     .or_alt(),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
                     s(&["@"], "Open editor windows, to search and switch to"),
-                    s(&["#tag"], "Just the projects with that tag (set in mod-k)"),
                     s(
                         &["paste"],
                         "A folder path to add it, or a git URL to clone it",
@@ -340,7 +339,6 @@ impl Palette {
             }
             List::Text => {
                 let save = match self.mode {
-                    Mode::Tags => "Save the tags",
                     Mode::AddCommand => "Add the command",
                     Mode::NewProject => "Make the project and open it",
                     _ => "Save the name",

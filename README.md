@@ -28,7 +28,7 @@ then opens a folder picker where you can select one or more projects at once.
 | ctrl-1 … 9, alt-1 … 9   | open the project in that place (hold ctrl or alt a moment to see the numbers) |
 | enter                   | open in editor                             |
 | ctrl-enter, alt-enter   | open with… (another editor once, or set the project's default) |
-| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: rename, tags, remove, and the ones below |
+| ctrl-k / alt-k, shift-f10, menu key, right-click | actions for the project: rename, remove, and the ones below |
 | ctrl-r / alt-r          | its commands to run: package.json scripts and your own (see Commands) |
 | f2                      | rename                                     |
 | shift-delete            | remove from the list (the folder stays)    |
@@ -37,7 +37,6 @@ then opens a folder picker where you can select one or more projects at once.
 | → / ←                   | browse into a project / back up (see below) |
 | backspace               | with nothing typed: back a page (out of a folder, the Open-with list…) |
 | tab / shift-tab         | mark projects to open together once, moving down / up (see Groups) |
-| `#tag`                  | only the projects with that tag (see Tags) |
 | ctrl-e / alt-e          | show in Explorer (Finder on macOS, the file manager on Linux) |
 | ctrl-g / alt-g          | open the repository page (from the git `origin` remote) |
 | ctrl-c / alt-c          | copy the project path (ctrl-c: the text, if some is selected) |
@@ -62,7 +61,7 @@ Esc or typing closes it.
 **ctrl-k** (or alt-k, handy right after alt+space; shift-f10, the menu key, or right-clicking a row) opens a menu over the list,
 at the bottom right, with everything you can do with the highlighted project: open with,
 show in Explorer, terminal, run a command (the ctrl-r menu, see Commands), rename,
-tags, open the repository page, its pull requests or its CI runs, copy the clone URL, change
+open the repository page, its pull requests or its CI runs, copy the clone URL, change
 what its git site runs, copy the path, start a new project from it, remove. Each shows its own key, if it has one. Type to filter it and press
 enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
 highlighted row, and any row under the mouse, also has a **⋯** icon that opens the same menu.
@@ -85,7 +84,7 @@ then offers **Undo** (or ctrl-z) for a few seconds.
 
 Every row starts with an icon: the editor the project opens in, a folder or file while
 browsing, the program in the editor and window lists. On the pages you reach from the project
-list (Open with, browsing, rename, tags…), the search bar starts with a back button and the
+list (Open with, browsing, rename…), the search bar starts with a back button and the
 page's name; backspace with nothing typed goes back too. Copying a path says **Copied** for
 a moment before the dialog closes.
 
@@ -194,7 +193,7 @@ tab, enter. Nothing is saved. Esc clears the marks.
 with that one ticked. **tab** or **space** ticks or unticks the highlighted project, and
 **alt-↑/↓** moves it earlier or later in the order (its number shows it). **enter** opens the
 ticked ones together once; **ctrl-enter** saves them as a group, a row of its own in the list,
-with its own history, editor, tags and commands, so next time you just search for it.
+with its own history, editor and commands, so next time you just search for it.
 Ticking the same projects in another order finds the same group.
 
 A group is named after its first folder, `example-v2 Workspace`, as everything it does goes
@@ -205,7 +204,7 @@ match. A group's row has a folder icon with how many folders it has, and its fol
 its name, each with a green dot when that project has a window of its own open. Its branches
 show on the right; hovering them lists each folder's branch and changes. ctrl-k on a group →
 **Folders…** opens the same page with its folders ticked, to add, take out or reorder them;
-enter saves, keeping its name, tags and history. Rename it (f2) to give it a shorter name;
+enter saves, keeping its name and history. Rename it (f2) to give it a shorter name;
 search still finds it by its folders' names. Removing it (shift-delete) forgets the group, not
 the projects.
 
@@ -235,13 +234,6 @@ Projects that share a folder name get their parent folder added, e.g. `app (clie
 A project you added whose folder is gone (moved, deleted, or on a drive that isn't
 connected) stays listed at the end, dimmed and marked **missing**, instead of vanishing. Type
 `>` and pick **Remove missing projects** to forget them all, or remove one with shift-delete.
-
-### Tags
-
-ctrl-k → **Tags…** on a project, type words like `work oss` and press enter. Tags show after
-the project's name. Search for `#work` to list only the projects tagged with it; the start of a
-tag is enough (`#wo`), several tags must all match, and the rest of the search filters as
-usual: `#work api`.
 
 ### Commands
 
@@ -323,8 +315,14 @@ Config and folder scans are re-read every time the dialog opens, so changes appl
 That includes `hotkey`: a new shortcut starts working once the dialog has opened, by the old
 shortcut or the tray icon. If none of the new shortcuts can be registered, the old ones keep
 working and the dialog says why.
-Manually added projects, hidden projects, names, tags, added commands and open history live
+Manually added projects, hidden projects, names, added commands and open history live
 in `projects.toml`.
+
+If either file can't be read (a typo made editing it by hand), the dialog says where, e.g.
+`config.toml, line 12: invalid type: string "2", expected u8`. Until it's fixed, a broken
+`config.toml` means default settings, but for the editor when proj can still find it, and the
+shortcuts stay as they were. A broken `projects.toml` is never written over: nothing is saved
+until you fix or delete it.
 
 ## Windows installer
 

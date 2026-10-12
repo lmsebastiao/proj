@@ -69,7 +69,7 @@ pub fn bind_keys(cx: &mut App) {
         // Mark projects to open together, then move down / up (other lists: just move).
         KeyBinding::new("tab", ToggleMark, ctx),
         KeyBinding::new("shift-tab", ToggleMarkUp, ctx),
-        // Everything else for the project (rename, tags, remove…), also on the
+        // Everything else for the project (rename, remove…), also on the
         // row's icons. Shift-F10 and the menu key open context menus elsewhere.
         KeyBinding::new("secondary-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),

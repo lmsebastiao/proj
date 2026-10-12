@@ -21,8 +21,6 @@ pub struct Theme {
     pub danger: u32,
     /// The dot after a project with an editor window open.
     pub open: u32,
-    /// Tags' colours, one picked by each tag's name (not green, the open dot's).
-    pub tags: [u32; 6],
 }
 
 pub const DARK: Theme = Theme {
@@ -37,7 +35,6 @@ pub const DARK: Theme = Theme {
     accent: 0x74ade8,
     danger: 0xe5707a,
     open: 0x6cc58a,
-    tags: [0x74ade8, 0xe5c07b, 0xc678dd, 0x56b6c2, 0xe5987a, 0xf28ab8],
 };
 
 pub const LIGHT: Theme = Theme {
@@ -52,7 +49,6 @@ pub const LIGHT: Theme = Theme {
     accent: 0x2468c4,
     danger: 0xc4314b,
     open: 0x2e8b4f,
-    tags: [0x2468c4, 0x9a6b00, 0x8e44ad, 0x0e7c86, 0xb5532a, 0xb8336a],
 };
 
 impl Theme {
@@ -71,14 +67,6 @@ impl Theme {
 
     pub fn is_dark(&self) -> bool {
         self.bg == DARK.bg
-    }
-
-    /// A tag's colour: always the same one for the same tag.
-    pub fn tag_color(&self, tag: &str) -> u32 {
-        let hash = tag
-            .bytes()
-            .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
-        self.tags[hash as usize % self.tags.len()]
     }
 }
 
@@ -99,7 +87,6 @@ pub(super) mod icons {
         pub const TERMINAL: &str = "\u{E756}";
         pub const RUN: &str = "\u{E768}";
         pub const ADD: &str = "\u{E710}";
-        pub const TAG: &str = "\u{E8EC}";
         pub const COPY: &str = "\u{E8C8}";
         pub const GLOBE: &str = "\u{E774}";
         pub const PULL_REQUESTS: &str = "\u{E8AB}";
@@ -133,7 +120,6 @@ pub(super) mod icons {
         pub const TERMINAL: &str = "›";
         pub const RUN: &str = "▶";
         pub const ADD: &str = "+";
-        pub const TAG: &str = "#";
         pub const COPY: &str = "⧉";
         pub const GLOBE: &str = "◍";
         pub const PULL_REQUESTS: &str = "⇄";

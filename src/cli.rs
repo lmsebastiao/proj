@@ -74,7 +74,6 @@ pub fn run(args: &[String]) -> i32 {
             db.names.remove(key.as_ref());
             db.editors.remove(key.as_ref());
             db.opened.remove(key.as_ref());
-            db.tags.remove(key.as_ref());
             db.commands.remove(key.as_ref());
             println!("removed {}", path.display());
         }

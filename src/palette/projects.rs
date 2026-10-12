@@ -191,7 +191,7 @@ impl Palette {
     }
 
     /// Type something about the selected entry in the search box: its name
-    /// (`Mode::Rename`), tags or a command.
+    /// (`Mode::Rename`) or a command.
     pub(super) fn edit_selected(&mut self, mode: Mode, cx: &mut Context<Self>) {
         let Some(key) = self.selected_project().map(Project::key) else {
             return;
@@ -209,21 +209,6 @@ impl Palette {
         if let Some(status) = status {
             self.notice(status, cx);
         }
-    }
-
-    pub(super) fn finish_tags(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.editing.clone() else {
-            return;
-        };
-        store::set_tags(&mut self.db, &key, &self.query);
-        let status = match self.db.tags.get(&key) {
-            Some(tags) => {
-                let tags: Vec<String> = tags.iter().map(|t| format!("#{t}")).collect();
-                format!("Tagged {}", tags.join(" "))
-            }
-            None => "No tags".into(),
-        };
-        self.done_editing(&key, Some(status), cx);
     }
 
     pub(super) fn finish_add_command(&mut self, cx: &mut Context<Self>) {
@@ -509,7 +494,7 @@ impl Palette {
     }
 
     /// Ctrl-Z after a remove: puts back what it took off the list, with its
-    /// name, tags and history.
+    /// name and history.
     pub(super) fn undo_remove(&mut self, _: &UndoRemove, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_last_remove(cx);
     }

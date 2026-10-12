@@ -4,7 +4,7 @@ use std::{cmp::Ordering, ops::Range, path::PathBuf};
 
 use gpui::{
     AnyElement, Context, Div, Focusable, FontWeight, HighlightStyle, KeyDownEvent,
-    ModifiersChangedEvent, MouseButton, StyledText, Window, div, list, prelude::*, px, rgb, rgba,
+    ModifiersChangedEvent, MouseButton, StyledText, Window, div, list, prelude::*, px, rgb,
 };
 
 use crate::{input, paths, store, templates::Template};
@@ -28,7 +28,7 @@ use super::{
 const ROW_GROUP: &str = "row";
 
 /// A key as key caps: "ctrl-k" as [ctrl] [k], "↑ ↓" as [↑] [↓]. Words that
-/// aren't modifiers ("right-click", "#tag") stay in one cap.
+/// aren't modifiers ("right-click", "f2") stay in one cap.
 pub(super) fn keycaps(keys: &str, t: Theme) -> Div {
     const MODIFIERS: [&str; 4] = ["ctrl", "alt", "shift", "cmd"];
     let caps: Vec<String> = keys
@@ -292,28 +292,9 @@ impl Palette {
             theme: t,
         });
         let icon = self.row_icon(row, m.ix);
-        // A project whose folder is gone is dimmed; tags show after the name.
+        // A project whose folder is gone is dimmed.
         let project = is_projects.then(|| &self.projects[m.ix]);
         let missing = project.is_some_and(|p| p.missing);
-        // Each tag in its own colour, so the same tag looks the same everywhere.
-        let tags: Vec<_> = project
-            .map(|p| p.tags.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|tag| {
-                let color = t.tag_color(&tag);
-                div()
-                    .flex_none()
-                    .px_1()
-                    .rounded_sm()
-                    .border_1()
-                    // The colour, faded.
-                    .border_color(rgba((color << 8) | 0x66))
-                    .text_size(px(SMALL_FONT_SIZE))
-                    .text_color(rgb(color))
-                    .child(format!("#{tag}"))
-            })
-            .collect();
         // A switcher row's close button, like ctrl-w: shown on the highlighted
         // row, and on any row the mouse is over.
         let close = (self.list() == List::Switch).then(|| {
@@ -518,8 +499,7 @@ impl Palette {
                                                     t,
                                                 )),
                                         )
-                                    })
-                                    .children(tags),
+                                    }),
                             )
                             .child(match members_line {
                                 Some(line) => line,
@@ -660,22 +640,8 @@ impl Palette {
                                 .text_color(rgb(color))
                                 .child(StyledText::new(title).with_highlights(title_hl)),
                         )
-                        // Its key, or the project's tags.
-                        .children(detail.map(|detail| {
-                            if detail.starts_with('#') {
-                                div()
-                                    .flex_none()
-                                    .max_w(px(160.))
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(SMALL_FONT_SIZE))
-                                    .text_color(rgb(t.muted))
-                                    .child(detail)
-                            } else {
-                                keycaps(&detail, t)
-                            }
-                        }))
+                        // Its key.
+                        .children(detail.map(|detail| keycaps(&detail, t)))
                         .into_any_element()
                 }
             })
@@ -874,10 +840,6 @@ impl Palette {
                 };
                 (None, vec![line])
             }
-            Mode::Tags => (
-                None,
-                vec!["Words, separated by spaces or commas; then search for #tag to list just those projects.".into()],
-            ),
             Mode::AddCommand => {
                 let project = self.edited_project()?;
                 (
@@ -1463,8 +1425,8 @@ impl Render for Palette {
                 }
             }))
             // Backspace with nothing typed goes back a page, as in PowerToys'
-            // Command Palette; in the menu, closes it. Not while typing a name
-            // or tags, where empty is a value.
+            // Command Palette; in the menu, closes it. Not while typing a name,
+            // where empty is a value.
             .capture_action(cx.listener(|this, _: &input::Backspace, _, cx| {
                 if this.menu_open() {
                     if this.menu_input.read(cx).text().is_empty() {

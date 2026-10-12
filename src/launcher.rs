@@ -622,7 +622,11 @@ fn check_for_updates_daily(tx: &async_channel::Sender<Command>) {
 /// Applies changed shortcuts from config.toml, like the palette does with the
 /// rest of the config each time it opens.
 fn reload_hotkeys(tray: Option<&Tray>, cx: &mut App) {
-    let config = config::load_config();
+    // Unreadable: keep the shortcuts that work rather than the defaults. The
+    // palette says what's wrong.
+    let (config, None) = config::load_config_checked() else {
+        return;
+    };
     let hotkeys = cx.global_mut::<Hotkeys>();
     let mut changed = hotkeys.sync_switcher(&config);
     if hotkeys.wanted != config.hotkey {

@@ -1,7 +1,11 @@
 //! User-edited settings (`config.toml`).
 
 use serde::{Deserialize, Deserializer};
-use std::{collections::BTreeMap, fs, io, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use crate::paths::{app_dir, write_atomic};
 
@@ -181,14 +185,25 @@ pub fn config_path() -> PathBuf {
     app_dir(dirs::config_dir()).join("config.toml")
 }
 
-/// Loads the config, writing a commented template on first run.
+/// Loads the config, writing a commented template on first run. The defaults
+/// if it can't be read.
 pub fn load_config() -> Config {
+    let (config, problem) = load_config_checked();
+    if let Some(problem) = problem {
+        eprintln!("proj: {problem}");
+    }
+    config
+}
+
+/// The config, and what's wrong with it if it can't be read (then the
+/// defaults), for the palette to show: without a console, nobody sees stderr.
+pub fn load_config_checked() -> (Config, Option<String>) {
     let path = config_path();
     match fs::read_to_string(&path) {
-        Ok(text) => toml::from_str(&text).unwrap_or_else(|err| {
-            eprintln!("proj: invalid {}: {err}", path.display());
-            Config::default()
-        }),
+        Ok(text) => match toml::from_str(&text) {
+            Ok(config) => (config, None),
+            Err(err) => (salvage(&text), Some(toml_problem(&path, &text, &err))),
+        },
         Err(_) => {
             let config = Config::default();
             let text = CONFIG_TEMPLATE.replace(
@@ -198,8 +213,49 @@ pub fn load_config() -> Config {
             if let Err(err) = write_atomic(&path, &text) {
                 eprintln!("proj: could not write {}: {err}", path.display());
             }
-            config
+            (config, None)
         }
+    }
+}
+
+/// The defaults, but for the editor when the file is TOML with a wrong value
+/// elsewhere (`scan_depth = "2"`): projects, and the config file to fix, still
+/// open in it.
+fn salvage(text: &str) -> Config {
+    let mut config = Config::default();
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return config;
+    };
+    if let Some(editor) = doc.get("editor").and_then(|v| v.as_str()) {
+        config.editor = Some(editor.to_string());
+        if let Some(args) = doc.get("editor_args").and_then(|v| v.as_array()) {
+            config.editor_args = args
+                .iter()
+                .filter_map(|arg| arg.as_str().map(String::from))
+                .collect();
+        }
+    }
+    config
+}
+
+/// A TOML error in one line, for the footer: "config.toml, line 12: invalid
+/// type: string "2", expected u8".
+pub(crate) fn toml_problem(path: &Path, text: &str, err: &toml::de::Error) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let message = err
+        .message()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    match err.span() {
+        Some(span) => {
+            let line = text[..span.start.min(text.len())].matches('\n').count() + 1;
+            format!("{name}, line {line}: {message}")
+        }
+        None => format!("{name}: {message}"),
     }
 }
 
@@ -341,6 +397,24 @@ fn with_editor(text: &str, command: &str) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn problems_fit_on_one_line() {
+        let text = "hotkey = \"f8\"\n\nscan_depth = \"2\"\n";
+        let err = toml::from_str::<Config>(text).unwrap_err();
+        let problem = toml_problem(Path::new("/x/config.toml"), text, &err);
+        assert!(problem.starts_with("config.toml, line 3: "), "{problem}");
+        assert!(!problem.contains('\n'), "{problem}");
+    }
+
+    #[test]
+    fn salvages_the_editor() {
+        let config = salvage("scan_depth = \"2\"\neditor = \"zed\"\neditor_args = [\"-n\"]\n");
+        assert_eq!(config.editor.as_deref(), Some("zed"));
+        assert_eq!(config.editor_args, ["-n"]);
+        // Not TOML at all: nothing to go on.
+        assert_eq!(salvage("editor = \"zed").editor, None);
+    }
 
     #[test]
     fn editor_is_added_below_its_docs_and_replaced_in_place() {

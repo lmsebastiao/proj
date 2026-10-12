@@ -67,7 +67,6 @@ impl ProjectAction {
             Self::OpenTogether | Self::Folders => icons::GROUP,
             Self::AddCommand => icons::ADD,
             Self::Rename => icons::RENAME,
-            Self::Tags => icons::TAG,
             Self::RepoPage => icons::GLOBE,
             Self::PullRequests => icons::PULL_REQUESTS,
             Self::Ci => icons::CI,
@@ -147,17 +146,17 @@ impl Palette {
         }
         self.tasks = Vec::new();
         if project.missing {
-            self.actions = vec![A::Rename, A::Tags, A::CopyPath, A::Remove];
+            self.actions = vec![A::Rename, A::CopyPath, A::Remove];
             return;
         }
         let remote = git::git_remote_url(&project.path).is_some();
         let web = git::git_web_url(&project.path).is_some();
         let mut actions = vec![A::OpenWith, A::ShowInFileManager, A::Terminal, A::Commands];
         if project.is_workspace() {
-            actions.extend([A::Rename, A::Folders, A::Tags]);
+            actions.extend([A::Rename, A::Folders]);
         } else {
             actions.insert(1, A::OpenTogether);
-            actions.extend([A::Rename, A::Tags]);
+            actions.push(A::Rename);
         }
         if web {
             actions.extend([A::RepoPage, A::PullRequests, A::Ci]);
@@ -186,7 +185,7 @@ impl Palette {
             A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
             A::Run(_) => Section::Scripts,
             A::AddCommand => Section::AddNew,
-            A::Rename | A::Folders | A::Tags => Section::Organize,
+            A::Rename | A::Folders => Section::Organize,
             A::RepoPage | A::PullRequests | A::Ci | A::CopyCloneUrl | A::ChangeForge => {
                 Section::Repository
             }
@@ -378,7 +377,6 @@ impl Palette {
             }
             ProjectAction::AddCommand => self.edit_selected(Mode::AddCommand, cx),
             ProjectAction::Rename => self.rename(cx),
-            ProjectAction::Tags => self.edit_selected(Mode::Tags, cx),
             ProjectAction::CopyPath => self.copy_path(&CopyPath, window, cx),
             ProjectAction::RepoPage => self.open_remote(&OpenRemote, window, cx),
             ProjectAction::PullRequests | ProjectAction::Ci => {

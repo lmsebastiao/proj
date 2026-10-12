@@ -9,14 +9,14 @@ use std::{
 };
 
 use crate::{
-    config::Config,
+    config::{Config, toml_problem},
     git,
     paths::{app_dir, display_path, write_atomic},
 };
 
 /// App-managed state: manually added projects, hidden scanned ones, and open history.
 ///
-/// `names`, `editors`, `opened`, `tags` and `commands` are keyed by
+/// `names`, `editors`, `opened`, `visits` and `commands` are keyed by
 /// [`Project::key`]: the folder path for a project, or all folder paths joined
 /// with `|` for a workspace.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -38,8 +38,6 @@ pub struct Db {
     /// Entry -> unix seconds of its last `VISITS_KEPT` opens, oldest first:
     /// how much and how recently it's used, for ranking search results.
     pub visits: BTreeMap<String, Vec<u64>>,
-    /// Entry -> its tags, lowercase, searched with `#tag`.
-    pub tags: BTreeMap<String, BTreeSet<String>>,
     /// Entry -> commands added to its actions menu, run in a terminal there.
     pub commands: BTreeMap<String, Vec<String>>,
 }
@@ -65,8 +63,6 @@ pub struct Project {
     /// Its folder (or one of a workspace's) is gone: moved, deleted, or on a
     /// drive that isn't connected.
     pub missing: bool,
-    /// Sorted, lowercase.
-    pub tags: Vec<String>,
 }
 
 impl Project {
@@ -100,13 +96,6 @@ impl Project {
         8. * (1. + self.frecency / 10.).ln()
     }
 
-    /// Whether it has a tag starting with each of `prefixes` (lowercase).
-    pub fn has_tags(&self, prefixes: &[String]) -> bool {
-        prefixes
-            .iter()
-            .all(|prefix| self.tags.iter().any(|tag| tag.starts_with(prefix.as_str())))
-    }
-
     /// The editor Enter uses: the entry's own default, else the global one.
     pub fn default_editor(&self, config: &Config) -> String {
         self.editor
@@ -129,16 +118,43 @@ pub fn db_path() -> PathBuf {
     app_dir(dirs::data_local_dir()).join("projects.toml")
 }
 
+/// The database, or an empty one if there's none yet or it can't be read (see
+/// `db_problem`).
 pub fn load_db() -> Db {
-    fs::read_to_string(db_path())
-        .ok()
-        .and_then(|text| toml::from_str(&text).ok())
-        .unwrap_or_default()
+    read_db(&db_path()).ok().flatten().unwrap_or_default()
+}
+
+/// What's wrong with `projects.toml`, if it's there but can't be read.
+pub fn db_problem() -> Option<String> {
+    read_db(&db_path()).err()
+}
+
+/// `Ok(None)` if there's no file yet.
+fn read_db(path: &Path) -> Result<Option<Db>, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("could not read {}: {err}", path.display())),
+    };
+    toml::from_str(&text)
+        .map(Some)
+        .map_err(|err| toml_problem(path, &text, &err))
 }
 
 pub fn save_db(db: &Db) -> io::Result<()> {
+    save_db_to(&db_path(), db)
+}
+
+fn save_db_to(path: &Path, db: &Db) -> io::Result<()> {
+    // A file that can't be read (edited by hand, cut short) loaded as an empty
+    // database: saving that would lose every project in it. Leave it to be fixed.
+    if let Err(problem) = read_db(path) {
+        return Err(io::Error::other(format!(
+            "{problem}. Fix or delete it, then try again"
+        )));
+    }
     let text = toml::to_string(db).map_err(io::Error::other)?;
-    write_atomic(&db_path(), &text)
+    write_atomic(path, &text)
 }
 
 /// How many opens of each entry `visits` keeps.
@@ -258,11 +274,6 @@ fn entry(paths: Vec<PathBuf>, name: String, manual: bool, db: &Db) -> Project {
         editor: db.editors.get(&key).and_then(|list| list.first()).cloned(),
         last_opened: db.opened.get(&key).copied().unwrap_or(0),
         frecency: frecency(db, &key, now()),
-        tags: db
-            .tags
-            .get(&key)
-            .map(|tags| tags.iter().cloned().collect())
-            .unwrap_or_default(),
         path,
         extra: paths.collect(),
         manual,
@@ -366,7 +377,7 @@ pub fn save_group(db: &mut Db, paths: Vec<PathBuf>) -> String {
     key
 }
 
-/// Changes a saved group's folders (or their order), keeping its name, tags,
+/// Changes a saved group's folders (or their order), keeping its name,
 /// editor, commands and history. Returns its new key.
 pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
     let (old_key, new_key) = (entry_key(old), entry_key(&new));
@@ -390,7 +401,6 @@ pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
         rekey(&mut db.editors, &old_key, &new_key);
         rekey(&mut db.opened, &old_key, &new_key);
         rekey(&mut db.visits, &old_key, &new_key);
-        rekey(&mut db.tags, &old_key, &new_key);
         rekey(&mut db.commands, &old_key, &new_key);
     }
     new_key
@@ -411,23 +421,7 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     db.editors.remove(&key);
     db.opened.remove(&key);
     db.visits.remove(&key);
-    db.tags.remove(&key);
     db.commands.remove(&key);
-}
-
-/// Sets an entry's tags from text like "work, #oss client-x": lowercase, without
-/// the `#`. Empty text removes them all.
-pub fn set_tags(db: &mut Db, key: &str, text: &str) {
-    let tags: BTreeSet<String> = text
-        .split(|c: char| c.is_whitespace() || c == ',')
-        .map(|tag| tag.trim_start_matches('#').to_lowercase())
-        .filter(|tag| !tag.is_empty())
-        .collect();
-    if tags.is_empty() {
-        db.tags.remove(key);
-    } else {
-        db.tags.insert(key.to_string(), tags);
-    }
 }
 
 /// Adds a command to an entry's actions menu, unless it's there already.
@@ -570,20 +564,8 @@ mod tests {
     }
 
     #[test]
-    fn tags_and_commands() {
+    fn commands() {
         let mut db = Db::default();
-        set_tags(&mut db, "k", "Work, #oss  client-x #work");
-        let tags: Vec<&str> = db.tags["k"].iter().map(String::as_str).collect();
-        assert_eq!(tags, ["client-x", "oss", "work"]);
-        let tagged = Project {
-            tags: tags.iter().map(|t| (*t).to_string()).collect(),
-            ..project("/a/app")
-        };
-        assert!(tagged.has_tags(&["wo".into(), "cl".into()]));
-        assert!(!tagged.has_tags(&["web".into()]));
-        set_tags(&mut db, "k", "  ");
-        assert!(db.tags.is_empty(), "no tags left");
-
         add_command(&mut db, "k", " npm run dev ");
         add_command(&mut db, "k", "npm run dev");
         add_command(&mut db, "k", "cargo watch");
@@ -591,6 +573,29 @@ mod tests {
         remove_command(&mut db, "k", "npm run dev");
         remove_command(&mut db, "k", "cargo watch");
         assert!(db.commands.is_empty());
+    }
+
+    #[test]
+    fn unreadable_db_is_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("proj-db-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("projects.toml");
+        let mut db = Db::default();
+        add_manual(&mut db, "/a/app".into());
+
+        // No file yet, then one that reads back.
+        assert!(matches!(read_db(&path), Ok(None)));
+        save_db_to(&path, &db).unwrap();
+        assert_eq!(read_db(&path).unwrap().unwrap().manual, db.manual);
+
+        // Edited by hand into something that isn't TOML: kept as it is.
+        let broken = "manual = [\"/a/app\"\nnames = {}\n";
+        fs::write(&path, broken).unwrap();
+        let problem = read_db(&path).unwrap_err();
+        assert!(problem.starts_with("projects.toml, line "), "{problem}");
+        assert!(save_db_to(&path, &Db::default()).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), broken);
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

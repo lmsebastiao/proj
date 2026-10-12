@@ -25,8 +25,6 @@ pub(super) enum Mode {
     Browse,
     /// Typing a new name for an entry (`Palette::editing`).
     Rename,
-    /// Typing an entry's tags (`Palette::editing`).
-    Tags,
     /// Typing a command for an entry's actions menu (`Palette::editing`).
     AddCommand,
     /// Choosing a template for a new project (`Palette::templates`).
@@ -52,7 +50,7 @@ pub(super) enum List {
     Commands,
     /// `$`: files and folders in every project (`FileSearch::hits`).
     Files,
-    /// Nothing: the search box holds what's being typed (a name, tags, a command).
+    /// Nothing: the search box holds what's being typed (a name, a command).
     Text,
     /// The switcher's rows (`Palette::switch_rows`).
     Switch,
@@ -80,7 +78,6 @@ pub(super) enum ProjectAction {
     Run(usize),
     AddCommand,
     Rename,
-    Tags,
     CopyPath,
     RepoPage,
     PullRequests,
@@ -390,11 +387,6 @@ impl Palette {
             ProjectAction::Rename => (
                 "Rename…".into(),
                 "A shorter name; search still finds it by its folder".into(),
-            ),
-            // Its tags show on the right (see `item_meta`).
-            ProjectAction::Tags => (
-                "Tags…".into(),
-                "Group projects, then search for them with #tag".into(),
             ),
             ProjectAction::CopyPath => ("Copy the path".into(), "To the clipboard".into()),
             ProjectAction::RepoPage => (
@@ -706,7 +698,7 @@ impl Palette {
     }
 
     /// What shows on the right of an action in the menu: its own shortcut,
-    /// where it has one, or the project's tags.
+    /// where it has one.
     pub(super) fn action_detail(&self, action: ProjectAction) -> Option<String> {
         let m = secondary();
         match action {
@@ -718,13 +710,6 @@ impl Palette {
             ProjectAction::RepoPage => Some(format!("{m}-g")),
             ProjectAction::Rename => Some("f2".into()),
             ProjectAction::Remove => Some("shift-del".into()),
-            ProjectAction::Tags => self
-                .actions_project()
-                .filter(|p| !p.tags.is_empty())
-                .map(|p| {
-                    let tags: Vec<String> = p.tags.iter().map(|t| format!("#{t}")).collect();
-                    tags.join(" ")
-                }),
             _ => None,
         }
     }
