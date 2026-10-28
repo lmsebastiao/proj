@@ -166,6 +166,7 @@ impl PaletteCommand {
             Self::OpenConfig => icons::SETTINGS,
             Self::RemoveMissing => icons::REMOVE,
             Self::Update => icons::UPDATE,
+            Self::Reset => icons::REMOVE,
             Self::Quit => icons::QUIT,
         }
     }
@@ -865,6 +866,10 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Reset => (
+                Some("Reset proj?".into()),
+                vec!["This clears your saved projects, watched folders, hidden entries, history, editor and other settings, and turns off start on login. It never deletes project folders or Git data. Type RESET and press enter; esc cancels.".into()],
+            ),
             Mode::Group if self.group_page.as_ref()?.editing.is_some() => (
                 None,
                 vec!["Tick or untick folders (tab or space); alt-↑/↓ moves the highlighted one in the order they open in. ↵ saves.".into()],

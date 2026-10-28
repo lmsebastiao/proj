@@ -66,13 +66,14 @@ Esc or typing closes it.
 at the bottom right, with everything you can do with the highlighted project: open with,
 show in Explorer, terminal, run a command (the ctrl-r menu, see Commands), rename,
 open the repository page, its pull requests or its CI runs, copy the clone URL, change
-what its git site runs, copy the path, start a new project from it, remove. Each shows its own key, if it has one. Type to filter it and press
+what its git site runs, copy the path, start a new project from it, pin/unpin, remove. Each shows its own key, if it has one. Type to filter it and press
 enter; esc, ctrl-k (or alt-k) again, backspace with nothing typed or clicking outside closes it. The
 highlighted row, and any row under the mouse, also has a **⋯** icon that opens the same menu.
 
 With nothing typed, the projects with an editor window open come first: the one you were
-in when you pressed the shortcut, then the others, the one used last first. Then the rest,
-the one opened last first, under a line.
+in when you pressed the shortcut, then the others, the one used last first. Then pinned
+projects, followed by the rest, the one opened last first, under a line. Pin or unpin one
+from its actions (ctrl-k) so a favorite is near the top whenever the search is empty.
 
 On Windows, when you open a new local folder in Zed or Zed Preview, proj can offer to
 add it in a small, non-focusing popup for seven seconds. Choose **Add** or **Dismiss**;
@@ -96,7 +97,9 @@ ago, though its name is longer. A group is an entry of its own, with its own ope
 
 **f2** renames a project; renaming to an empty name goes back to the folder name.
 **shift-delete** removes it, only from the list, as the folder isn't touched. The footer
-then offers **Undo** (or ctrl-z) for a few seconds.
+then offers **Undo** (or ctrl-z) for a few seconds. A row says **watched**, **added**, or
+**workspace** so you know why it is listed; hovering the right-hand details says which
+watched folder it came from. Removing a watched project hides it on later scans.
 
 Every row starts with an icon: the editor the project opens in, a folder or file while
 browsing, the program in the editor and window lists. On the pages you reach from the project
@@ -110,7 +113,10 @@ typing replaces it.
 
 Type `>` to list commands: start on login, discover projects in folders, add individual projects, new project from a template, change
 the default editor, theme, open the config file,
-check for updates / install update (installed copies), quit.
+check for updates / install update (installed copies), reset, quit. **Reset proj…**
+requires typing `RESET` and pressing enter. It clears proj's config, watched and added
+projects, hidden entries, custom names/editors/commands, pins, and usage history, and turns
+off start on login. It never deletes project folders or Git data.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
 keep typing to filter it, enter switches, esc goes back to the projects.
 Type `$` and part of a file's name to find it in any of your projects, as ctrl-p does in an
@@ -255,7 +261,8 @@ connected) stays listed at the end, dimmed and marked **missing**, instead of va
 over the list like the ctrl-k one: the ones you added, then its `package.json` scripts, run
 with npm, pnpm, yarn or bun according to its lock file, then **Add a command…** (e.g.
 `npm run dev`). Type to filter them. Enter opens a terminal in the project's folder running
-it, which stays open when it ends. **shift-delete** on an added command takes it out again.
+it, which stays open when it ends. The last command you ran for that project is selected
+when you open the menu again, so ctrl-r then enter repeats it. **shift-delete** on an added command takes it out again.
 ctrl-r again, or esc, closes the menu; ctrl-k switches to the actions.
 
 ### Pull requests and CI

@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    Palette,
+    LastSearch, Palette,
     items::{CloneTarget, List, Mode, PaletteCommand, PastedPath, Target},
     keymap::{AddProjects, CopyPath, OpenRemote, UndoRemove},
 };
@@ -584,8 +584,40 @@ impl Palette {
                     launcher::run_update(cx);
                 }
             }
+            PaletteCommand::Reset => self.set_mode(Mode::Reset, cx),
             PaletteCommand::Quit => cx.quit(),
         }
+    }
+
+    /// Reset requires an exact typed confirmation because it discards all saved
+    /// launcher preferences and project metadata, not the projects on disk.
+    pub(super) fn finish_reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.query != "RESET" {
+            return self.problem(
+                "Type RESET exactly to confirm; no data has been cleared",
+                cx,
+            );
+        }
+        if self.autostart {
+            if let Err(err) = autostart::set(false) {
+                return self.problem(format!("Could not turn off start on login: {err}"), cx);
+            }
+            self.autostart = false;
+        }
+        if let Err(err) = paths::clear_saved_files(&config::config_path(), &store::db_path()) {
+            return self.problem(format!("Could not clear saved data: {err}"), cx);
+        }
+        self.config = config::load_config();
+        self.db = Db::default();
+        self.undo = None;
+        self.marked.clear();
+        self.git_status.clear();
+        self.files = Default::default();
+        cx.default_global::<LastSearch>().0 = None;
+        self.reload_projects();
+        self.set_mode(Mode::Editors, cx);
+        self.apply_theme(window, cx);
+        self.notice("proj reset; choose your editor to start fresh", cx);
     }
 
     /// Pick roots once; new immediate subfolders are discovered on each open.

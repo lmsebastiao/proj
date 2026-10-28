@@ -507,6 +507,7 @@ impl Palette {
             | Mode::Rename
             | Mode::AddCommand
             | Mode::NewProject
+            | Mode::Reset
             | Mode::Switch
             | Mode::Forges
             | Mode::Group => {}
@@ -575,6 +576,7 @@ impl Palette {
                 None => String::new(),
             },
             Mode::NewProject => "Name of the new project's folder".into(),
+            Mode::Reset => "Type RESET to clear proj's saved data".into(),
             Mode::Switch => "Switch to…".into(),
         };
         self.input
@@ -605,7 +607,7 @@ impl Palette {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
             Mode::Browse => List::Browse,
-            Mode::Rename | Mode::AddCommand | Mode::NewProject => List::Text,
+            Mode::Rename | Mode::AddCommand | Mode::NewProject | Mode::Reset => List::Text,
             Mode::Templates => List::Templates,
             Mode::Forges => List::Forges,
             Mode::Group => List::Group,
@@ -813,6 +815,7 @@ impl Palette {
             return match self.mode {
                 Mode::AddCommand => self.finish_add_command(cx),
                 Mode::NewProject => self.finish_new_project(window, cx),
+                Mode::Reset => self.finish_reset(window, cx),
                 _ => self.finish_rename(cx),
             };
         }
@@ -900,6 +903,7 @@ impl Palette {
                 None => "Open together".into(),
             },
             Mode::NewProject => format!("New from {}", self.new_from.as_ref()?.name()),
+            Mode::Reset => "Reset proj".into(),
             Mode::Editors if self.config.editor.is_some() => "Default editor".into(),
             Mode::Projects | Mode::Editors | Mode::Switch => return None,
         })

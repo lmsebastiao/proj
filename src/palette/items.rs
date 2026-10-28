@@ -35,6 +35,8 @@ pub(super) enum Mode {
     Switch,
     /// Choosing what a self-hosted git site runs (`Palette::forge_pick`).
     Forges,
+    /// Typing RESET to confirm clearing the launcher's saved data.
+    Reset,
     /// Ticking projects to open together, or a group's folders
     /// (`Palette::group_page`).
     Group,
@@ -78,6 +80,7 @@ pub(super) enum ProjectAction {
     Run(usize),
     AddCommand,
     Rename,
+    Pin,
     CopyPath,
     RepoPage,
     PullRequests,
@@ -130,6 +133,7 @@ pub(super) enum PaletteCommand {
     RemoveMissing,
     /// Check for an update, or install the one found.
     Update,
+    Reset,
     Quit,
 }
 
@@ -148,7 +152,7 @@ pub(super) fn commands(updates: bool, missing: bool) -> Vec<PaletteCommand> {
     .into_iter()
     .chain(missing.then_some(PaletteCommand::RemoveMissing))
     .chain(updates.then_some(PaletteCommand::Update))
-    .chain([PaletteCommand::Quit])
+    .chain([PaletteCommand::Reset, PaletteCommand::Quit])
     .collect()
 }
 
@@ -267,6 +271,10 @@ impl Palette {
                     if self.autostart { "off" } else { "on" }
                 ),
             ),
+            PaletteCommand::Reset => (
+                "Reset proj…".into(),
+                "Clear settings, projects, history and start-on-login; keep folders".into(),
+            ),
             PaletteCommand::AddProjects => (
                 "Add projects…".into(),
                 format!("Pick one or more project folders · {m}-o"),
@@ -380,6 +388,15 @@ impl Palette {
             ProjectAction::Rename => (
                 "Rename…".into(),
                 "A shorter name; search still finds it by its folder".into(),
+            ),
+            ProjectAction::Pin => (
+                if project.is_some_and(|p| p.pinned) {
+                    "Unpin"
+                } else {
+                    "Pin to top"
+                }
+                .into(),
+                "Keep it near the top when nothing is typed, after open windows".into(),
             ),
             ProjectAction::CopyPath => ("Copy the path".into(), "To the clipboard".into()),
             ProjectAction::RepoPage => (
@@ -576,7 +593,19 @@ impl Palette {
                 } else {
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now))
                 };
-                let bottom: Vec<String> = editor.into_iter().chain(opened).collect();
+                let source_label = if project.is_workspace() {
+                    "workspace"
+                } else if project.manual {
+                    "added"
+                } else {
+                    "watched"
+                };
+                let bottom: Vec<String> = Some(source_label.to_string())
+                    .into_iter()
+                    .chain(project.pinned.then(|| "pinned".to_string()))
+                    .chain(editor)
+                    .chain(opened)
+                    .collect();
                 Meta {
                     top: self
                         .entry_branch_label(project)
@@ -592,10 +621,26 @@ impl Palette {
                         });
                         let opened = (project.last_opened > 0)
                             .then(|| format!("Opened {}", store::date_of(project.last_opened)));
+                        let source = if project.is_workspace() {
+                            "Saved workspace".to_string()
+                        } else if project.manual {
+                            "Added individually".to_string()
+                        } else {
+                            let root = self
+                                .config
+                                .scan_dirs
+                                .iter()
+                                .find(|root| project.path.starts_with(root));
+                            root.map_or_else(
+                                || "Discovered in a watched folder".to_string(),
+                                |root| format!("Discovered in {}", paths::display_path(root)),
+                            )
+                        };
                         let lines: Vec<String> = window
                             .into_iter()
                             .chain(self.entry_branch_tip(project))
                             .chain(opened)
+                            .chain(Some(source))
                             .collect();
                         (!lines.is_empty()).then(|| lines.join("\n"))
                     },

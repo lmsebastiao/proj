@@ -24,6 +24,8 @@ use crate::{
 pub struct Db {
     pub manual: Vec<PathBuf>,
     pub hidden: BTreeSet<PathBuf>,
+    /// Entries kept near the top of the launcher (after open windows).
+    pub pinned: BTreeSet<String>,
     /// Multi-folder workspaces, remembered when projects are opened together.
     pub workspaces: Vec<Vec<PathBuf>>,
     /// Entry -> name given with F2, shown instead of the folder name(s).
@@ -40,6 +42,8 @@ pub struct Db {
     pub visits: BTreeMap<String, Vec<u64>>,
     /// Entry -> commands added to its actions menu, run in a terminal there.
     pub commands: BTreeMap<String, Vec<String>>,
+    /// Most recently run command per entry, selected first in its commands menu.
+    pub last_command: BTreeMap<String, String>,
 }
 
 /// A list entry: a project folder, or a workspace of several folders opened together.
@@ -57,6 +61,7 @@ pub struct Project {
     /// This entry's own default editor; `None` = the global one.
     pub editor: Option<String>,
     pub manual: bool,
+    pub pinned: bool,
     pub last_opened: u64,
     /// How much and how recently it's used (see `frecency`).
     pub frecency: f32,
@@ -294,6 +299,7 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     projects.sort_by(|a, b| {
         a.missing
             .cmp(&b.missing)
+            .then_with(|| b.pinned.cmp(&a.pinned))
             .then_with(|| b.last_opened.cmp(&a.last_opened))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -338,6 +344,7 @@ fn entry(paths: Vec<PathBuf>, name: String, manual: bool, db: &Db) -> Project {
         path,
         extra: paths.collect(),
         manual,
+        pinned: db.pinned.contains(&key),
         missing,
     }
 }
@@ -446,6 +453,12 @@ pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
     if let Some(other) = saved_group(db, &new).filter(|g| entry_key(g) != old_key) {
         let other = entry_key(other);
         db.workspaces.retain(|g| entry_key(g) != old_key);
+        if db.pinned.remove(&old_key) {
+            db.pinned.insert(other.clone());
+        }
+        if let Some(last) = db.last_command.remove(&old_key) {
+            db.last_command.entry(other.clone()).or_insert(last);
+        }
         return other;
     }
     match db.workspaces.iter_mut().find(|g| entry_key(g) == old_key) {
@@ -463,6 +476,10 @@ pub fn change_group(db: &mut Db, old: &[PathBuf], new: Vec<PathBuf>) -> String {
         rekey(&mut db.opened, &old_key, &new_key);
         rekey(&mut db.visits, &old_key, &new_key);
         rekey(&mut db.commands, &old_key, &new_key);
+        rekey(&mut db.last_command, &old_key, &new_key);
+        if db.pinned.remove(&old_key) {
+            db.pinned.insert(new_key.clone());
+        }
     }
     new_key
 }
@@ -482,6 +499,8 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
 }
 
 fn forget_metadata(db: &mut Db, key: &str) {
+    db.pinned.remove(key);
+    db.last_command.remove(key);
     db.names.remove(key);
     db.editors.remove(key);
     db.opened.remove(key);
@@ -502,6 +521,9 @@ pub fn add_command(db: &mut Db, key: &str, command: &str) {
 }
 
 pub fn remove_command(db: &mut Db, key: &str, command: &str) {
+    if db.last_command.get(key).is_some_and(|last| last == command) {
+        db.last_command.remove(key);
+    }
     if let Some(commands) = db.commands.get_mut(key) {
         commands.retain(|c| c != command);
         if commands.is_empty() {
@@ -598,6 +620,30 @@ mod tests {
             manual: true,
             ..Project::default()
         }
+    }
+
+    #[test]
+    fn pinned_entries_precede_recent_ones_and_forgetting_clears_preferences() {
+        let root = std::env::temp_dir().join(format!("proj-pinned-{}", std::process::id()));
+        let (old, recent) = (root.join("old"), root.join("recent"));
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir(&recent).unwrap();
+        let old_key = entry_key(std::slice::from_ref(&old));
+        let recent_key = entry_key(std::slice::from_ref(&recent));
+        let mut db = Db {
+            manual: vec![old.clone(), recent.clone()],
+            ..Db::default()
+        };
+        db.opened.insert(recent_key, 100);
+        db.pinned.insert(old_key.clone());
+        db.last_command.insert(old_key.clone(), "cargo test".into());
+        let entries = collect(&Config::default(), &db);
+        assert_eq!(entries[0].path, old);
+        assert!(entries[0].pinned);
+        forget_entry(&mut db, &entries[0]);
+        assert!(!db.pinned.contains(&old_key));
+        assert!(!db.last_command.contains_key(&old_key));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -931,12 +977,20 @@ mod tests {
         // Changing its folders keeps what's keyed by it.
         db.names.insert(key.clone(), "web".into());
         db.opened.insert(key.clone(), 5);
+        db.pinned.insert(key.clone());
+        db.last_command.insert(key.clone(), "cargo test".into());
         let new = change_group(&mut db, &[a.clone(), b.clone()], vec![b.clone(), c.clone()]);
         assert_eq!(new, entry_key(&[b.clone(), c.clone()]));
         assert_eq!(db.workspaces, vec![vec![b.clone(), c.clone()]]);
         assert_eq!(db.names.get(&new).map(String::as_str), Some("web"));
         assert_eq!(db.opened.get(&new), Some(&5));
+        assert!(db.pinned.contains(&new));
+        assert_eq!(
+            db.last_command.get(&new).map(String::as_str),
+            Some("cargo test")
+        );
         assert!(!db.names.contains_key(&key));
+        assert!(!db.pinned.contains(&key));
 
         // Changed into another saved group's folders: it becomes that one.
         let other = save_group(&mut db, vec![a.clone(), c.clone()]);
@@ -945,6 +999,12 @@ mod tests {
             other
         );
         assert_eq!(db.workspaces.len(), 1);
+        assert!(db.pinned.contains(&other));
+        assert!(!db.pinned.contains(&new));
+        assert_eq!(
+            db.last_command.get(&other).map(String::as_str),
+            Some("cargo test")
+        );
     }
 
     #[test]

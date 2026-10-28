@@ -334,10 +334,12 @@ impl Palette {
                 let save = match self.mode {
                     Mode::AddCommand => "Add the command",
                     Mode::NewProject => "Make the project and open it",
+                    Mode::Reset => "Reset only after typing RESET",
                     _ => "Save the name",
                 };
                 let short = match self.mode {
                     Mode::NewProject => "Make",
+                    Mode::Reset => "Reset",
                     Mode::AddCommand => "Add",
                     _ => "Save",
                 };

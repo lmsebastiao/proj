@@ -67,6 +67,7 @@ impl ProjectAction {
             Self::OpenTogether | Self::Folders => icons::GROUP,
             Self::AddCommand => icons::ADD,
             Self::Rename => icons::RENAME,
+            Self::Pin => icons::ADD,
             Self::RepoPage => icons::GLOBE,
             Self::PullRequests => icons::PULL_REQUESTS,
             Self::Ci => icons::CI,
@@ -124,6 +125,12 @@ impl Palette {
             input.set_text("", cx);
         });
         self.refilter_menu(cx);
+        if kind == MenuKind::Commands
+            && let Some(last) = self.db.last_command.get(&project.key())
+            && let Some(row) = self.tasks.iter().position(|task| &task.command == last)
+        {
+            self.select_menu_row(row, cx);
+        }
     }
 
     /// Back to the list, with the same project highlighted. Focus follows in
@@ -146,7 +153,7 @@ impl Palette {
         }
         self.tasks = Vec::new();
         if project.missing {
-            self.actions = vec![A::Rename, A::CopyPath, A::Remove];
+            self.actions = vec![A::Rename, A::Pin, A::CopyPath, A::Remove];
             return;
         }
         let remote = git::git_remote_url(&project.path).is_some();
@@ -167,6 +174,7 @@ impl Palette {
         if web {
             actions.push(A::ChangeForge);
         }
+        actions.push(A::Pin);
         actions.push(A::CopyPath);
         if !project.is_workspace() {
             actions.push(A::NewFromThis);
@@ -185,7 +193,7 @@ impl Palette {
             A::Run(i) if self.tasks.get(i).is_some_and(|t| t.added) => Section::Added,
             A::Run(_) => Section::Scripts,
             A::AddCommand => Section::AddNew,
-            A::Rename | A::Folders => Section::Organize,
+            A::Rename | A::Folders | A::Pin => Section::Organize,
             A::RepoPage | A::PullRequests | A::Ci | A::CopyCloneUrl | A::ChangeForge => {
                 Section::Repository
             }
@@ -369,7 +377,11 @@ impl Palette {
                     return;
                 };
                 match open::run_in_terminal(&project.path, &task.command) {
-                    Ok(()) => window.remove_window(),
+                    Ok(()) => {
+                        self.db.last_command.insert(project.key(), task.command);
+                        self.save(cx);
+                        window.remove_window();
+                    }
                     Err(err) => {
                         self.problem(format!("Could not run {}: {err}", task.command), cx);
                     }
@@ -377,6 +389,25 @@ impl Palette {
             }
             ProjectAction::AddCommand => self.edit_selected(Mode::AddCommand, cx),
             ProjectAction::Rename => self.rename(cx),
+            ProjectAction::Pin => {
+                let pinned = if self.db.pinned.remove(&key) {
+                    false
+                } else {
+                    self.db.pinned.insert(key);
+                    true
+                };
+                self.save(cx);
+                self.reload_projects();
+                self.set_query("", cx);
+                self.notice(
+                    format!(
+                        "{} {}",
+                        if pinned { "Pinned" } else { "Unpinned" },
+                        project.name
+                    ),
+                    cx,
+                );
+            }
             ProjectAction::CopyPath => self.copy_path(&CopyPath, window, cx),
             ProjectAction::RepoPage => self.open_remote(&OpenRemote, window, cx),
             ProjectAction::PullRequests | ProjectAction::Ci => {
