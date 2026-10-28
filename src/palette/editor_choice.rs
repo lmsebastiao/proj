@@ -10,7 +10,6 @@ use crate::{
 use super::{
     Palette,
     items::{EditorOption, Mode, Target},
-    keymap::AddProjects,
 };
 
 impl Palette {
@@ -177,9 +176,17 @@ impl Palette {
             n => format!("Projects now open in {label}, except {n} with their own editor"),
         };
         self.notice(status, cx);
-        // First run: go straight on to picking projects.
-        if self.projects.is_empty() {
-            self.add_projects(&AddProjects, window, cx);
+        // First run: choose roots once rather than adding every project by hand.
+        if self.projects.is_empty() && self.config.scan_dirs.is_empty() && self.db.manual.is_empty()
+        {
+            if config::suggested_scan_dirs().is_empty() {
+                self.discover_projects(window, cx);
+            } else {
+                self.notice(
+                    "Choose suggested project folders below, or pick your own",
+                    cx,
+                );
+            }
         }
     }
 }

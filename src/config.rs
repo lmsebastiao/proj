@@ -281,8 +281,9 @@ hotkey = {hotkey}
 # AltGr+7 ({) and so on would stop typing in every app.
 # switch_number_modifiers = "ctrl+shift"
 
-# Optional: folders whose sub-folders are all listed as projects,
-# e.g. ['C:\Users\me\repos']. Projects can also be added one by one from the launcher.
+# Folders whose sub-folders are listed as projects. Choose folders to watch
+# from the launcher with > Discover projects in folders, or edit this list.
+# You can still add individual projects with ctrl-o.
 scan_dirs = []
 
 # 1 = every direct sub-folder of a scan_dir is a project. Higher values descend
@@ -371,6 +372,73 @@ fn with_forge(text: &str, host: &str, kind: &str) -> io::Result<String> {
     Ok(doc.to_string())
 }
 
+/// Existing conventional project roots, suggested only when they have subfolders.
+/// Discovery is local and shallow; watching one still requires a user action.
+pub fn suggested_scan_dirs() -> Vec<PathBuf> {
+    dirs::home_dir().map_or_else(Vec::new, |home| suggested_scan_dirs_in(&home))
+}
+
+fn suggested_scan_dirs_in(home: &Path) -> Vec<PathBuf> {
+    [
+        "repos",
+        "projects",
+        "code",
+        "dev",
+        "src",
+        "Documents/GitHub",
+    ]
+    .into_iter()
+    .map(|name| home.join(name))
+    .filter(|path| {
+        fs::read_dir(path).is_ok_and(|mut entries| {
+            entries.any(|entry| entry.is_ok_and(|entry| entry.path().is_dir()))
+        })
+    })
+    .collect()
+}
+
+/// Adds folders to the watched scan roots, preserving the rest of config.toml.
+/// Already watched folders (including those listed with a different spelling)
+/// are not duplicated.
+pub fn add_scan_dirs(dirs: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
+    let path = config_path();
+    let text = fs::read_to_string(&path)?;
+    let (updated, added) = with_scan_dirs(&text, dirs)?;
+    if !added.is_empty() {
+        write_atomic(&path, &updated)?;
+    }
+    Ok(added)
+}
+
+fn with_scan_dirs(text: &str, dirs: &[PathBuf]) -> io::Result<(String, Vec<PathBuf>)> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    if !doc.contains_key("scan_dirs") {
+        doc["scan_dirs"] = toml_edit::value(toml_edit::Array::new());
+    }
+    let array = doc["scan_dirs"]
+        .as_array_mut()
+        .ok_or_else(|| io::Error::other("scan_dirs in config.toml isn't a list of folders"))?;
+    let mut seen = std::collections::HashSet::new();
+    for value in array.iter() {
+        let path = value
+            .as_str()
+            .ok_or_else(|| io::Error::other("scan_dirs in config.toml isn't a list of folders"))?;
+        seen.insert(crate::paths::normalize(path).unwrap_or_else(|| PathBuf::from(path)));
+    }
+    let mut added = Vec::new();
+    for dir in dirs {
+        let Some(path) = crate::paths::normalize(&dir.to_string_lossy()).filter(|p| p.is_dir())
+        else {
+            continue;
+        };
+        if seen.insert(path.clone()) {
+            array.push(path.to_string_lossy().as_ref());
+            added.push(path);
+        }
+    }
+    Ok((doc.to_string(), added))
+}
+
 /// Sets `editor` in config.toml, preserving the rest of the file.
 pub fn set_editor(command: &str) -> io::Result<()> {
     let path = config_path();
@@ -431,6 +499,35 @@ mod tests {
 
         let replaced = with_editor(&added, "code").unwrap();
         assert_eq!(replaced, added.replace("\"zed\"", "\"code\""));
+    }
+
+    #[test]
+    fn suggests_only_common_roots_with_subfolders() {
+        let home = std::env::temp_dir().join(format!("proj-scan-suggest-{}", std::process::id()));
+        let repos = home.join("repos");
+        fs::create_dir_all(repos.join("app")).unwrap();
+        fs::create_dir(home.join("code")).unwrap();
+        assert_eq!(suggested_scan_dirs_in(&home), [repos]);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn scan_dirs_keep_existing_settings_and_skip_duplicates() {
+        let root = std::env::temp_dir().join(format!("proj-scan-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"alt+space\"");
+        let (updated, added) = with_scan_dirs(&template, std::slice::from_ref(&root)).unwrap();
+        assert_eq!(added, std::slice::from_ref(&root));
+        assert!(updated.contains("# You can still add individual projects with ctrl-o."));
+        assert_eq!(
+            toml::from_str::<Config>(&updated).unwrap().scan_dirs,
+            std::slice::from_ref(&root)
+        );
+        let (same, added) = with_scan_dirs(&updated, &[root.clone(), root.clone()]).unwrap();
+        assert!(added.is_empty());
+        assert_eq!(same, updated);
+        assert!(with_scan_dirs("scan_dirs = \"oops\"", std::slice::from_ref(&root)).is_err());
+        fs::remove_dir(root).unwrap();
     }
 
     #[test]

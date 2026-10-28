@@ -7,7 +7,7 @@ use gpui::{
     ModifiersChangedEvent, MouseButton, StyledText, Window, div, list, prelude::*, px, rgb,
 };
 
-use crate::{input, paths, store, templates::Template};
+use crate::{config, input, paths, store, templates::Template};
 
 use super::{
     Palette,
@@ -159,7 +159,7 @@ impl PaletteCommand {
     fn icon(self) -> &'static str {
         match self {
             Self::Autostart => icons::POWER,
-            Self::AddProjects => icons::ADD,
+            Self::AddProjects | Self::DiscoverProjects => icons::ADD,
             Self::NewFromTemplate => icons::NEW_PROJECT,
             Self::ChangeEditor => icons::EDIT,
             Self::Theme => icons::THEME,
@@ -763,13 +763,62 @@ impl Palette {
                 .into_any_element();
         }
         if self.list() == List::Projects && self.projects.is_empty() {
+            let suggested = self
+                .config
+                .scan_dirs
+                .is_empty()
+                .then(config::suggested_scan_dirs)
+                .unwrap_or_default();
+            let suggestion = suggested.first().map(|first| {
+                let label = if suggested.len() == 1 {
+                    format!("Discover in {}", paths::display_path(first))
+                } else {
+                    format!(
+                        "Discover in {} + {} more",
+                        paths::display_path(first),
+                        suggested.len() - 1
+                    )
+                };
+                div()
+                    .id("discover-suggested")
+                    .px_3()
+                    .h(px(32.))
+                    .rounded_md()
+                    .flex()
+                    .items_center()
+                    .bg(rgb(t.selected))
+                    .text_size(px(SMALL_FONT_SIZE))
+                    .text_color(rgb(t.text))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(rgb(t.border)))
+                    .on_click(cx.listener(|this, _, _, cx| this.discover_suggested(cx)))
+                    .child(label)
+            });
             return centered()
                 .child("No projects yet")
-                .child(add_button(cx))
+                .children(suggestion)
+                .child(
+                    div()
+                        .id("discover-projects")
+                        .px_3()
+                        .h(px(32.))
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .bg(rgb(t.selected))
+                        .text_size(px(SMALL_FONT_SIZE))
+                        .text_color(rgb(t.text))
+                        .cursor_pointer()
+                        .hover(|d| d.bg(rgb(t.border)))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.discover_projects(window, cx)),
+                        )
+                        .child("Choose folders to watch…"),
+                )
                 .child(
                     div()
                         .text_size(px(SMALL_FONT_SIZE))
-                        .child("or paste a folder path above"),
+                        .child(format!("or add individual folders with {}-o", secondary())),
                 )
                 .into_any_element();
         }

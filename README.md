@@ -18,7 +18,11 @@ PowerToys Run uses it too; if another app has it, the dialog says so and you can
 
 On first launch the dialog opens by itself. It asks which editor to use (it lists the ones it
 finds installed, plus "Other…" to pick any program, or "No editor" to use the file manager),
-then opens a folder picker where you can select one or more projects at once.
+then suggests existing common project folders (such as `~/repos`) to watch with one click,
+or lets you choose your own. If none are found, it opens a folder picker. Their direct
+subfolders appear as projects automatically, including folders created later. You can
+still add individual projects (ctrl-o). Use `> Discover projects in folders…` to watch
+more folders later. Nothing outside the chosen folders is scanned.
 
 | Key                     | Action                                     |
 | ----------------------- | ------------------------------------------ |
@@ -104,7 +108,7 @@ If the dialog closes without opening anything (esc, the shortcut again, or a cli
 elsewhere), opening it again within 30 seconds brings back what you'd typed, selected so that
 typing replaces it.
 
-Type `>` to list commands: start on login, add projects, new project from a template, change
+Type `>` to list commands: start on login, discover projects in folders, add individual projects, new project from a template, change
 the default editor, theme, open the config file,
 check for updates / install update (installed copies), quit.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
@@ -307,7 +311,7 @@ proj version        # show the installed version
 hotkey = "alt+space"
 # switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
 # switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that row; default alt+shift
-scan_dirs = []          # optional: list every sub-folder of these folders as projects
+scan_dirs = []          # folders to watch; chosen on first launch or with > Discover projects in folders
 # templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]
 # forges = { "git.example.com" = "gitlab" }  # for pull request and CI links
 scan_depth = 1          # >1 descends into non-git folders

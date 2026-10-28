@@ -532,6 +532,10 @@ impl Palette {
                 self.set_query("", cx);
                 self.add_projects(&AddProjects, window, cx);
             }
+            PaletteCommand::DiscoverProjects => {
+                self.set_query("", cx);
+                self.discover_projects(window, cx);
+            }
             PaletteCommand::NewFromTemplate => self.set_mode(Mode::Templates, cx),
             PaletteCommand::RemoveMissing => {
                 let missing: Vec<Project> = self
@@ -582,6 +586,43 @@ impl Palette {
             }
             PaletteCommand::Quit => cx.quit(),
         }
+    }
+
+    /// Pick roots once; new immediate subfolders are discovered on each open.
+    pub(super) fn discover_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some("Watch folders for projects".into()),
+        };
+        self.pick(options, window, cx, |this, paths, _, cx| {
+            if !paths.is_empty() {
+                this.watch_folders(&paths, cx);
+            }
+        });
+    }
+
+    pub(super) fn discover_suggested(&mut self, cx: &mut Context<Self>) {
+        self.watch_folders(&config::suggested_scan_dirs(), cx);
+    }
+
+    fn watch_folders(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let added = match config::add_scan_dirs(paths) {
+            Ok(added) => added,
+            Err(err) => return self.problem(format!("Could not save scan folders: {err}"), cx),
+        };
+        if added.is_empty() {
+            return self.notice("Those folders are already watched", cx);
+        }
+        self.config.scan_dirs.extend(added.iter().cloned());
+        self.reload_projects();
+        self.set_mode(Mode::Projects, cx);
+        let count = self.projects.len();
+        self.notice(
+            format!("Watching {} folders · {count} projects found", added.len()),
+            cx,
+        );
     }
 
     pub(super) fn add_projects(

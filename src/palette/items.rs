@@ -120,6 +120,7 @@ pub(super) enum EditorOption {
 pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
+    DiscoverProjects,
     NewFromTemplate,
     ChangeEditor,
     /// Go through system → light → dark.
@@ -138,6 +139,7 @@ pub(super) fn commands(updates: bool, missing: bool) -> Vec<PaletteCommand> {
     [
         PaletteCommand::Autostart,
         PaletteCommand::AddProjects,
+        PaletteCommand::DiscoverProjects,
         PaletteCommand::NewFromTemplate,
         PaletteCommand::ChangeEditor,
         PaletteCommand::Theme,
@@ -268,6 +270,10 @@ impl Palette {
             PaletteCommand::AddProjects => (
                 "Add projects…".into(),
                 format!("Pick one or more project folders · {m}-o"),
+            ),
+            PaletteCommand::DiscoverProjects => (
+                "Discover projects in folders…".into(),
+                "Watch chosen folders; their subfolders appear automatically".into(),
             ),
             PaletteCommand::NewFromTemplate => (
                 "New project from a template…".into(),
