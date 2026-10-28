@@ -4,11 +4,13 @@
 mod autostart;
 mod cli;
 mod config;
+mod discovery;
 mod editors;
 mod fuzzy;
 mod git;
 mod input;
 mod launcher;
+mod offer;
 mod open;
 mod palette;
 mod paths;

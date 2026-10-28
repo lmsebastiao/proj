@@ -50,7 +50,7 @@ pub(super) enum List {
     Commands,
     /// `$`: files and folders in every project (`FileSearch::hits`).
     Files,
-    /// Nothing: the search box holds what's being typed (a name, a command).
+    /// Nothing: the search box holds what's being typed (a name or a command).
     Text,
     /// The switcher's rows (`Palette::switch_rows`).
     Switch,
@@ -230,25 +230,12 @@ impl Palette {
                 let hit = &self.files.hits[ix];
                 (hit.title.clone(), hit.subtitle.clone())
             }
-            // The project's name over the window's title ("proj — main.rs"), or
-            // over all its windows' titles; windows of no known project show
-            // just their title. A project's own windows, once → opens them up,
-            // show their titles.
+            // The project's name over each window's title ("proj — main.rs");
+            // windows of no known project show just their title.
             List::Switch => {
-                let row = &self.switch_rows[ix];
-                let window = &self.windows[row[0]];
-                match self.window_projects[row[0]] {
-                    _ if self.expanded.is_some() => (window.title.clone(), window.editor.clone()),
-                    Some(project) if row.len() > 1 => {
-                        let titles: Vec<&str> = row
-                            .iter()
-                            .map(|&w| self.windows[w].title.as_str())
-                            .collect();
-                        (
-                            self.projects[project].name.clone(),
-                            format!("{} windows · {}", row.len(), titles.join(" · ")),
-                        )
-                    }
+                let w = self.switch_rows[ix][0];
+                let window = &self.windows[w];
+                match self.window_projects[w] {
                     Some(project) => (self.projects[project].name.clone(), window.title.clone()),
                     None => (window.title.clone(), window.editor.clone()),
                 }
@@ -649,29 +636,14 @@ impl Palette {
                 tip: None,
             },
             List::Switch => {
-                let row = &self.switch_rows[ix];
-                let project = self.window_projects[row[0]].map(|p| &self.projects[p]);
-                let editor = &self.windows[row[0]].editor;
-                let expanded = self.expanded.is_some();
+                let w = self.switch_rows[ix][0];
+                let project = self.window_projects[w].map(|p| &self.projects[p]);
                 Meta {
                     top: project
                         .and_then(|p| self.branch_label(p))
                         .map(|b| (b, self.theme.branch)),
-                    // A project's several windows: → shows them.
-                    bottom: (project.is_some() && !expanded).then(|| {
-                        let more = if row.len() > 1 { " · →" } else { "" };
-                        format!("{editor}{more}")
-                    }),
-                    tip: match project {
-                        Some(p) if row.len() > 1 && !expanded => Some(format!(
-                            "{} {editor} windows of {}: ↵ switches to the one you used last, → \
-                             lists them",
-                            row.len(),
-                            p.name
-                        )),
-                        Some(p) => self.branch_tip(p),
-                        None => None,
-                    },
+                    bottom: project.map(|_| self.windows[w].editor.clone()),
+                    tip: project.and_then(|p| self.branch_tip(p)),
                 }
             }
             List::Templates => Meta {
@@ -697,8 +669,7 @@ impl Palette {
         }
     }
 
-    /// What shows on the right of an action in the menu: its own shortcut,
-    /// where it has one.
+    /// What shows on the right of an action in the menu: its shortcut, if any.
     pub(super) fn action_detail(&self, action: ProjectAction) -> Option<String> {
         let m = secondary();
         match action {

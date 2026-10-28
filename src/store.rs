@@ -121,7 +121,19 @@ pub fn db_path() -> PathBuf {
 /// The database, or an empty one if there's none yet or it can't be read (see
 /// `db_problem`).
 pub fn load_db() -> Db {
-    read_db(&db_path()).ok().flatten().unwrap_or_default()
+    load_db_from(&db_path())
+}
+
+fn load_db_from(path: &Path) -> Db {
+    let Ok(Some(mut db)) = read_db(path) else {
+        return Db::default();
+    };
+    if prune_gone(&mut db)
+        && let Err(err) = save_db_to(path, &db)
+    {
+        eprintln!("proj: could not save removed projects: {err}");
+    }
+    db
 }
 
 /// What's wrong with `projects.toml`, if it's there but can't be read.
@@ -139,6 +151,55 @@ fn read_db(path: &Path) -> Result<Option<Db>, String> {
     toml::from_str(&text)
         .map(Some)
         .map_err(|err| toml_problem(path, &text, &err))
+}
+
+/// Only forget a folder when it is definitely gone. A failed lookup alone can
+/// mean a disconnected drive, an inaccessible folder, or a transient I/O error.
+fn gone(path: &Path) -> bool {
+    match fs::metadata(path) {
+        Ok(meta) => return !meta.is_dir(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return false,
+    }
+    // A broken symlink can point to a temporarily unavailable location.
+    if !matches!(fs::symlink_metadata(path), Err(err) if err.kind() == io::ErrorKind::NotFound) {
+        return false;
+    }
+    // Require an accessible ancestor on the same volume; a missing drive
+    // root or an unavailable symlink in the parent chain is inconclusive.
+    for ancestor in path.ancestors().skip(1) {
+        match fs::symlink_metadata(ancestor) {
+            Ok(meta) if meta.file_type().is_symlink() => return false,
+            Ok(meta) => return meta.is_dir(),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+fn prune_gone(db: &mut Db) -> bool {
+    let mut removed = Vec::new();
+    db.manual.retain(|path| {
+        if gone(path) {
+            removed.push(entry_key(std::slice::from_ref(path)));
+            false
+        } else {
+            true
+        }
+    });
+    db.workspaces.retain(|group| {
+        if group.iter().any(|path| gone(path)) {
+            removed.push(entry_key(group));
+            false
+        } else {
+            true
+        }
+    });
+    for key in &removed {
+        forget_metadata(db, key);
+    }
+    !removed.is_empty()
 }
 
 pub fn save_db(db: &Db) -> io::Result<()> {
@@ -194,8 +255,8 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Builds the project list: scanned + manual, minus hidden, most recently
-/// opened first. Added projects whose folder is gone come last, marked missing.
+/// Builds the project list: scanned + manual, minus hidden and unavailable
+/// folders, most recently opened first. Offline drives stay in the database.
 pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     let mut seen = HashSet::new();
     let mut projects = Vec::new();
@@ -214,12 +275,12 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     }
     folders.extend(scanned.into_iter().map(|p| (p, false)));
     for (path, manual) in folders {
-        if !db.hidden.contains(&path) {
+        if !db.hidden.contains(&path) && path.is_dir() {
             push(vec![path.clone()], folder_name(&path), manual);
         }
     }
     for group in &db.workspaces {
-        if group.len() > 1 {
+        if group.len() > 1 && group.iter().all(|path| path.is_dir()) {
             push(group.clone(), group_name(group), true);
         }
     }
@@ -417,11 +478,15 @@ pub fn forget_entry(db: &mut Db, project: &Project) {
     } else {
         db.hidden.insert(project.path.clone());
     }
-    db.names.remove(&key);
-    db.editors.remove(&key);
-    db.opened.remove(&key);
-    db.visits.remove(&key);
-    db.commands.remove(&key);
+    forget_metadata(db, &key);
+}
+
+fn forget_metadata(db: &mut Db, key: &str) {
+    db.names.remove(key);
+    db.editors.remove(key);
+    db.opened.remove(key);
+    db.visits.remove(key);
+    db.commands.remove(key);
 }
 
 /// Adds a command to an entry's actions menu, unless it's there already.
@@ -536,31 +601,149 @@ mod tests {
     }
 
     #[test]
-    fn gone_folders_stay_listed_as_missing() {
+    fn gone_folders_are_omitted_and_pruned_with_their_metadata() {
         let dir = std::env::temp_dir().join(format!("proj-missing-{}", std::process::id()));
-        let (app, gone) = (dir.join("app"), dir.join("gone"));
+        let (app, gone, sdk) = (dir.join("app"), dir.join("gone"), dir.join("sdk"));
         fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&gone).unwrap();
+        fs::create_dir_all(&sdk).unwrap();
+        fs::remove_dir(&gone).unwrap();
         let mut db = Db {
-            manual: vec![gone.clone(), app.clone()],
+            manual: vec![gone.clone(), app.clone(), sdk.clone()],
             ..Db::default()
         };
-        db.opened.insert(entry_key(std::slice::from_ref(&gone)), 99);
-        save_group(&mut db, vec![app.clone(), gone.clone()]);
-        let projects = collect(&Config::default(), &db);
-        let listed: Vec<(&Path, bool, bool)> = projects
-            .iter()
-            .map(|p| (p.path.as_path(), p.is_workspace(), p.missing))
-            .collect();
-        // Last, even though it was opened most recently.
-        assert_eq!(
-            listed,
-            [
-                (app.as_path(), false, false),
-                (gone.as_path(), false, true),
-                (app.as_path(), true, true),
-            ]
-        );
+        let gone_key = entry_key(std::slice::from_ref(&gone));
+        let app_key = entry_key(std::slice::from_ref(&app));
+        let broken = save_group(&mut db, vec![app.clone(), gone.clone()]);
+        let healthy = save_group(&mut db, vec![app.clone(), sdk.clone()]);
+        for key in [&gone_key, &broken, &app_key, &healthy] {
+            rename(&mut db, key, "custom");
+            set_editor(&mut db, key, Some("code".into()));
+            db.opened.insert(key.clone(), 99);
+            db.visits.insert(key.clone(), vec![99]);
+            add_command(&mut db, key, "build");
+        }
+        // Even before persistence, gone entries never appear in the list.
+        let listed = collect(&Config::default(), &db);
+        assert_eq!(listed.len(), 3);
+        assert!(listed.iter().all(|p| !p.missing && p.path != gone));
+        assert!(listed.iter().any(|p| p.key() == healthy));
+
+        assert!(prune_gone(&mut db));
+        assert!(!prune_gone(&mut db), "cleanup is idempotent");
+        assert_eq!(db.manual, [app, sdk]);
+        assert_eq!(db.workspaces.len(), 1);
+        assert_eq!(entry_key(&db.workspaces[0]), healthy);
+        for key in [&gone_key, &broken] {
+            assert!(!db.names.contains_key(key));
+            assert!(!db.editors.contains_key(key));
+            assert!(!db.opened.contains_key(key));
+            assert!(!db.visits.contains_key(key));
+
+            assert!(!db.commands.contains_key(key));
+        }
+        for key in [&app_key, &healthy] {
+            assert!(db.names.contains_key(key));
+            assert!(db.editors.contains_key(key));
+            assert!(db.opened.contains_key(key));
+            assert!(db.visits.contains_key(key));
+
+            assert!(db.commands.contains_key(key));
+        }
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn load_prunes_and_saves_confirmed_deletions() {
+        let dir = std::env::temp_dir().join(format!("proj-prune-load-{}", std::process::id()));
+        let (existing, deleted) = (dir.join("existing"), dir.join("deleted"));
+        fs::create_dir_all(&existing).unwrap();
+        let path = dir.join("projects.toml");
+        let mut db = Db {
+            manual: vec![existing.clone(), deleted.clone()],
+            ..Db::default()
+        };
+        let deleted_key = entry_key(std::slice::from_ref(&deleted));
+        let existing_key = entry_key(std::slice::from_ref(&existing));
+        let group_key = save_group(&mut db, vec![existing.clone(), deleted]);
+        for key in [&deleted_key, &existing_key, &group_key] {
+            rename(&mut db, key, "kept until deleted");
+        }
+        save_db_to(&path, &db).unwrap();
+
+        let loaded = load_db_from(&path);
+        assert_eq!(loaded.manual, [existing]);
+        assert!(loaded.workspaces.is_empty());
+        assert!(!loaded.names.contains_key(&deleted_key));
+        assert!(!loaded.names.contains_key(&group_key));
+        assert!(loaded.names.contains_key(&existing_key));
+        let saved = read_db(&path).unwrap().unwrap();
+        assert_eq!(saved.manual, loaded.manual);
+        assert_eq!(saved.workspaces, loaded.workspaces);
+        assert_eq!(saved.names, loaded.names);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn folder_replaced_by_file_is_removed() {
+        let dir = std::env::temp_dir().join(format!("proj-file-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project");
+        fs::create_dir(&path).unwrap();
+        fs::remove_dir(&path).unwrap();
+        fs::write(&path, "not a folder").unwrap();
+        let mut db = Db {
+            manual: vec![path.clone()],
+            ..Db::default()
+        };
+        assert!(collect(&Config::default(), &db).is_empty());
+        assert!(prune_gone(&mut db));
+        assert!(db.manual.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unavailable_drive_does_not_lose_projects() {
+        let Some(root) = ('A'..='Z')
+            .map(|letter| PathBuf::from(format!("{letter}:\\")))
+            .find(|root| !root.exists())
+        else {
+            return;
+        };
+        let path = root.join("project");
+        let mut db = Db {
+            manual: vec![path.clone()],
+            ..Db::default()
+        };
+        let key = entry_key(std::slice::from_ref(&path));
+        rename(&mut db, &key, "saved name");
+        assert!(!gone(&path));
+        assert!(!prune_gone(&mut db));
+        assert!(db.names.contains_key(&key));
+        assert!(collect(&Config::default(), &db).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unavailable_symlink_parent_keeps_saved_project() {
+        use std::os::unix::fs::symlink;
+
+        let dir = std::env::temp_dir().join(format!("proj-offline-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        symlink(dir.join("offline"), dir.join("drive")).unwrap();
+        let path = dir.join("drive/project");
+        let key = entry_key(std::slice::from_ref(&path));
+        let mut db = Db {
+            manual: vec![path.clone()],
+            ..Db::default()
+        };
+        rename(&mut db, &key, "saved name");
+        assert!(!gone(&path));
+        assert!(!prune_gone(&mut db));
+        assert!(db.names.contains_key(&key));
+        assert!(collect(&Config::default(), &db).is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -595,7 +778,18 @@ mod tests {
         assert!(problem.starts_with("projects.toml, line "), "{problem}");
         assert!(save_db_to(&path, &Db::default()).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), broken);
+        assert!(load_db_from(&path).manual.is_empty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), broken);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn legacy_tags_are_ignored() {
+        let text = "[names]\n\"/a/app\" = \"My App\"\n[tags]\n\"/a/app\" = [\"work\"]\n[commands]\n\"/a/app\" = [\"build\"]\n";
+        let db: Db = toml::from_str(text).unwrap();
+        assert_eq!(db.names["/a/app"], "My App");
+        assert_eq!(db.commands["/a/app"], ["build"]);
+        assert!(!toml::to_string(&db).unwrap().contains("[tags]"));
     }
 
     #[test]

@@ -36,27 +36,10 @@ impl EditorWindow {
     }
 }
 
-/// The switcher's rows, as indexes into `windows` (in the switcher's order):
-/// windows of the same project (`projects_of`) in the same editor share a row
-/// where the first of them is, best to switch to first (see
-/// [`EditorWindow::rank`]); the others get a row each.
-pub fn rows(windows: &[EditorWindow], projects_of: &[Option<usize>]) -> Vec<Vec<usize>> {
-    let mut rows: Vec<Vec<usize>> = Vec::new();
-    for (w, project) in projects_of.iter().enumerate() {
-        let shared = project.and_then(|p| {
-            rows.iter().position(|row| {
-                projects_of[row[0]] == Some(p) && windows[row[0]].editor == windows[w].editor
-            })
-        });
-        match shared {
-            Some(row) => rows[row].push(w),
-            None => rows.push(vec![w]),
-        }
-    }
-    for row in &mut rows {
-        row.sort_by_key(|&w| windows[w].rank());
-    }
-    rows
+/// Each open editor window gets its own switcher row, including windows of
+/// the same project. Their order is the order of `windows`.
+pub fn rows(windows: &[EditorWindow]) -> Vec<Vec<usize>> {
+    (0..windows.len()).map(|w| vec![w]).collect()
 }
 
 /// A shortcut from the config for display, like the palette's keys:
@@ -365,27 +348,26 @@ mod tests {
     }
 
     #[test]
-    fn a_project_gets_a_row_per_editor() {
-        let windows = [
+    fn same_project_gets_a_row_per_window_even_in_the_same_editor() {
+        let mut windows = [
             window(0, 0, "Zed"),
             window(1, 1, "Visual Studio Code"),
             window(2, 2, "Zed"),
         ];
-        let projects_of = [Some(7), Some(7), Some(7)];
-        assert_eq!(rows(&windows, &projects_of), [vec![2, 0], vec![1]]);
+        let projects = [project("app", &["/r/app"])];
+        for w in &mut windows {
+            w.title = "app — main.rs".into();
+            assert_eq!(w.project(&projects), Some(0));
+        }
+        assert_eq!(rows(&windows), [vec![0], vec![1], vec![2]]);
     }
 
     #[test]
-    fn a_project_s_windows_share_a_row() {
+    fn each_window_has_its_own_row() {
         // In the switcher's order; z is front to back, and window 2 was in front.
         let window = |id: isize, z: usize| window(id, z, "Zed");
         let windows = [window(0, 3), window(1, 1), window(2, 0), window(3, 2)];
-        let projects_of = [Some(7), None, Some(7), Some(7)];
-        assert_eq!(
-            rows(&windows, &projects_of),
-            [vec![3, 0, 2], vec![1]],
-            "where its first window is; the one switched away from last"
-        );
-        assert_eq!(rows(&[], &[]), Vec::<Vec<usize>>::new());
+        assert_eq!(rows(&windows), [vec![0], vec![1], vec![2], vec![3]]);
+        assert_eq!(rows(&[]), Vec::<Vec<usize>>::new());
     }
 }

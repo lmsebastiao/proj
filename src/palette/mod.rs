@@ -166,12 +166,8 @@ pub struct Palette {
     windows: Vec<EditorWindow>,
     /// The project each of `windows` shows, as an index into `projects`.
     window_projects: Vec<Option<usize>>,
-    /// The switcher's rows, as indexes into `windows`: one per project and
-    /// editor (the window to switch to first), or each of `expanded`'s windows.
+    /// The switcher's rows, as indexes into `windows`: one per window.
     switch_rows: Vec<Vec<usize>>,
-    /// The project (index into `projects`) and editor whose windows the
-    /// switcher lists one by one, after → on its row.
-    expanded: Option<(usize, String)>,
     /// Keys of the projects that have a window open.
     open_keys: HashSet<String>,
     /// The switcher's modifiers while they're held; letting go switches.
@@ -280,7 +276,6 @@ impl Palette {
             windows: Vec::new(),
             window_projects: Vec::new(),
             switch_rows: Vec::new(),
-            expanded: None,
             open_keys: HashSet::new(),
             hold: None,
             status: None,
@@ -500,7 +495,6 @@ impl Palette {
                 self.new_from = None;
                 self.forge_pick = None;
                 self.group_page = None;
-                self.expanded = None;
                 // An unsaved group goes from the list again.
                 if let Some(group) = self.unsaved.take() {
                     let key = group.key();
@@ -629,7 +623,7 @@ impl Palette {
         self.projects.iter().find(|p| &p.key() == key)
     }
 
-    /// The entry being renamed, tagged or given a command.
+    /// The entry being renamed or given a command.
     fn edited_project(&self) -> Option<&Project> {
         let key = self.editing.as_ref()?;
         self.projects.iter().find(|p| &p.key() == key)
@@ -649,10 +643,7 @@ impl Palette {
 
     fn refilter(&mut self, cx: &mut Context<Self>) {
         let list = self.list();
-        // Left the `@` list from inside a project's windows: all rows next time.
-        if list != List::Switch && self.expanded.take().is_some() {
-            self.arrange_rows();
-        }
+
         if list == List::Files {
             self.pasted = None;
             self.clone_candidate = None;
@@ -835,7 +826,6 @@ impl Palette {
             List::Editors => self.choose_editor(ix, window, cx),
             List::OpenWith => self.choose_open_with(ix, window, cx),
             List::Commands => self.run_command(self.commands[ix], window, cx),
-            // A project's row: its window used last.
             List::Switch => self.switch_to(self.switch_rows[ix][0], window, cx),
             List::Templates => {
                 self.new_from = Some(self.templates[ix].clone());
@@ -873,10 +863,7 @@ impl Palette {
         }
         match self.list() {
             List::Commands | List::Files => self.set_query("", cx),
-            // A project's windows: back to every project's.
-            List::Switch if self.expanded.is_some() => {
-                self.leave(cx);
-            }
+
             List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
             List::OpenWith | List::Text | List::Templates | List::Forges | List::Group => {
@@ -897,13 +884,6 @@ impl Palette {
     /// The page the list is on, for the search bar, after its back button;
     /// `None` on the project list and the lists that don't go back to it.
     fn page_title(&self) -> Option<String> {
-        if self.list() == List::Switch {
-            let (project, editor) = self.expanded.as_ref()?;
-            return Some(format!(
-                "{}'s {editor} windows",
-                self.projects[*project].name
-            ));
-        }
         Some(match self.mode {
             Mode::Browse => self.browse.as_ref()?.breadcrumb(),
             Mode::OpenWith => format!("Open {} with", self.open_with_project()?.name),
@@ -925,9 +905,8 @@ impl Palette {
         })
     }
 
-    /// The back button, or backspace in an empty search box: up a folder, out
-    /// of a project's windows, or back to the projects. Returns whether there
-    /// was somewhere to go back to.
+    /// The back button, or backspace in an empty search box: up a folder
+    /// or back to the projects. Returns whether there was somewhere to go back to.
     fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
         if self.page_title().is_none() {
             return false;

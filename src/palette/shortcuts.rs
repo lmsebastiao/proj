@@ -296,10 +296,6 @@ impl Palette {
             List::Switch if self.hold.is_some() => vec![
                 s(&["alt-↓", "alt-↑"], "Move the selection"),
                 s(&["alt-1…9"], "Switch to the row with that number"),
-                s(
-                    &["alt-→", "alt-←"],
-                    "A project's windows one by one, and back",
-                ),
                 s(&["alt-mod-w"], "Close the window")
                     .footer("Close window")
                     .run(CloseWindow),
@@ -308,9 +304,7 @@ impl Palette {
             ],
             List::Switch => {
                 // Typed `@` in the project search: esc goes back to it.
-                let esc = if self.expanded.is_some() {
-                    "Back to every project's windows"
-                } else if self.mode == Mode::Projects {
+                let esc = if self.mode == Mode::Projects {
                     "Back to the projects"
                 } else {
                     "Close"
@@ -324,7 +318,6 @@ impl Palette {
                     s(&["mod-w"], "Close the window")
                         .footer("Close window")
                         .run(CloseWindow),
-                    s(&["→", "←"], "A project's windows one by one, and back"),
                     s(&["↑ ↓"], "Move the selection"),
                     s(&["drag"], "Move a row to another place in the list"),
                 ];

@@ -1,7 +1,7 @@
 //! The window switcher: open editor windows, like Alt+Tab for your projects.
 //! It stays up while the shortcut's modifiers are held and letting go switches;
-//! typing while holding them keeps it up to search in instead. A project's
-//! windows in the same editor share a row, which → opens up.
+//! typing while holding them keeps it up to search in instead. Each open
+//! editor window has its own row, even when several show the same project.
 
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    Palette, SWITCH_PREFIX,
+    Palette,
     items::{List, Mode},
     keymap::{CloseWindow, Confirm},
     theme::{FONT_SIZE, ROW_HEIGHT, Theme},
@@ -213,13 +213,12 @@ impl Palette {
     }
 
     /// Whether rows can be dragged to reorder the list: only while it shows
-    /// every project's row in order, not search results or one project's windows.
+    /// every window in order, not search results.
     pub(super) fn can_reorder(&self) -> bool {
-        self.list() == List::Switch && self.filter_query().is_empty() && self.expanded.is_none()
+        self.list() == List::Switch && self.filter_query().is_empty()
     }
 
-    /// A row dropped on another: the row at `from` (all of a project's
-    /// windows) takes the place of the one at `to`, and stays highlighted. The
+    /// A row dropped on another takes its place and stays highlighted. The
     /// switcher keeps the new order.
     pub(super) fn move_window(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
         let len = self.switch_rows.len();
@@ -256,64 +255,9 @@ impl Palette {
         self.arrange_rows();
     }
 
-    /// The switcher's rows: a row per project and editor, or `expanded`'s
-    /// windows one by one.
+    /// The switcher's rows: one per editor window.
     pub(super) fn arrange_rows(&mut self) {
-        self.switch_rows = match &self.expanded {
-            Some(expanded) => (0..self.windows.len())
-                .filter(|&w| self.shows(w, expanded))
-                .map(|w| vec![w])
-                .collect(),
-            None => switcher::rows(&self.windows, &self.window_projects),
-        };
-    }
-
-    /// Whether `windows[w]` is one of the windows of `(project, editor)`.
-    fn shows(&self, w: usize, (project, editor): &(usize, String)) -> bool {
-        self.window_projects[w] == Some(*project) && self.windows[w].editor == *editor
-    }
-
-    /// →: a project row with several windows lists them one by one.
-    /// Returns false when the highlighted row isn't one.
-    pub(super) fn expand_row(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.expanded.is_some() {
-            return false;
-        }
-        let Some(row) = self
-            .matches
-            .get(self.selected)
-            .and_then(|m| self.switch_rows.get(m.ix))
-            .filter(|row| row.len() > 1)
-        else {
-            return false;
-        };
-        let editor = self.windows[row[0]].editor.clone();
-        self.expanded = self.window_projects[row[0]].map(|project| (project, editor));
-        self.arrange_rows();
-        self.clear_switch_query(cx);
-        true
-    }
-
-    /// ←: back from one project's windows to every project's rows, on its row.
-    pub(super) fn collapse_row(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(expanded) = self.expanded.take() else {
-            return false;
-        };
-        self.arrange_rows();
-        self.clear_switch_query(cx);
-        self.select_where(|this, ix| this.shows(this.switch_rows[ix][0], &expanded));
-        cx.notify();
-        true
-    }
-
-    /// An empty search, keeping the `@` that shows the windows in the project search.
-    fn clear_switch_query(&mut self, cx: &mut Context<Self>) {
-        let query = if self.mode == Mode::Projects {
-            SWITCH_PREFIX.to_string()
-        } else {
-            String::new()
-        };
-        self.set_query(&query, cx);
+        self.switch_rows = switcher::rows(&self.windows);
     }
 
     /// Ctrl-W in the switcher: closes the highlighted row's window.
@@ -321,8 +265,7 @@ impl Palette {
         self.close_row(self.selected, cx);
     }
 
-    /// Asks the window of the switcher's `row` (for a project's row, the one
-    /// it would switch to) to close, and takes it off the list.
+    /// Asks the window of the switcher's `row` to close and takes it off the list.
     pub(super) fn close_row(&mut self, row: usize, cx: &mut Context<Self>) {
         if self.list() != List::Switch {
             return;
@@ -339,16 +282,6 @@ impl Palette {
         let closed = self.windows.remove(w);
         platform::close_window(closed.window);
         self.match_windows();
-        // Down to one window: no list of them to show.
-        if let Some(expanded) = &self.expanded
-            && (0..self.windows.len())
-                .filter(|&w| self.shows(w, expanded))
-                .count()
-                < 2
-        {
-            self.expanded = None;
-            self.arrange_rows();
-        }
         let selected = self.selected;
         self.refilter(cx);
         self.selected = selected.min(self.matches.len().saturating_sub(1));

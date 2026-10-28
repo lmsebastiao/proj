@@ -70,6 +70,18 @@ With nothing typed, the projects with an editor window open come first: the one 
 in when you pressed the shortcut, then the others, the one used last first. Then the rest,
 the one opened last first, under a line.
 
+On Windows, when you open a new local folder in Zed or Zed Preview, proj can offer to
+add it in a small, non-focusing popup for seven seconds. Choose **Add** or **Dismiss**;
+no folder is added without your confirmation. Multi-folder Zed windows can be saved as
+workspaces (their folders open together as one entry). Already listed or hidden folders
+aren't offered again. The prompt waits while the search dialog is open. Detection uses
+Zed's local workspace database, so it skips ambiguous titles, remote folders, other
+editors, and editor windows already open when proj starts.
+
+A listed project or workspace whose folder is deleted disappears automatically the
+next time the project list is loaded. Folders on inaccessible or disconnected drives
+are hidden until they become available again, rather than forgotten.
+
 Searching uses fzf's way of matching (through [nucleo](https://github.com/helix-editor/nucleo),
 as Helix and Zed do): letters at the start of words and next to each other count most, and
 each word you type matches on its own, in any order (`sdk shared` finds `shared-sdk`).
@@ -93,7 +105,7 @@ elsewhere), opening it again within 30 seconds brings back what you'd typed, sel
 typing replaces it.
 
 Type `>` to list commands: start on login, add projects, new project from a template, change
-the default editor, theme, open the config file, remove missing projects (when some are),
+the default editor, theme, open the config file,
 check for updates / install update (installed copies), quit.
 Type `@` to list your open editor windows instead, the same list as the switcher (below):
 keep typing to filter it, enter switches, esc goes back to the projects.
@@ -143,12 +155,10 @@ back up, and a number (**alt+1** to **9**) switches straight to that row. Let go
 the highlighted window comes to the front. The list shows as soon as you press the key, like
 Alt+Tab; a quick tap switches to the editor window you used before. **alt-esc** cancels.
 
-A project's windows share one row ("3 windows · …"), which switches to the one you used last
-(or, for the project you're in, to its other window). **→** on that row (**alt+→** while
-holding) lists its windows one by one; **←** goes back. **ctrl-w** (**ctrl+alt+w** while
-holding) closes the highlighted window, as its close button would, so the editor can still
-ask about unsaved changes. So does the **✕** at the end of the highlighted row, or of any row
-under the mouse.
+Every editor window has its own row, even when two windows show the same project.
+**ctrl-w** (**ctrl+alt+w** while holding) closes the highlighted window, as its close
+button would, so the editor can still ask about unsaved changes. So does the **✕**
+at the end of the highlighted row, or of any row under the mouse.
 
 The list keeps its order: rows stay where they first appeared, new ones are added at the
 end, and switching doesn't move anything. The highlight starts on the window you used before
@@ -167,7 +177,7 @@ order, each row keeps its number until it closes. Set other modifiers with
 `switch_number_modifiers` in config.toml, but not ctrl+alt on Windows: Windows reads AltGr as
 ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 
-Each window is listed under its project, with the branch and the editor. proj works out the
+Each window shows its project name, title, branch and editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
 folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
 title. Projects with a window open get a green dot after their name in the normal list, and

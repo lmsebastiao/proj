@@ -32,6 +32,8 @@ gpui = "0.2.2"
 image = { version = "0.25", default-features = false }
 # Fuzzy matching for the searches: fzf's algorithm, as Helix and Zed use it.
 nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
+# Read Zed's workspace SQLite database without opening it for writes.
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 # package.json scripts, listed in the file's order.
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -40,6 +42,7 @@ time = { version = "0.3", features = ["local-offset"] }
 toml = "1.1.6"
 toml_edit = "0.25"
 ureq = { version = "3.4.2", features = ["json"] }
+
 
 [build-dependencies]
 embed-resource = "3"

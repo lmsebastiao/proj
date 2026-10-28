@@ -15,7 +15,7 @@ use gpui::{
 };
 
 use crate::{
-    autostart, config, editors, open,
+    autostart, config, editors, offer, open,
     palette::{self, Palette},
     platform, store,
     switcher::{self, EditorWindow},
@@ -408,6 +408,7 @@ pub fn run() {
         // Finds installed editors off the main thread so the first open is instant.
         std::thread::spawn(|| editors::detected_editors(false));
         cx.set_global(PaletteWindow::default());
+        offer::start(cx);
 
         let anchor = cx.open_window(
             WindowOptions {
@@ -669,14 +670,14 @@ fn arranged_windows(delta: isize, cx: &mut App) -> (Vec<EditorWindow>, usize) {
 }
 
 /// A switch-by-number shortcut: straight to the `ix`th row (0 = the first) of
-/// the switcher, without showing it: to a project's window used last.
+/// the switcher, without showing it: to that individual window.
 fn switch_to_number(ix: usize, cx: &mut App) {
     let (windows, _) = arranged_windows(1, cx);
     let config = config::load_config();
     let mut db = store::load_db();
     let projects = store::collect(&config, &db);
     let projects_of: Vec<Option<usize>> = windows.iter().map(|w| w.project(&projects)).collect();
-    let rows = switcher::rows(&windows, &projects_of);
+    let rows = switcher::rows(&windows);
     let Some(&target) = rows.get(ix).and_then(|row| row.first()) else {
         return;
     };
@@ -776,6 +777,10 @@ fn show_palette(
 }
 
 /// The palette closes itself (blur, escape, open), so the stored handle may be stale.
+pub(crate) fn palette_is_open(cx: &App) -> bool {
+    open_palette(cx).is_some()
+}
+
 fn open_palette(cx: &App) -> Option<WindowHandle<Palette>> {
     let handle = cx.global::<PaletteWindow>().handle?;
     cx.windows()

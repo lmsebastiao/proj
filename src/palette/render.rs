@@ -640,7 +640,7 @@ impl Palette {
                                 .text_color(rgb(color))
                                 .child(StyledText::new(title).with_highlights(title_hl)),
                         )
-                        // Its key.
+                        // Its key, where it has one.
                         .children(detail.map(|detail| keycaps(&detail, t)))
                         .into_any_element()
                 }
@@ -942,9 +942,7 @@ impl Palette {
         let scope = match self.list() {
             List::Commands => Some("Commands"),
             List::Files => Some("Files"),
-            List::Switch if self.mode == Mode::Projects && self.expanded.is_none() => {
-                Some("Windows")
-            }
+            List::Switch if self.mode == Mode::Projects => Some("Windows"),
             _ => None,
         };
         div()
@@ -1426,7 +1424,7 @@ impl Render for Palette {
             }))
             // Backspace with nothing typed goes back a page, as in PowerToys'
             // Command Palette; in the menu, closes it. Not while typing a name,
-            // where empty is a value.
+            // where an empty value is allowed.
             .capture_action(cx.listener(|this, _: &input::Backspace, _, cx| {
                 if this.menu_open() {
                     if this.menu_input.read(cx).text().is_empty() {
