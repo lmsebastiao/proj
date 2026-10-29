@@ -1,10 +1,11 @@
-[package]
-name = "proj"
+[workspace]
+members = ["crates/proj", "crates/proj-cli", "crates/proj-core", "crates/proj-git", "crates/proj-projects", "crates/proj-ui"]
+resolver = "3"
+default-members = ["crates/proj"]
+
+# The binary and its CLI/update code must report the same release version.
+[workspace.package]
 version = "1.0.21"
-edition = "2024"
-description = "Always-running project launcher with a Raycast-style search dialog"
-# The updater downloads releases from here.
-repository = "https://github.com/lmsebastiao/proj"
 
 [workspace.lints.clippy]
 all = "deny"
@@ -22,92 +23,6 @@ semicolon_if_nothing_returned = "deny"
 uninlined_format_args = "deny"
 unnecessary_wraps = "deny"
 unnested_or_patterns = "deny"
-
-[dependencies]
-async-channel = "2"
-dirs = "7.0.0"
-global-hotkey = "0.8.0"
-gpui = "0.2.2"
-# The pixel buffer type gpui images are made of.
-image = { version = "0.25", default-features = false }
-# Fuzzy matching for the searches: fzf's algorithm, as Helix and Zed use it.
-nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
-# Read Zed's workspace SQLite database without opening it for writes.
-rusqlite = { version = "0.37", features = ["bundled"] }
-serde = { version = "1.0.229", features = ["derive"] }
-# package.json scripts, listed in the file's order.
-serde_json = { version = "1", features = ["preserve_order"] }
-# The date a project was last opened, in local time.
-time = { version = "0.3", features = ["local-offset"] }
-toml = "1.1.6"
-toml_edit = "0.25"
-ureq = { version = "3.4.2", features = ["json"] }
-
-
-[build-dependencies]
-embed-resource = "3"
-
-[target.'cfg(windows)'.dependencies]
-raw-window-handle = "0.6"
-windows-sys = { version = "0.61", features = [
-  "Win32_Foundation",
-  "Win32_Graphics_Dwm",
-  "Win32_Graphics_Gdi",
-  "Win32_UI_HiDpi",
-  "Win32_UI_Input_KeyboardAndMouse",
-  "Win32_UI_WindowsAndMessaging",
-  "Win32_System_Console",
-  "Win32_System_ProcessStatus",
-  "Win32_System_Registry",
-  "Win32_System_Threading",
-  "Win32_UI_Shell",
-] }
-
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-tray-icon = "0.25"
-
-# App icons, and the window switcher through the Accessibility API.
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-  "std",
-  "libc",
-  "NSGraphicsContext",
-  "NSImage",
-  "NSImageRep",
-  "NSRunningApplication",
-  "NSWorkspace",
-  "objc2-core-graphics",
-] }
-objc2-application-services = { version = "0.3", default-features = false, features = [
-  "std",
-  "libc",
-  "AXError",
-  "AXUIElement",
-  "HIServices",
-] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = [
-  "std",
-  "CFArray",
-  "CFCGTypes",
-  "CFDictionary",
-  "CFNumber",
-  "CFString",
-] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = [
-  "std",
-  "CGBitmapContext",
-  "CGColorSpace",
-  "CGContext",
-  "CGEventSource",
-  "CGEventTypes",
-  "CGImage",
-  "CGWindow",
-] }
-objc2-foundation = { version = "0.3", default-features = false, features = [
-  "std",
-  "NSString",
-  "NSURL",
-] }
 
 [profile.release]
 lto = "thin"

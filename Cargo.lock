@@ -4552,27 +4552,72 @@ dependencies = [
 name = "proj"
 version = "1.0.21"
 dependencies = [
- "async-channel 2.5.0",
- "dirs 7.0.0",
  "embed-resource",
+ "proj-cli",
+ "proj-ui",
+]
+
+[[package]]
+name = "proj-cli"
+version = "1.0.21"
+dependencies = [
+ "dirs 7.0.0",
  "global-hotkey",
  "gpui",
- "image",
- "nucleo-matcher",
  "objc2-app-kit",
  "objc2-application-services",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
+ "proj-core",
+ "proj-projects",
  "raw-window-handle",
+ "serde",
+ "time",
+ "ureq",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "proj-core"
+version = "0.1.0"
+dependencies = [
+ "nucleo-matcher",
+]
+
+[[package]]
+name = "proj-git"
+version = "0.1.0"
+
+[[package]]
+name = "proj-projects"
+version = "0.1.0"
+dependencies = [
+ "dirs 7.0.0",
+ "proj-core",
+ "proj-git",
  "rusqlite",
  "serde",
  "serde_json",
  "time",
  "toml 1.1.8+spec-1.1.0",
  "toml_edit 0.25.17+spec-1.1.0",
+]
+
+[[package]]
+name = "proj-ui"
+version = "0.1.0"
+dependencies = [
+ "async-channel 2.5.0",
+ "global-hotkey",
+ "gpui",
+ "image",
+ "proj-cli",
+ "proj-core",
+ "proj-git",
+ "proj-projects",
+ "raw-window-handle",
  "tray-icon",
- "ureq",
  "windows-sys 0.61.2",
 ]
 

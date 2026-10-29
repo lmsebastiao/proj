@@ -240,7 +240,7 @@ fn salvage(text: &str) -> Config {
 
 /// A TOML error in one line, for the footer: "config.toml, line 12: invalid
 /// type: string "2", expected u8".
-pub(crate) fn toml_problem(path: &Path, text: &str, err: &toml::de::Error) -> String {
+pub fn toml_problem(path: &Path, text: &str, err: &toml::de::Error) -> String {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -439,6 +439,107 @@ fn with_scan_dirs(text: &str, dirs: &[PathBuf]) -> io::Result<(String, Vec<PathB
     Ok((doc.to_string(), added))
 }
 
+/// Stops watching a folder without touching the folder or its contents.
+pub fn remove_scan_dir(dir: &Path) -> io::Result<bool> {
+    let path = config_path();
+    let text = fs::read_to_string(&path)?;
+    let (updated, removed) = without_scan_dir(&text, dir)?;
+    if removed {
+        write_atomic(&path, &updated)?;
+    }
+    Ok(removed)
+}
+
+fn without_scan_dir(text: &str, dir: &Path) -> io::Result<(String, bool)> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    let Some(array) = doc
+        .get_mut("scan_dirs")
+        .and_then(toml_edit::Item::as_array_mut)
+    else {
+        return Err(io::Error::other(
+            "scan_dirs in config.toml isn't a list of folders",
+        ));
+    };
+    let target =
+        crate::paths::normalize(&dir.to_string_lossy()).unwrap_or_else(|| dir.to_path_buf());
+    let mut removed = false;
+    for index in (0..array.len()).rev() {
+        let entry = array
+            .get(index)
+            .and_then(toml_edit::Value::as_str)
+            .ok_or_else(|| io::Error::other("scan_dirs in config.toml isn't a list of folders"))?;
+        let entry = crate::paths::normalize(entry).unwrap_or_else(|| PathBuf::from(entry));
+        if entry == target {
+            array.remove(index);
+            removed = true;
+        }
+    }
+    Ok((doc.to_string(), removed))
+}
+
+/// Saves a valid folder or git URL in `templates`, preserving the other settings.
+pub fn add_template(source: &str) -> io::Result<bool> {
+    let path = config_path();
+    let text = fs::read_to_string(&path)?;
+    let (updated, added) = with_template(&text, source, false)?;
+    if added {
+        write_atomic(&path, &updated)?;
+    }
+    Ok(added)
+}
+
+/// Forgets a template without deleting its source folder or repository.
+pub fn remove_template(source: &str) -> io::Result<bool> {
+    let path = config_path();
+    let text = fs::read_to_string(&path)?;
+    let (updated, removed) = with_template(&text, source, true)?;
+    if removed {
+        write_atomic(&path, &updated)?;
+    }
+    Ok(removed)
+}
+
+fn with_template(text: &str, source: &str, remove: bool) -> io::Result<(String, bool)> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    let template = crate::templates::Template::parse(source)
+        .ok_or_else(|| io::Error::other("Not a valid template folder or git URL"))?;
+    if !remove && matches!(&template, crate::templates::Template::Folder(dir) if !dir.is_dir()) {
+        return Err(io::Error::other("Template folder does not exist"));
+    }
+    if !doc.contains_key("templates") {
+        if remove {
+            return Ok((text.to_string(), false));
+        }
+        doc["templates"] = toml_edit::value(toml_edit::Array::new());
+    }
+    let array = doc["templates"]
+        .as_array_mut()
+        .ok_or_else(|| io::Error::other("templates in config.toml isn't a list"))?;
+    let mut matching = None;
+    for (index, entry) in array.iter().enumerate() {
+        let entry = entry
+            .as_str()
+            .ok_or_else(|| io::Error::other("templates in config.toml isn't a list"))?;
+        if crate::templates::Template::parse(entry) == Some(template.clone()) {
+            matching = Some(index);
+            break;
+        }
+    }
+    if remove {
+        if let Some(index) = matching {
+            array.remove(index);
+        }
+    } else if matching.is_none() {
+        array.push(source.trim());
+    }
+    let changed = if remove {
+        matching.is_some()
+    } else {
+        matching.is_none()
+    };
+    Ok((doc.to_string(), changed))
+}
+
 /// Sets `editor` in config.toml, preserving the rest of the file.
 pub fn set_editor(command: &str) -> io::Result<()> {
     let path = config_path();
@@ -527,6 +628,56 @@ mod tests {
         assert!(added.is_empty());
         assert_eq!(same, updated);
         assert!(with_scan_dirs("scan_dirs = \"oops\"", std::slice::from_ref(&root)).is_err());
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn removing_a_watched_root_keeps_other_settings() {
+        let root = std::env::temp_dir().join(format!("proj-remove-root-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"alt+space\"");
+        let (watched, _) = with_scan_dirs(&template, std::slice::from_ref(&root)).unwrap();
+        let (updated, removed) = without_scan_dir(&watched, &root).unwrap();
+        assert!(removed);
+        assert!(root.is_dir());
+        assert!(updated.contains("# You can still add individual projects with ctrl-o."));
+        assert!(
+            toml::from_str::<Config>(&updated)
+                .unwrap()
+                .scan_dirs
+                .is_empty()
+        );
+        assert!(!without_scan_dir(&updated, &root).unwrap().1);
+        fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn template_edits_preserve_settings_and_reject_duplicates() {
+        let root =
+            std::env::temp_dir().join(format!("proj-config-template-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"alt+space\"");
+        let folder = root.to_string_lossy();
+        let (added, changed) = with_template(&template, &folder, false).unwrap();
+        assert!(changed);
+        assert_eq!(
+            toml::from_str::<Config>(&added).unwrap().templates,
+            [folder.as_ref()]
+        );
+        assert!(added.contains("check_for_updates = true"));
+        assert!(!with_template(&added, &folder, false).unwrap().1);
+        let (both, changed) =
+            with_template(&added, "https://github.com/me/starter.git", false).unwrap();
+        assert!(changed);
+        let (removed, changed) = with_template(&both, &folder, true).unwrap();
+        assert!(changed);
+        assert_eq!(
+            toml::from_str::<Config>(&removed).unwrap().templates,
+            ["https://github.com/me/starter.git"]
+        );
+        assert!(root.is_dir());
+        assert!(!with_template(&removed, &folder, true).unwrap().1);
+        assert!(with_template(&template, "not-a-valid-folder", false).is_err());
         fs::remove_dir(root).unwrap();
     }
 

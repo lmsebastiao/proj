@@ -1,5 +1,5 @@
 # Run by hand (Actions > Release > Run workflow, or `gh workflow run release.yml`).
-# Builds the installer for the version in Cargo.toml and publishes it as a GitHub
+# Builds the installer for the workspace version in Cargo.toml and publishes it as a GitHub
 # Release, creating the vX.Y.Z tag on the commit it built. Installed copies of
 # proj find the release there and offer to update.
 name: Release

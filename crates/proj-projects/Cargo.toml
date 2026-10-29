@@ -1,0 +1,19 @@
+[package]
+name = "proj-projects"
+version = "0.1.0"
+edition = "2024"
+description = "Project discovery, persistence and opening for proj"
+
+[dependencies]
+proj-git = { path = "../proj-git" }
+dirs = "7.0.0"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+# Preserve package.json script order.
+serde_json = { version = "1", features = ["preserve_order"] }
+time = { version = "0.3", features = ["local-offset"] }
+toml = "1.1.6"
+toml_edit = "0.25"
+
+[dev-dependencies]
+proj-core = { path = "../proj-core" }

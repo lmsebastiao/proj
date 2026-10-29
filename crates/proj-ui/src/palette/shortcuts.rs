@@ -155,6 +155,11 @@ impl Palette {
                     s(&["mod-c"], "Copy the path").or_alt().run(CopyPath),
                     s(&["mod-o"], "Add projects…").run(AddProjects),
                     s(
+                        &["mod-↵"],
+                        "On a pasted git URL, choose the clone destination",
+                    )
+                    .run(ConfirmSecondary),
+                    s(
                         &["mod-1…9"],
                         "Open the project in that place (numbered while mod is held)",
                     )
@@ -206,11 +211,37 @@ impl Palette {
                 ]
             }
             List::Templates => vec![
-                s(&["↵"], "Make a new project from it")
-                    .footer("Pick")
+                s(&["↵"], "Use the template, or add a folder / git URL")
+                    .footer("Choose")
                     .run(Confirm),
+                s(
+                    &["shift-del"],
+                    "Remove the selected template (keep its source)",
+                )
+                .run(RemoveItem),
                 s(&["↑ ↓"], "Move the selection"),
                 s(&["esc", "backspace"], "Back to the projects")
+                    .footer("Back")
+                    .run(Dismiss),
+            ],
+            List::WatchedRoots => vec![
+                s(&["↵"], "Watch another folder").footer("Add").run(Confirm),
+                s(
+                    &["shift-del"],
+                    "Stop watching the selected root; never delete its folder",
+                )
+                .run(RemoveItem),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "backspace"], "Back to the projects")
+                    .footer("Back")
+                    .run(Dismiss),
+            ],
+            List::Destinations => vec![
+                s(&["↵"], "Use this parent folder, then confirm the action")
+                    .footer("Choose")
+                    .run(Confirm),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "backspace"], "Keep the previous destination")
                     .footer("Back")
                     .run(Dismiss),
             ],
@@ -334,19 +365,23 @@ impl Palette {
                 let save = match self.mode {
                     Mode::AddCommand => "Add the command",
                     Mode::NewProject => "Make the project and open it",
+                    Mode::TemplateUrl => "Save the git template URL",
                     Mode::Reset => "Reset only after typing RESET",
                     _ => "Save the name",
                 };
                 let short = match self.mode {
                     Mode::NewProject => "Make",
+                    Mode::TemplateUrl => "Add",
                     Mode::Reset => "Reset",
                     Mode::AddCommand => "Add",
                     _ => "Save",
                 };
-                vec![
-                    s(&["↵"], save).footer(short).run(Confirm),
-                    s(&["esc"], "Cancel").footer("Cancel").run(Dismiss),
-                ]
+                let mut keys = vec![s(&["↵"], save).footer(short).run(Confirm)];
+                if self.mode == Mode::NewProject {
+                    keys.push(s(&["mod-↵"], "Change the destination folder").run(ConfirmSecondary));
+                }
+                keys.push(s(&["esc"], "Cancel").footer("Cancel").run(Dismiss));
+                keys
             }
         }
     }

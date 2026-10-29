@@ -3,10 +3,26 @@
 A project launcher that runs in the background: press a global shortcut, fuzzy-search your
 projects, hit enter to open one in your editor. Built with [gpui](https://crates.io/crates/gpui).
 
+## Workspace
+
+`crates/proj` contains only the `proj` entry point and Windows icon build script.
+`crates/proj-core` contains independent fuzzy matching and ranking; `crates/proj-git`
+reads Git metadata and status; `crates/proj-projects` owns project discovery, settings,
+persistence, templates, tasks and opening; `crates/proj-cli` owns CLI commands, updates,
+autostart and shared OS/platform integration; `crates/proj-ui` owns the GPUI launcher,
+search palette, input and window switcher. The CLI also depends on GPUI because the shared
+platform integration exposes window operations. Dependencies run from core/Git through
+projects and CLI to UI; none of these crates depends on the binary.
+
+From the repository root, plain `cargo build --release` builds `proj`;
+`cargo check --workspace` and `cargo test --workspace` include every crate. Icons, the
+installer and release scripts remain at the repository root. The binary and CLI share
+`[workspace.package].version` so the updater reports the same version as the binary.
+
 ## Usage
 
 ```sh
-cargo build --release
+cargo build --release  # from the repository root; builds the proj binary
 proj            # start the launcher in the background
 ```
 
@@ -22,7 +38,9 @@ then suggests existing common project folders (such as `~/repos`) to watch with 
 or lets you choose your own. If none are found, it opens a folder picker. Their direct
 subfolders appear as projects automatically, including folders created later. You can
 still add individual projects (ctrl-o). Use `> Discover projects in folders…` to watch
-more folders later. Nothing outside the chosen folders is scanned.
+more folders later, or `> Manage watched folders…` to see their project counts, add another,
+or stop watching one. Stopping a watch never deletes its folder. Nothing outside the chosen
+folders is scanned.
 
 | Key                     | Action                                     |
 | ----------------------- | ------------------------------------------ |
@@ -278,9 +296,12 @@ Forgejo…), opens the page, and saves the answer in config.toml as
 ### New projects from templates
 
 Type `>` and pick **New project from a template**, or ctrl-k → **New project from this one…**
-on any project. Templates are the folders and git URLs listed under `templates` in
-config.toml. After picking one, type the new project's folder name and press enter: it's made
-in the first `scan_dirs` folder (or one you pick), with a git history of its own, and opens.
+on any project. On the template list, add a folder or a git URL, or remove a saved template
+with **shift-delete** (its source is kept). `> Manage templates…` opens the same list;
+entries are saved under `templates` in config.toml. After picking one, type the new
+project's folder name; the full destination is shown. **ctrl-enter** (**cmd-enter** on macOS)
+changes the parent to another watched folder or one you choose. **Enter** makes and opens it with its own git
+history.
 A folder that is a git repository is copied as git would commit it, so without what
 `.gitignore` leaves out; other folders are copied whole, but for `node_modules`, `target` and
 the like. A git URL is cloned without its history.
@@ -291,10 +312,13 @@ A file path shows an **Open** row: the file opens in the editor of the listed pr
 it lands in that project's window), or in the default editor.
 
 Pasting a git URL (`https://…`, `ssh://…`, `git@host:owner/repo.git`) shows a **Clone** row.
-Enter runs `git clone` into the first `scan_dirs` folder (or asks for a folder if there are none),
-then opens the new project. The dialog stays open while it clones; if you close it, the clone
-still finishes and is listed next time. Private repositories work the way they do for `git` on
-your machine (SSH keys, Git Credential Manager).
+Enter runs `git clone` into the displayed destination (the first watched folder by default);
+**ctrl-enter** (**cmd-enter** on macOS) chooses another watched folder or a folder outside them.
+If there is no watched
+folder, it asks for one. The dialog stays open while it clones; if you close it, the clone
+still finishes, and its success or failure is reported the next time the dialog opens after
+it finishes. Private repositories work the way they do for `git` on your machine (SSH keys,
+Git Credential Manager).
 
 CLI:
 
@@ -318,8 +342,8 @@ proj version        # show the installed version
 hotkey = "alt+space"
 # switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
 # switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that row; default alt+shift
-scan_dirs = []          # folders to watch; chosen on first launch or with > Discover projects in folders
-# templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]
+scan_dirs = []          # folders to watch; manage with > Manage watched folders
+# templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]  # or > Manage templates
 # forges = { "git.example.com" = "gitlab" }  # for pull request and CI links
 scan_depth = 1          # >1 descends into non-git folders
 check_for_updates = true  # look for a new release about once a day
@@ -352,7 +376,7 @@ until you fix or delete it.
 .\scripts\build-installer.ps1 -SkipBuild   # package the last release build
 ```
 
-This produces `dist\proj-setup-<version>.exe` (version from `Cargo.toml`). The script uses
+This produces `dist\proj-setup-<version>.exe` (workspace version from `Cargo.toml`). The script uses
 `makensis` if NSIS is installed; otherwise it downloads the pinned portable NSIS release once into
 `%LOCALAPPDATA%\proj-build`, checking its SHA-256. Nothing is installed system-wide.
 
@@ -391,13 +415,14 @@ whether a newer version exists.
 GitHub Actions runs `cargo fmt --check`, clippy and the tests on every push to `main` and every
 pull request (`.github/workflows/ci.yml`). To publish a version:
 
-1. Bump `version` in `Cargo.toml` (e.g. `0.3.0`), run `cargo check` so `Cargo.lock` follows,
+1. Bump `[workspace.package].version` in `Cargo.toml` (e.g. `0.3.0`), run
+   `cargo check --workspace` so `Cargo.lock` follows,
    commit and push to `main`.
 2. Run the **Release** workflow: on GitHub, Actions → Release → Run workflow (branch `main`),
    or `gh workflow run release.yml`.
 
 `.github/workflows/release.yml` refuses to run from any branch other than `main`, or when the
-version in `Cargo.toml` is already tagged. It then runs `scripts/build-installer.ps1` and
+workspace version in `Cargo.toml` is already tagged. It then runs `scripts/build-installer.ps1` and
 creates the `v0.3.0` tag and a release with `proj-setup-0.3.0.exe` and `SHA256SUMS.txt`, with
 notes generated from the commits. You don't create the tag yourself. Installed copies pick the
 release up on their next check.

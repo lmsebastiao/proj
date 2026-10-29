@@ -1,0 +1,7 @@
+[package]
+name = "proj-git"
+version = "0.1.0"
+edition = "2024"
+description = "Git repository status and metadata for proj"
+
+[dependencies]

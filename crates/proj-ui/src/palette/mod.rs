@@ -22,6 +22,7 @@ mod tooltip;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -74,6 +75,59 @@ impl Global for LastSearch {}
 /// How long a closed palette's search is kept.
 const KEEP_SEARCH: Duration = Duration::from_secs(30);
 
+/// Results of jobs that outlived their palette window. Kept until a later
+/// opening, rather than disappearing with the window that started them.
+static JOB_RESULTS: OnceLock<Mutex<Vec<(String, bool)>>> = OnceLock::new();
+
+fn job_results() -> &'static Mutex<Vec<(String, bool)>> {
+    JOB_RESULTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub(super) fn record_job_result(message: String, failed: bool) {
+    let mut results = job_results()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    results.push((message, failed));
+    if results.len() > 5 {
+        results.remove(0);
+    }
+}
+
+fn take_job_results() -> Option<Status> {
+    let mut results = job_results()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if results.is_empty() {
+        return None;
+    }
+    let failed = results.iter().any(|(_, failed)| *failed);
+    let text = results
+        .drain(..)
+        .map(|(text, _)| text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(Status {
+        text: text.into(),
+        problem: failed,
+        undo: false,
+    })
+}
+
+fn append_job_results(status: &mut Option<Status>) -> bool {
+    let Some(result) = take_job_results() else {
+        return false;
+    };
+    *status = Some(match status.take() {
+        Some(existing) => Status {
+            text: format!("{}\n{}", existing.text, result.text).into(),
+            problem: existing.problem || result.problem,
+            undo: existing.undo,
+        },
+        None => result,
+    });
+    true
+}
+
 /// The footer's message.
 #[derive(Clone, PartialEq)]
 pub(super) struct Status {
@@ -122,6 +176,11 @@ pub struct Palette {
     templates: Vec<Template>,
     /// What `Mode::NewProject` makes the new project from.
     new_from: Option<Template>,
+    /// Parent folder for the next clone or new project.
+    destination: Option<PathBuf>,
+    /// The screen and input to return to after choosing a destination.
+    destination_for: Mode,
+    destination_query: String,
     /// The git site `Mode::Forges` asks about.
     forge_pick: Option<forges::ForgePick>,
     /// The "Open together" page, or a group's "Folders…" (`Mode::Group`).
@@ -250,6 +309,9 @@ impl Palette {
             menu_selected: 0,
             templates: Vec::new(),
             new_from: None,
+            destination: None,
+            destination_for: Mode::Projects,
+            destination_query: String::new(),
             forge_pick: None,
             group_page: None,
             unsaved: None,
@@ -324,6 +386,29 @@ impl Palette {
             problem: true,
             undo: false,
         });
+        // Results are delivered after the window's restored search is applied,
+        // which otherwise clears its status on construction.
+        // A job begun in an earlier window may finish while this one is open.
+        // Keep checking until the palette closes; completed results are drained
+        // only after the current window has received them.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(350))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if append_job_results(&mut this.status) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         this
     }
 
@@ -493,6 +578,7 @@ impl Palette {
                 self.browse = None;
                 self.editing = None;
                 self.new_from = None;
+                self.destination = None;
                 self.forge_pick = None;
                 self.group_page = None;
                 // An unsaved group goes from the list again.
@@ -507,6 +593,9 @@ impl Palette {
             | Mode::Rename
             | Mode::AddCommand
             | Mode::NewProject
+            | Mode::TemplateUrl
+            | Mode::WatchedRoots
+            | Mode::Destinations
             | Mode::Reset
             | Mode::Switch
             | Mode::Forges
@@ -569,7 +658,10 @@ impl Palette {
             },
             Mode::Rename => "Leave empty to use the folder name".into(),
             Mode::AddCommand => "A command to run in the project's folder, e.g. npm run dev".into(),
-            Mode::Templates => "New project from…".into(),
+            Mode::Templates => "New project from… or add a template".into(),
+            Mode::TemplateUrl => "Git repository URL for the template".into(),
+            Mode::WatchedRoots => "Watched folders…".into(),
+            Mode::Destinations => "Choose a parent folder…".into(),
             Mode::Group => "Search projects to tick…".into(),
             Mode::Forges => match &self.forge_pick {
                 Some(pick) => format!("What does {} run?", pick.host),
@@ -607,8 +699,14 @@ impl Palette {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
             Mode::Browse => List::Browse,
-            Mode::Rename | Mode::AddCommand | Mode::NewProject | Mode::Reset => List::Text,
+            Mode::Rename
+            | Mode::AddCommand
+            | Mode::NewProject
+            | Mode::TemplateUrl
+            | Mode::Reset => List::Text,
             Mode::Templates => List::Templates,
+            Mode::WatchedRoots => List::WatchedRoots,
+            Mode::Destinations => List::Destinations,
             Mode::Forges => List::Forges,
             Mode::Group => List::Group,
             Mode::Switch => List::Switch,
@@ -711,13 +809,17 @@ impl Palette {
                     None
                 }
             });
+        let previous_clone = self.clone_candidate.clone();
         self.clone_candidate = (list == List::Projects)
             .then(|| git::clone_name(&query))
             .flatten()
             .map(|name| CloneTarget {
                 url: query.clone(),
                 name,
-                into: self.config.scan_dirs.first().cloned(),
+                into: previous_clone
+                    .filter(|old| old.url == query)
+                    .map(|old| old.into)
+                    .unwrap_or_else(|| self.config.scan_dirs.first().cloned()),
             });
 
         self.selected = 0;
@@ -815,6 +917,7 @@ impl Palette {
             return match self.mode {
                 Mode::AddCommand => self.finish_add_command(cx),
                 Mode::NewProject => self.finish_new_project(window, cx),
+                Mode::TemplateUrl => self.finish_template_url(cx),
                 Mode::Reset => self.finish_reset(window, cx),
                 _ => self.finish_rename(cx),
             };
@@ -830,10 +933,13 @@ impl Palette {
             List::OpenWith => self.choose_open_with(ix, window, cx),
             List::Commands => self.run_command(self.commands[ix], window, cx),
             List::Switch => self.switch_to(self.switch_rows[ix][0], window, cx),
-            List::Templates => {
-                self.new_from = Some(self.templates[ix].clone());
-                self.set_mode(Mode::NewProject, cx);
+            List::Templates => self.choose_template(ix, window, cx),
+            List::WatchedRoots => {
+                if ix == self.config.scan_dirs.len() {
+                    self.discover_projects(window, cx);
+                }
             }
+            List::Destinations => self.choose_destination(ix, window, cx),
             List::Forges => self.choose_forge(ix, window, cx),
             List::Browse | List::Files => {
                 if let Some((project, ..)) = self.selected_file() {
@@ -869,7 +975,14 @@ impl Palette {
 
             List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
-            List::OpenWith | List::Text | List::Templates | List::Forges | List::Group => {
+            List::Destinations => self.return_from_destination(cx),
+            List::Text if self.mode == Mode::TemplateUrl => self.set_mode(Mode::Templates, cx),
+            List::OpenWith
+            | List::Text
+            | List::Templates
+            | List::WatchedRoots
+            | List::Forges
+            | List::Group => {
                 self.back_to_projects(cx);
             }
             List::Projects if !self.marked.is_empty() => {
@@ -893,6 +1006,9 @@ impl Palette {
             Mode::Rename => format!("Rename {}", self.edited_project()?.name),
             Mode::AddCommand => format!("Command for {}", self.edited_project()?.name),
             Mode::Templates => "New project".into(),
+            Mode::TemplateUrl => "Add git template".into(),
+            Mode::WatchedRoots => "Watched folders".into(),
+            Mode::Destinations => "Destination".into(),
             Mode::Forges => format!("What runs {}", self.forge_pick.as_ref()?.host),
             Mode::Group => match &self.group_page.as_ref()?.editing {
                 Some(folders) => {
@@ -917,6 +1033,14 @@ impl Palette {
         }
         match self.list() {
             List::Browse | List::Switch => self.leave(cx),
+            List::Destinations => {
+                self.return_from_destination(cx);
+                true
+            }
+            List::Text if self.mode == Mode::TemplateUrl => {
+                self.set_mode(Mode::Templates, cx);
+                true
+            }
             _ => {
                 self.back_to_projects(cx);
                 true

@@ -1,0 +1,14 @@
+[package]
+name = "proj"
+version.workspace = true
+edition = "2024"
+description = "Always-running project launcher with a Raycast-style search dialog"
+# The updater downloads releases from here.
+repository = "https://github.com/lmsebastiao/proj"
+
+[dependencies]
+proj-cli = { path = "../proj-cli" }
+proj-ui = { path = "../proj-ui" }
+
+[build-dependencies]
+embed-resource = "3"

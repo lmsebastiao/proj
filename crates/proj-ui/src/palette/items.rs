@@ -29,6 +29,9 @@ pub(super) enum Mode {
     AddCommand,
     /// Choosing a template for a new project (`Palette::templates`).
     Templates,
+    TemplateUrl,
+    WatchedRoots,
+    Destinations,
     /// Typing the name of a new project made from `Palette::new_from`.
     NewProject,
     /// The window switcher: open editor windows (`Palette::windows`).
@@ -57,6 +60,8 @@ pub(super) enum List {
     /// The switcher's rows (`Palette::switch_rows`).
     Switch,
     Templates,
+    WatchedRoots,
+    Destinations,
     /// What a git site can run (`forges::CHOICES`).
     Forges,
     /// The projects to tick (indexes into `Palette::projects`, groups left out).
@@ -109,7 +114,7 @@ pub(super) struct CloneTarget {
     pub(super) url: String,
     /// The folder `git clone` creates.
     pub(super) name: String,
-    /// Where to clone it: the first `scan_dirs` folder, or `None` to ask.
+    /// Parent folder chosen for the clone, or `None` to ask.
     pub(super) into: Option<PathBuf>,
 }
 
@@ -124,7 +129,9 @@ pub(super) enum PaletteCommand {
     Autostart,
     AddProjects,
     DiscoverProjects,
+    ManageWatchedRoots,
     NewFromTemplate,
+    ManageTemplates,
     ChangeEditor,
     /// Go through system → light → dark.
     Theme,
@@ -144,7 +151,9 @@ pub(super) fn commands(updates: bool, missing: bool) -> Vec<PaletteCommand> {
         PaletteCommand::Autostart,
         PaletteCommand::AddProjects,
         PaletteCommand::DiscoverProjects,
+        PaletteCommand::ManageWatchedRoots,
         PaletteCommand::NewFromTemplate,
+        PaletteCommand::ManageTemplates,
         PaletteCommand::ChangeEditor,
         PaletteCommand::Theme,
         PaletteCommand::OpenConfig,
@@ -246,10 +255,34 @@ impl Palette {
                     None => (window.title.clone(), window.editor.clone()),
                 }
             }
-            List::Templates => {
-                let template = &self.templates[ix];
-                (template.name(), template.source())
-            }
+            List::Templates => match self.templates.get(ix) {
+                Some(template) => (template.name(), template.source()),
+                None if ix == self.templates.len() => (
+                    "Add a template folder…".into(),
+                    "Pick an existing folder".into(),
+                ),
+                None => (
+                    "Add a git template URL…".into(),
+                    "Type a repository URL".into(),
+                ),
+            },
+            List::WatchedRoots => match self.config.scan_dirs.get(ix) {
+                Some(root) => (
+                    paths::display_path(root),
+                    "Watched folder · shift-del stops watching (keeps the folder)".into(),
+                ),
+                None => (
+                    "Watch another folder…".into(),
+                    "Pick one or more folders to discover projects".into(),
+                ),
+            },
+            List::Destinations => match self.config.scan_dirs.get(ix) {
+                Some(root) => (paths::display_path(root), "Watched folder".into()),
+                None => (
+                    "Choose another folder…".into(),
+                    "Pick a destination outside the watched roots".into(),
+                ),
+            },
             List::Forges => {
                 let (label, _, what) = super::forges::CHOICES[ix];
                 (label.into(), what.into())
@@ -283,12 +316,23 @@ impl Palette {
                 "Discover projects in folders…".into(),
                 "Watch chosen folders; their subfolders appear automatically".into(),
             ),
+            PaletteCommand::ManageWatchedRoots => (
+                "Manage watched folders…".into(),
+                format!(
+                    "{} roots · add or stop watching; folders stay on disk",
+                    self.config.scan_dirs.len()
+                ),
+            ),
+            PaletteCommand::ManageTemplates => (
+                "Manage templates…".into(),
+                "Add a folder or git URL; remove saved templates".into(),
+            ),
             PaletteCommand::NewFromTemplate => (
                 "New project from a template…".into(),
                 match self.config.templates.len() {
-                    0 => "Set up templates in the config file".into(),
-                    1 => "From the template in the config file".into(),
-                    n => format!("From one of the {n} templates in the config file"),
+                    0 => "Add a folder or git URL from the template list".into(),
+                    1 => "From your saved template".into(),
+                    n => format!("From one of {n} saved templates"),
                 },
             ),
             PaletteCommand::ChangeEditor => (
@@ -698,16 +742,49 @@ impl Palette {
                 }
             }
             List::Templates => Meta {
-                top: Some((
-                    match self.templates[ix] {
-                        crate::templates::Template::Folder(_) => "folder".into(),
-                        crate::templates::Template::Git(_) => "git".into(),
-                    },
-                    self.theme.muted,
-                )),
+                top: self.templates.get(ix).map(|template| {
+                    (
+                        match template {
+                            crate::templates::Template::Folder(_) => "folder".into(),
+                            crate::templates::Template::Git(_) => "git".into(),
+                        },
+                        self.theme.muted,
+                    )
+                }),
                 bottom: None,
                 tip: None,
             },
+            List::WatchedRoots if ix < self.config.scan_dirs.len() => {
+                let root = &self.config.scan_dirs[ix];
+                let count = self
+                    .projects
+                    .iter()
+                    .filter(|p| {
+                        !p.is_workspace()
+                            && !p.manual
+                            && self
+                                .config
+                                .scan_dirs
+                                .iter()
+                                .filter(|r| p.path.starts_with(r))
+                                .max_by_key(|r| r.components().count())
+                                == Some(root)
+                    })
+                    .count();
+                Meta {
+                    top: Some((format!("{count} projects"), self.theme.accent)),
+                    bottom: None,
+                    tip: None,
+                }
+            }
+            List::Destinations if self.config.scan_dirs.get(ix) == self.destination.as_ref() => {
+                Meta {
+                    top: Some(("selected".into(), self.theme.accent)),
+                    bottom: None,
+                    tip: None,
+                }
+            }
+            List::WatchedRoots | List::Destinations => Meta::NONE,
             // Its branch, as in the project list.
             List::Group => Meta {
                 top: self
@@ -775,7 +852,8 @@ impl Palette {
             List::Commands => self.commands.len(),
             List::Files => self.files.hits.len(),
             List::Switch => self.switch_rows.len(),
-            List::Templates => self.templates.len(),
+            List::Templates => self.templates.len() + 2,
+            List::WatchedRoots | List::Destinations => self.config.scan_dirs.len() + 1,
             List::Forges => super::forges::CHOICES.len(),
             List::Group => self.projects.len(),
             List::Text => 0,

@@ -160,7 +160,8 @@ impl PaletteCommand {
         match self {
             Self::Autostart => icons::POWER,
             Self::AddProjects | Self::DiscoverProjects => icons::ADD,
-            Self::NewFromTemplate => icons::NEW_PROJECT,
+            Self::ManageWatchedRoots => icons::FOLDER,
+            Self::NewFromTemplate | Self::ManageTemplates => icons::NEW_PROJECT,
             Self::ChangeEditor => icons::EDIT,
             Self::Theme => icons::THEME,
             Self::OpenConfig => icons::SETTINGS,
@@ -235,10 +236,20 @@ impl Palette {
                 t,
             ),
             List::Commands => glyph(self.commands[ix].icon(), t.muted).into_any_element(),
-            List::Templates => match self.templates[ix] {
-                Template::Folder(_) => glyph(icons::FOLDER, t.muted).into_any_element(),
-                Template::Git(_) => glyph(icons::GLOBE, t.muted).into_any_element(),
+            List::Templates => match self.templates.get(ix) {
+                Some(Template::Folder(_)) => glyph(icons::FOLDER, t.muted).into_any_element(),
+                Some(Template::Git(_)) => glyph(icons::GLOBE, t.muted).into_any_element(),
+                None => glyph(icons::ADD, t.muted).into_any_element(),
             },
+            List::WatchedRoots | List::Destinations => glyph(
+                if ix < self.config.scan_dirs.len() {
+                    icons::FOLDER
+                } else {
+                    icons::ADD
+                },
+                t.muted,
+            )
+            .into_any_element(),
             List::Forges => glyph(icons::GLOBE, t.muted).into_any_element(),
             List::Text => div().into_any_element(),
         };
@@ -317,6 +328,43 @@ impl Palette {
                     // Not also a click on the row, which switches to it.
                     cx.stop_propagation();
                     this.close_row(row, cx);
+                }))
+                .when(!selected, |d| {
+                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
+                })
+                .child(icons::CLOSE)
+        });
+        let removable = match self.list() {
+            List::Templates => m.ix < self.templates.len(),
+            List::WatchedRoots => m.ix < self.config.scan_dirs.len(),
+            _ => false,
+        };
+        let remove = removable.then(|| {
+            div()
+                .id(("remove", row))
+                .flex_none()
+                .size(px(28.))
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                .text_size(px(12.))
+                .text_color(rgb(t.muted))
+                .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.danger)))
+                .tooltip(tooltip(
+                    "Remove from config · folder stays on disk · shift-del",
+                    t,
+                ))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.selected = row;
+                    if this.list() == List::Templates {
+                        this.remove_selected_template(cx);
+                    } else {
+                        this.remove_watched_root(cx);
+                    }
                 }))
                 .when(!selected, |d| {
                     d.invisible().group_hover(ROW_GROUP, |s| s.visible())
@@ -538,7 +586,8 @@ impl Palette {
                         )
                     })
                     .children(more)
-                    .children(close),
+                    .children(close)
+                    .children(remove),
             )
     }
 
@@ -749,20 +798,7 @@ impl Palette {
                 .child("Add projects…")
                 .child(keycaps(&format!("{}-o", secondary()), t))
         };
-        if self.list() == List::Templates && self.templates.is_empty() {
-            return centered()
-                .child("No templates yet")
-                .child(
-                    div()
-                        .text_size(px(SMALL_FONT_SIZE))
-                        .child("List folders and git URLs under templates in the config file (> Open config file)."),
-                )
-                .child(div().text_size(px(SMALL_FONT_SIZE)).child(format!(
-                    "Any project works too: {}-k on it, then \"New project from this one\".",
-                    secondary()
-                )))
-                .into_any_element();
-        }
+
         if self.list() == List::Projects && self.projects.is_empty() {
             let suggested = self
                 .config
@@ -865,7 +901,8 @@ impl Palette {
         let t = self.theme;
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
-            Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates => return None,
+            Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates | Mode::WatchedRoots | Mode::Destinations => return None,
+            Mode::TemplateUrl => (None, vec!["Enter a git repository URL; esc cancels. No download happens until you make a project from it.".into()]),
             Mode::Reset => (
                 Some("Reset proj?".into()),
                 vec!["This clears your saved projects, watched folders, hidden entries, history, editor and other settings, and turns off start on login. It never deletes project folders or Git data. Type RESET and press enter; esc cancels.".into()],
@@ -905,16 +942,11 @@ impl Palette {
                 )
             }
             Mode::NewProject => {
-                let into = match self.config.scan_dirs.first() {
-                    Some(dir) => format!("in {}", paths::display_path(dir)),
-                    None => "in a folder you pick next".into(),
+                let into = match &self.destination {
+                    Some(dir) => paths::display_path(&dir.join(self.query.trim())),
+                    None => "choose a parent folder before making the project".into(),
                 };
-                (
-                    None,
-                    vec![format!(
-                        "Made {into}, with a git history of its own, then opened."
-                    )],
-                )
+                (None, vec![format!("Destination: {into} · {}-↵ to change · ↵ makes and opens it with its own git history.", secondary())])
             }
             // First run: nothing to go back to, so it says what proj is about.
             Mode::Editors if self.config.editor.is_none() => (
@@ -1329,12 +1361,10 @@ impl Render for Palette {
             .or_else(|| {
                 self.clone_candidate.as_ref().map(|target| {
                     let into = match &target.into {
-                        Some(folder) => {
-                            format!("{} into {}", target.name, paths::display_path(folder))
-                        }
-                        None => format!("{} into a folder you choose…", target.name),
+                        Some(folder) => paths::display_path(&folder.join(&target.name)),
+                        None => "choose a parent folder first…".into(),
                     };
-                    ("Clone", into)
+                    ("Clone to", into)
                 })
             });
         let add_row = action.map(|(label, detail)| {
@@ -1371,6 +1401,26 @@ impl Render for Palette {
                         .child(detail),
                 )
                 .child(div().flex_1())
+                .when(self.clone_candidate.is_some(), |d| {
+                    d.child(
+                        div()
+                            .id("clone-destination")
+                            .flex_none()
+                            .px_2()
+                            .h(px(28.))
+                            .rounded_md()
+                            .flex()
+                            .items_center()
+                            .text_size(px(SMALL_FONT_SIZE))
+                            .text_color(rgb(t.accent))
+                            .hover(|d| d.bg(rgb(t.hover)))
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.choose_destination_for(Mode::Projects, window, cx);
+                            }))
+                            .child("Change destination…"),
+                    )
+                })
                 .when(open_only, |d| {
                     d.child(
                         div()
@@ -1519,8 +1569,13 @@ impl Render for Palette {
             .on_action(cx.listener(|this, _: &RemoveItem, _, cx| {
                 if this.menu_open() {
                     this.remove_task(cx);
-                } else if this.list() == List::Projects {
-                    this.remove(cx);
+                } else {
+                    match this.list() {
+                        List::Projects => this.remove(cx),
+                        List::Templates => this.remove_selected_template(cx),
+                        List::WatchedRoots => this.remove_watched_root(cx),
+                        _ => {}
+                    }
                 }
             }))
             .on_action(cx.listener(|this, _: &RenameItem, _, cx| {
@@ -1557,7 +1612,13 @@ impl Render for Palette {
                 cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
                     List::OpenWith => this.toggle_project_default(window, cx),
                     List::Group => this.save_ticked(cx),
+                    List::Text if this.mode == Mode::NewProject => {
+                        this.choose_destination_for(Mode::NewProject, window, cx)
+                    }
                     List::Projects if this.menu_open() => {}
+                    List::Projects if this.clone_candidate.is_some() => {
+                        this.choose_destination_for(Mode::Projects, window, cx)
+                    }
                     List::Projects if this.pasted.is_some() => this.open_pasted(false, window, cx),
                     List::Projects => this.open_with_selected(cx),
                     _ => {}
@@ -1617,6 +1678,22 @@ impl Render for Palette {
             .text_color(rgb(t.text))
             .child(self.render_search_bar(cx))
             .children(self.render_banner())
+            .children((self.mode == Mode::NewProject).then(|| {
+                div()
+                    .id("new-destination")
+                    .mx_4()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .text_size(px(SMALL_FONT_SIZE))
+                    .text_color(rgb(t.accent))
+                    .hover(|d| d.bg(rgb(t.hover)))
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.choose_destination_for(Mode::NewProject, window, cx);
+                    }))
+                    .child("Change destination…")
+            }))
             .children(add_row)
             .child(rows)
             .children(self.render_problem())

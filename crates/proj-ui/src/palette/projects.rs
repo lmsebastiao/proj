@@ -257,8 +257,7 @@ impl Palette {
         }
     }
 
-    /// Enter on a pasted git URL: clone it into the first scan folder (or one
-    /// picked now), then list and open it.
+    /// Clone into the selected parent, after showing the resulting path.
     pub(super) fn clone_repo(
         &mut self,
         target: CloneTarget,
@@ -269,24 +268,11 @@ impl Palette {
             return;
         }
         match target.into {
-            // Folders cloned straight into a scan folder are listed by the scan.
             Some(folder) => {
-                self.start_clone(target.url, folder.join(&target.name), true, window, cx)
+                let scanned = self.config.scan_dirs.contains(&folder);
+                self.start_clone(target.url, folder.join(&target.name), scanned, window, cx);
             }
-            None => {
-                let options = PathPromptOptions {
-                    files: false,
-                    directories: true,
-                    multiple: false,
-                    prompt: Some(format!("Clone {} into", target.name).into()),
-                };
-                self.pick(options, window, cx, move |this, paths, window, cx| {
-                    if let Some(folder) = paths.into_iter().next() {
-                        let dest = folder.join(&target.name);
-                        this.start_clone(target.url, dest, false, window, cx);
-                    }
-                });
-            }
+            None => self.choose_destination_for(Mode::Projects, window, cx),
         }
     }
 
@@ -302,8 +288,7 @@ impl Palette {
         self.start_making(dest, scanned, Making::Clone, job, window, cx);
     }
 
-    /// Enter on the new project's name: make it from `new_from` in the first
-    /// scan folder (or one picked now), then list and open it.
+    /// Enter on the new project's name: make it in the displayed destination.
     pub(super) fn finish_new_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(template) = self.new_from.clone() else {
             return;
@@ -313,24 +298,19 @@ impl Palette {
             return self.problem(problem, cx);
         }
         let job = move |dest: &Path| template.create(dest);
-        match self.config.scan_dirs.first().cloned() {
+        match self.destination.clone() {
             Some(folder) => {
-                self.start_making(folder.join(&name), true, Making::Template, job, window, cx);
+                let scanned = self.config.scan_dirs.contains(&folder);
+                self.start_making(
+                    folder.join(&name),
+                    scanned,
+                    Making::Template,
+                    job,
+                    window,
+                    cx,
+                );
             }
-            None => {
-                let options = PathPromptOptions {
-                    files: false,
-                    directories: true,
-                    multiple: false,
-                    prompt: Some(format!("Make {name} in").into()),
-                };
-                self.pick(options, window, cx, move |this, paths, window, cx| {
-                    if let Some(folder) = paths.into_iter().next() {
-                        let dest = folder.join(&name);
-                        this.start_making(dest, false, Making::Template, job, window, cx);
-                    }
-                });
-            }
+            None => self.choose_destination_for(Mode::NewProject, window, cx),
         }
     }
 
@@ -363,14 +343,40 @@ impl Palette {
         cx.spawn_in(window, async move |this, cx| {
             let result = work.await;
             let made = result.is_ok();
+            let error = result.as_ref().err().map(ToString::to_string);
             let finished = this.update_in(cx, |this, window, cx| {
                 this.finish_making(dest.clone(), scanned, making, result, window, cx);
             });
-            // Closed with esc meanwhile: still list the new project.
-            if finished.is_err() && made {
-                let mut db = store::load_db();
-                list_clone(&mut db, dest, scanned);
-                store::save_db(&db).ok();
+            // Closed with esc meanwhile: still list the new project, and keep
+            // its result for the next time the palette opens.
+            if finished.is_err() {
+                if made {
+                    let mut db = store::load_db();
+                    list_clone(&mut db, dest.clone(), scanned);
+                    match store::save_db(&db) {
+                        Ok(()) => super::record_job_result(
+                            format!("{} {}", making.done(), paths::display_path(&dest)),
+                            false,
+                        ),
+                        Err(err) => super::record_job_result(
+                            format!(
+                                "{} {}, but could not save it to the project list: {err}",
+                                making.done(),
+                                paths::display_path(&dest)
+                            ),
+                            true,
+                        ),
+                    }
+                } else if let Some(err) = error {
+                    super::record_job_result(
+                        format!(
+                            "{} in {}: {err}. Check the folder before retrying",
+                            making.failed(),
+                            paths::display_path(&dest)
+                        ),
+                        true,
+                    );
+                }
             }
         })
         .detach();
@@ -390,7 +396,16 @@ impl Palette {
             return self.problem(format!("{}: {err}", making.failed()), cx);
         }
         list_clone(&mut self.db, dest.clone(), scanned);
-        self.save(cx);
+        self.undo = None;
+        if let Err(err) = store::save_db(&self.db) {
+            let message = format!(
+                "{} {}, but could not save it to the project list: {err}",
+                making.done(),
+                paths::display_path(&dest)
+            );
+            self.problem(message.clone(), cx);
+            super::record_job_result(message, true);
+        }
         self.reload_projects();
         let project = self
             .projects
@@ -536,7 +551,10 @@ impl Palette {
                 self.set_query("", cx);
                 self.discover_projects(window, cx);
             }
-            PaletteCommand::NewFromTemplate => self.set_mode(Mode::Templates, cx),
+            PaletteCommand::ManageWatchedRoots => self.set_mode(Mode::WatchedRoots, cx),
+            PaletteCommand::NewFromTemplate | PaletteCommand::ManageTemplates => {
+                self.set_mode(Mode::Templates, cx)
+            }
             PaletteCommand::RemoveMissing => {
                 let missing: Vec<Project> = self
                     .projects
@@ -649,7 +667,11 @@ impl Palette {
         }
         self.config.scan_dirs.extend(added.iter().cloned());
         self.reload_projects();
-        self.set_mode(Mode::Projects, cx);
+        if self.mode == Mode::WatchedRoots {
+            self.refilter(cx);
+        } else {
+            self.set_mode(Mode::Projects, cx);
+        }
         let count = self.projects.len();
         self.notice(
             format!("Watching {} folders · {count} projects found", added.len()),
@@ -761,6 +783,191 @@ impl Palette {
             many => format!("Added {} projects", many.len()),
         };
         self.notice(added, cx);
+    }
+
+    pub(super) fn remove_watched_root(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self
+            .matches
+            .get(self.selected)
+            .and_then(|m| self.config.scan_dirs.get(m.ix))
+            .cloned()
+        else {
+            return;
+        };
+        match config::remove_scan_dir(&root) {
+            Ok(true) => {
+                self.config.scan_dirs.retain(|dir| dir != &root);
+                self.reload_projects();
+                self.refilter(cx);
+                self.notice(
+                    format!(
+                        "Stopped watching {} · folder kept",
+                        paths::display_path(&root)
+                    ),
+                    cx,
+                );
+            }
+            Ok(false) => self.problem("That folder is no longer watched", cx),
+            Err(err) => self.problem(format!("Could not stop watching: {err}"), cx),
+        }
+    }
+
+    pub(super) fn choose_template(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(template) = self.templates.get(ix).cloned() {
+            self.new_from = Some(template);
+            self.destination = self.config.scan_dirs.first().cloned();
+            self.set_mode(Mode::NewProject, cx);
+        } else if ix == self.templates.len() {
+            let options = PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some("Add a template folder".into()),
+            };
+            self.pick(options, window, cx, |this, paths, _, cx| {
+                if let Some(path) = paths.into_iter().next() {
+                    this.save_template(&path.to_string_lossy(), cx);
+                }
+            });
+        } else {
+            self.set_mode(Mode::TemplateUrl, cx);
+        }
+    }
+
+    pub(super) fn finish_template_url(&mut self, cx: &mut Context<Self>) {
+        let url = self.query.trim().to_string();
+        if !matches!(
+            crate::templates::Template::parse(&url),
+            Some(crate::templates::Template::Git(_))
+        ) {
+            return self.problem("Enter a valid git repository URL", cx);
+        }
+        self.save_template(&url, cx);
+    }
+
+    fn save_template(&mut self, source: &str, cx: &mut Context<Self>) {
+        let Some(template) = crate::templates::Template::parse(source) else {
+            return self.problem("Not a valid template folder or git URL", cx);
+        };
+        if let crate::templates::Template::Folder(ref folder) = template
+            && !folder.is_dir()
+        {
+            return self.problem("Template folder does not exist", cx);
+        }
+        if self.templates.contains(&template) {
+            return self.problem("That template is already saved", cx);
+        }
+        match config::add_template(source) {
+            Ok(true) => {
+                self.config.templates.push(source.to_string());
+                self.set_mode(Mode::Templates, cx);
+                self.select_where(|this, ix| this.templates.get(ix) == Some(&template));
+                self.notice(format!("Added template {}", template.name()), cx);
+            }
+            Ok(false) => self.problem("That template is already saved", cx),
+            Err(err) => self.problem(format!("Could not save template: {err}"), cx),
+        }
+    }
+
+    pub(super) fn remove_selected_template(&mut self, cx: &mut Context<Self>) {
+        let Some(template) = self
+            .matches
+            .get(self.selected)
+            .and_then(|m| self.templates.get(m.ix))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(source) = self
+            .config
+            .templates
+            .iter()
+            .find(|s| crate::templates::Template::parse(s) == Some(template.clone()))
+            .cloned()
+        else {
+            return self.problem("Template is no longer in config", cx);
+        };
+        match config::remove_template(&source) {
+            Ok(true) => {
+                self.config.templates.retain(|s| s != &source);
+                self.templates.retain(|t| t != &template);
+                self.refilter(cx);
+                self.notice(
+                    format!("Removed template {} · source kept", template.name()),
+                    cx,
+                );
+            }
+            Ok(false) => self.problem("Template is no longer in config", cx),
+            Err(err) => self.problem(format!("Could not remove template: {err}"), cx),
+        }
+    }
+
+    pub(super) fn choose_destination_for(
+        &mut self,
+        mode: Mode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.destination_for = mode;
+        self.destination_query = self.query.clone();
+        if self.config.scan_dirs.is_empty() {
+            self.pick_destination(window, cx);
+        } else {
+            self.destination = if mode == Mode::Projects {
+                self.clone_candidate.as_ref().and_then(|c| c.into.clone())
+            } else {
+                self.destination.clone()
+            };
+            self.set_mode(Mode::Destinations, cx);
+            let chosen = self.destination.clone();
+            self.select_where(|this, ix| this.config.scan_dirs.get(ix) == chosen.as_ref());
+        }
+    }
+
+    pub(super) fn choose_destination(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(root) = self.config.scan_dirs.get(ix).cloned() {
+            self.destination = Some(root);
+            self.return_from_destination(cx);
+        } else {
+            self.pick_destination(window, cx);
+        }
+    }
+
+    fn pick_destination(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose a parent folder for the new project".into()),
+        };
+        self.pick(options, window, cx, |this, paths, _, cx| {
+            if let Some(folder) = paths.into_iter().next() {
+                this.destination = Some(folder);
+                this.return_from_destination(cx);
+            }
+        });
+    }
+
+    pub(super) fn return_from_destination(&mut self, cx: &mut Context<Self>) {
+        let query = self.destination_query.clone();
+        let into = self.destination.clone();
+        self.set_mode(self.destination_for, cx);
+        self.set_query(&query, cx);
+        if self.destination_for == Mode::Projects
+            && let Some(target) = self.clone_candidate.as_mut()
+        {
+            target.into = into;
+        }
     }
 
     /// Shows a native file dialog, keeping the palette open while it's up.

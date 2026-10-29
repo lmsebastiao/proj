@@ -90,8 +90,9 @@ pub fn window_access_hint() -> Option<&'static str> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WindowRef(isize);
 
-#[cfg(test)]
 impl WindowRef {
+    /// A synthetic window reference for UI tests.
+    #[doc(hidden)]
     pub fn test(id: isize) -> Self {
         Self(id)
     }

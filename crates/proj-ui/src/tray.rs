@@ -128,7 +128,7 @@ mod imp {
     /// The icon at 32×32, as written by scripts/make-icon.
     #[cfg(target_os = "macos")]
     fn icon() -> Icon {
-        let rgba = include_bytes!("../assets/icon-32.rgba");
+        let rgba = include_bytes!("../../../assets/icon-32.rgba");
         Icon::from_rgba(rgba.to_vec(), 32, 32).expect("valid icon size")
     }
 }

@@ -1,0 +1,9 @@
+[package]
+name = "proj-core"
+version = "0.1.0"
+edition = "2024"
+description = "Reusable fuzzy matching and ranking for proj"
+repository = "https://github.com/lmsebastiao/proj"
+
+[dependencies]
+nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }

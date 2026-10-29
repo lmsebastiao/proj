@@ -1,0 +1,50 @@
+[package]
+name = "proj-cli"
+version.workspace = true
+edition = "2024"
+description = "Command-line commands, updates and platform services for proj"
+
+[dependencies]
+proj-core = { path = "../proj-core" }
+proj-projects = { path = "../proj-projects" }
+dirs = "7.0.0"
+global-hotkey = "0.8.0"
+gpui = "0.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+time = { version = "0.3", features = ["local-offset"] }
+ureq = { version = "3.4.2", features = ["json"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Console",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std", "libc", "NSGraphicsContext", "NSImage", "NSImageRep",
+  "NSRunningApplication", "NSWorkspace", "objc2-core-graphics",
+] }
+objc2-application-services = { version = "0.3", default-features = false, features = [
+  "std", "libc", "AXError", "AXUIElement", "HIServices",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+  "std", "CFArray", "CFCGTypes", "CFDictionary", "CFNumber", "CFString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+  "std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGEventSource",
+  "CGEventTypes", "CGImage", "CGWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std", "NSString", "NSURL",
+] }

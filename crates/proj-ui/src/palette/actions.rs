@@ -442,6 +442,7 @@ impl Palette {
             }
             ProjectAction::NewFromThis => {
                 self.new_from = Some(Template::Folder(project.path.clone()));
+                self.destination = self.config.scan_dirs.first().cloned();
                 self.set_mode(Mode::NewProject, cx);
             }
             ProjectAction::Remove => self.remove(cx),

@@ -19,7 +19,7 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 }
 
 /// Removes only proj's own config and database files; never touches project folders.
-pub(crate) fn clear_saved_files(config: &Path, database: &Path) -> io::Result<()> {
+pub fn clear_saved_files(config: &Path, database: &Path) -> io::Result<()> {
     for path in [config, database] {
         match fs::remove_file(path) {
             Ok(()) => {}

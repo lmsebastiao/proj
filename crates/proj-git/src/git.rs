@@ -22,7 +22,7 @@ fn git_dir(path: &Path) -> Option<PathBuf> {
 }
 
 /// Current branch (or short commit when detached), read straight from `.git/HEAD`.
-pub(crate) fn git_branch(path: &Path) -> Option<String> {
+pub fn git_branch(path: &Path) -> Option<String> {
     let head = fs::read_to_string(git_dir(path)?.join("HEAD")).ok()?;
     let head = head.trim();
     Some(match head.strip_prefix("ref: ") {
