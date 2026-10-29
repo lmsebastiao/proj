@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "proj"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "embed-resource",
  "proj-cli",
@@ -4559,7 +4559,7 @@ dependencies = [
 
 [[package]]
 name = "proj-cli"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "dirs 7.0.0",
  "global-hotkey",
