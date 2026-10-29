@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "proj"
-version = "1.0.20"
+version = "1.0.21"
 dependencies = [
  "async-channel 2.5.0",
  "dirs 7.0.0",
@@ -8063,11 +8063,3 @@ dependencies = [
  "syn 3.0.9",
  "winnow 1.0.4",
 ]
-
-[[patch.unused]]
-name = "domain"
-version = "0.1.1"
-
-[[patch.unused]]
-name = "tauri-app"
-version = "0.1.1"
