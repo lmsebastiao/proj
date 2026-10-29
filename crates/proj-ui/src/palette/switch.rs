@@ -288,14 +288,26 @@ impl Palette {
         self.notice(format!("Closing {}", closed.title), cx);
     }
 
-    /// The open window showing `project`, preferring one of `editor`'s and then
-    /// the one used last, as its index in `windows`.
-    pub(super) fn open_window_of(&self, project: &Project, editor: &str) -> Option<usize> {
-        let key = project.key();
-        let editor = self.name_of(editor);
-        (0..self.windows.len())
-            .filter(|&w| self.window_projects[w].is_some_and(|p| self.projects[p].key() == key))
-            .min_by_key(|&w| (self.windows[w].editor != editor, self.windows[w].rank()))
+    pub(super) fn window_choice_project(&self) -> Option<&Project> {
+        let key = self.choosing_window.as_ref()?;
+        self.projects.iter().find(|p| &p.key() == key)
+    }
+
+    /// Select a specific, confidently matched window or explicitly open anew.
+    pub(super) fn choose_project_window(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(&w) = self.window_choices.get(ix) {
+            self.switch_to(w, window, cx);
+        } else if ix == self.window_choices.len()
+            && let Some(project) = self.window_choice_project().cloned()
+        {
+            let editor = project.default_editor(&self.config);
+            self.launch(&project, super::items::Target::Editor(editor), window, cx);
+        }
     }
 
     pub(super) fn switch_to(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {

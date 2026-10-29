@@ -39,8 +39,9 @@ or lets you choose your own. If none are found, it opens a folder picker. Their 
 subfolders appear as projects automatically, including folders created later. You can
 still add individual projects (ctrl-o). Use `> Discover projects in folders…` to watch
 more folders later, or `> Manage watched folders…` to see their project counts, add another,
-or stop watching one. Stopping a watch never deletes its folder. Nothing outside the chosen
-folders is scanned.
+set a root's depth or excluded folders, or stop watching one. On that page, Enter on a root
+sets its depth (leave empty to inherit the global depth); Ctrl/Cmd+Enter edits exclusions.
+Stopping a watch never deletes its folder. Nothing outside the chosen folders is scanned.
 
 | Key                     | Action                                     |
 | ----------------------- | ------------------------------------------ |
@@ -207,11 +208,12 @@ ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
 
 Each window shows its project name, title, branch and editor. proj works out the
 project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
-folder list, or the solution name (Visual Studio). Windows it can't match are listed by their
-title. Projects with a window open get a green dot after their name in the normal list, and
-"window open · ↵ switches" on the right where "3d ago" would be. **Enter** on one brings its
-window to the front instead of opening it again, and the footer's button says **Switch to
-window** (**alt-↵** still opens it anew, in any editor).
+folder list, or the solution name (Visual Studio). Windows it can't match confidently are
+listed as **unmatched** by title in the switcher; you can still switch to them there.
+Projects with a window open get a green dot after their name in the normal list. **Enter**
+switches to its window when there's one match; when there are several, it shows their titles
+and editors so you can choose one or explicitly launch the project again. **alt-↵** still
+opens it in an editor without choosing a matched window.
 
 `switch_hotkey` in config.toml sets another shortcut, e.g. `"alt+q"`, or `""` turns the
 switcher off. Windows and macOS; on macOS proj needs to be allowed under System Settings ›
@@ -276,12 +278,21 @@ connected) stays listed at the end, dimmed and marked **missing**, instead of va
 ### Commands
 
 **ctrl-r** (or alt-r, or ctrl-k → **Run a command…**) on a project opens its commands menu,
-over the list like the ctrl-k one: the ones you added, then its `package.json` scripts, run
-with npm, pnpm, yarn or bun according to its lock file, then **Add a command…** (e.g.
+over the list like the ctrl-k one: your saved commands first, then tasks discovered from
+`package.json`, `Cargo.toml`, a Makefile or a justfile, each labeled with its source.
+Package scripts use npm, pnpm, yarn or bun according to the lock file; Cargo targets,
+Make targets and parameter-free Just recipes are offered without running their build tools
+just to list them. Then comes **Add a command…** (e.g.
 `npm run dev`). Type to filter them. Enter opens a terminal in the project's folder running
 it, which stays open when it ends. The last command you ran for that project is selected
 when you open the menu again, so ctrl-r then enter repeats it. **shift-delete** on an added command takes it out again.
 ctrl-r again, or esc, closes the menu; ctrl-k switches to the actions.
+
+When a clone, template copy or editor launch fails, the palette shows the attempted location
+and an explicit **Retry** action. A partially created destination is never deleted or
+overwritten; inspect/remove it yourself or choose another destination before retrying.
+Completed background results remain available while proj is running, including when the
+palette was closed before the work finished.
 
 ### Pull requests and CI
 
@@ -345,13 +356,26 @@ hotkey = "alt+space"
 scan_dirs = []          # folders to watch; manage with > Manage watched folders
 # templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]  # or > Manage templates
 # forges = { "git.example.com" = "gitlab" }  # for pull request and CI links
-scan_depth = 1          # >1 descends into non-git folders
+scan_depth = 1          # >1 descends into non-git folders; default for every root
+# [scan_rules.'C:\repos']   # optional override keyed by a path in scan_dirs
+# depth = 3
+# exclude = ["node_modules", "target", "tmp*"]
 check_for_updates = true  # look for a new release about once a day
 theme = "system"        # or "light" / "dark"; also set with > Theme
 monitor = "cursor"      # the screen it opens on: "cursor", "focused" (the window in front) or "primary" (Windows only)
 editor = "zed"          # set from the launcher; "" = file manager
 editor_args = []        # e.g. ["--new-window"]
 ```
+
+`scan_dirs` remains a list of paths. Optional `[scan_rules.'path']` entries override a
+watched root: `depth` defaults to `scan_depth`, and `exclude` defaults to `[]`. Depth 1
+lists immediate subfolders; higher depths descend into non-git folders and stop at git
+repositories. An excluded name such as `target` matches a folder component exactly at
+**any depth**; a trailing `*` such as `tmp*` matches folder names starting with `tmp`.
+These are case-sensitive name/prefix rules, not path globs. Excluded directories are
+neither listed nor traversed. Hidden directories are skipped as before, and manually added projects are
+unaffected. The watched-folders page edits these rules without removing other config or
+comments.
 
 Picking an editor in the launcher updates only the `editor` line; the rest of the file,
 comments included, is left alone.

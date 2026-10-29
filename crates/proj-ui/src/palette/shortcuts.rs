@@ -105,12 +105,15 @@ impl Palette {
         match self.list() {
             List::Projects => {
                 let marking = !self.marked.is_empty();
-                let has_window = self
-                    .selected_project()
-                    .is_some_and(|p| self.open_keys.contains(&p.key()));
+                let window_count = self.selected_project().map_or(0, |p| {
+                    crate::switcher::windows_for_project(p, &self.projects, &self.window_projects)
+                        .len()
+                });
                 let (open, open_short) = if self.marked.len() > 1 {
                     ("Open the marked projects in one window", "Open together")
-                } else if has_window {
+                } else if window_count > 1 {
+                    ("Choose an open window or open a new one", "Choose window")
+                } else if window_count == 1 {
                     ("Switch to its open editor window", "Switch to window")
                 } else {
                     ("Open in the editor", "Open")
@@ -127,7 +130,7 @@ impl Palette {
                     .run(ShowActions),
                     s(
                         &["mod-r"],
-                        "Commands: its package.json scripts and your own",
+                        "Commands: tasks from project files and your own",
                     )
                     .or_alt()
                     .run(ShowCommands),
@@ -192,6 +195,15 @@ impl Palette {
                 s(&["↑ ↓"], "Move the selection"),
                 s(&["esc"], "Back to the projects").run(Dismiss),
             ],
+            List::ProjectWindows => vec![
+                s(&["↵"], "Switch to this window or open a new one")
+                    .footer("Choose")
+                    .run(Confirm),
+                s(&["↑ ↓"], "Move the selection"),
+                s(&["esc", "backspace"], "Back to the projects")
+                    .footer("Back")
+                    .run(Dismiss),
+            ],
             List::OpenWith => {
                 let own = self.open_with_project().and_then(|p| p.editor.as_ref());
                 let selected = self.selected_editor().map(|e| &e.command);
@@ -225,7 +237,25 @@ impl Palette {
                     .run(Dismiss),
             ],
             List::WatchedRoots => vec![
-                s(&["↵"], "Watch another folder").footer("Add").run(Confirm),
+                s(
+                    &["↵"],
+                    "Edit this root's scan depth (or watch another folder)",
+                )
+                .footer(
+                    if self
+                        .matches
+                        .get(self.selected)
+                        .is_some_and(|m| m.ix < self.config.scan_dirs.len())
+                    {
+                        "Set depth"
+                    } else {
+                        "Add"
+                    },
+                )
+                .run(Confirm),
+                s(&["mod-↵"], "Edit excluded folder names or prefixes")
+                    .footer("Exclusions")
+                    .run(ConfirmSecondary),
                 s(
                     &["shift-del"],
                     "Stop watching the selected root; never delete its folder",
@@ -366,6 +396,7 @@ impl Palette {
                     Mode::AddCommand => "Add the command",
                     Mode::NewProject => "Make the project and open it",
                     Mode::TemplateUrl => "Save the git template URL",
+                    Mode::ScanDepth | Mode::ScanExclusions => "Save this root's scan settings",
                     Mode::Reset => "Reset only after typing RESET",
                     _ => "Save the name",
                 };
@@ -374,6 +405,7 @@ impl Palette {
                     Mode::TemplateUrl => "Add",
                     Mode::Reset => "Reset",
                     Mode::AddCommand => "Add",
+                    Mode::ScanDepth | Mode::ScanExclusions => "Save",
                     _ => "Save",
                 };
                 let mut keys = vec![s(&["↵"], save).footer(short).run(Confirm)];

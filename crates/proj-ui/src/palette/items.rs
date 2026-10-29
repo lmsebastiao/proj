@@ -21,6 +21,8 @@ pub(super) enum Mode {
     Editors,
     /// Choosing an editor for one project (`Palette::open_with`).
     OpenWith,
+    /// Choosing between a project's open windows or opening a new one.
+    ProjectWindows,
     /// Inside a project's folders (`Palette::browse`).
     Browse,
     /// Typing a new name for an entry (`Palette::editing`).
@@ -31,6 +33,8 @@ pub(super) enum Mode {
     Templates,
     TemplateUrl,
     WatchedRoots,
+    ScanDepth,
+    ScanExclusions,
     Destinations,
     /// Typing the name of a new project made from `Palette::new_from`.
     NewProject,
@@ -51,6 +55,7 @@ pub(super) enum List {
     Projects,
     Editors,
     OpenWith,
+    ProjectWindows,
     Browse,
     Commands,
     /// `$`: files and folders in every project (`FileSearch::hits`).
@@ -240,6 +245,22 @@ impl Palette {
                     "Open project folders in the file manager".into(),
                 ),
             },
+            List::ProjectWindows => match self.window_choices.get(ix) {
+                Some(&w) => (
+                    self.windows[w].title.clone(),
+                    self.windows[w].editor.clone(),
+                ),
+                None => (
+                    "Open in a new window".into(),
+                    self.window_choice_project()
+                        .map_or_else(String::new, |project| {
+                            format!(
+                                "Launch in {}",
+                                self.name_of(&project.default_editor(&self.config))
+                            )
+                        }),
+                ),
+            },
             List::Commands => self.command_text(self.commands[ix]),
             List::Files => {
                 let hit = &self.files.hits[ix];
@@ -252,7 +273,10 @@ impl Palette {
                 let window = &self.windows[w];
                 match self.window_projects[w] {
                     Some(project) => (self.projects[project].name.clone(), window.title.clone()),
-                    None => (window.title.clone(), window.editor.clone()),
+                    None => (
+                        window.title.clone(),
+                        format!("{} · unmatched", window.editor),
+                    ),
                 }
             }
             List::Templates => match self.templates.get(ix) {
@@ -267,10 +291,24 @@ impl Palette {
                 ),
             },
             List::WatchedRoots => match self.config.scan_dirs.get(ix) {
-                Some(root) => (
-                    paths::display_path(root),
-                    "Watched folder · shift-del stops watching (keeps the folder)".into(),
-                ),
+                Some(root) => {
+                    let rule = self.config.scan_rule(root);
+                    let depth = self.config.effective_scan_depth(root);
+                    let source = if rule.depth.is_some() {
+                        "custom"
+                    } else {
+                        "global"
+                    };
+                    let exclude = if rule.exclude.is_empty() {
+                        "none".to_string()
+                    } else {
+                        rule.exclude.join(", ")
+                    };
+                    (
+                        paths::display_path(root),
+                        format!("Depth {depth} ({source}) · exclude: {exclude}"),
+                    )
+                }
                 None => (
                     "Watch another folder…".into(),
                     "Pick one or more folders to discover projects".into(),
@@ -319,7 +357,7 @@ impl Palette {
             PaletteCommand::ManageWatchedRoots => (
                 "Manage watched folders…".into(),
                 format!(
-                    "{} roots · add or stop watching; folders stay on disk",
+                    "{} roots · set depth and exclusions, add or stop watching",
                     self.config.scan_dirs.len()
                 ),
             ),
@@ -397,11 +435,11 @@ impl Palette {
             ProjectAction::Run(i) => {
                 let task = &self.tasks[i];
                 let from = if task.added {
-                    "Runs in a terminal there · shift-del removes it"
+                    "Saved command · runs in a terminal there · shift-del removes it".into()
                 } else {
-                    "A package.json script, run in a terminal there"
+                    format!("From {} · runs in a terminal there", task.origin)
                 };
-                (task.command.clone(), from.into())
+                (task.command.clone(), from)
             }
             ProjectAction::OpenTogether => (
                 "Open together with…".into(),
@@ -413,7 +451,7 @@ impl Palette {
             ),
             ProjectAction::Commands => (
                 "Run a command…".into(),
-                "Its package.json scripts and the commands you add".into(),
+                "Tasks from project files and the commands you add".into(),
             ),
             ProjectAction::ChangeForge => {
                 let web = self.actions_web_url().unwrap_or_default();
@@ -500,7 +538,7 @@ impl Palette {
         Some(match section {
             Section::Open => "Open".into(),
             Section::Added => "Your commands".into(),
-            Section::Scripts => "package.json".into(),
+            Section::Scripts => "Found in project".into(),
             Section::Organize => "Organize".into(),
             Section::Repository => {
                 let host = self
@@ -632,7 +670,15 @@ impl Palette {
                 // With a window open, that says more than when it was last
                 // opened: enter goes to that window rather than opening another.
                 let has_window = self.open_keys.contains(&project.key());
-                let opened = if has_window {
+                let count = crate::switcher::windows_for_project(
+                    project,
+                    &self.projects,
+                    &self.window_projects,
+                )
+                .len();
+                let opened = if count > 1 {
+                    Some(format!("{count} windows · ↵ choose"))
+                } else if has_window {
                     Some("window open · ↵ switches".to_string())
                 } else {
                     (project.last_opened > 0).then(|| store::ago(project.last_opened, now))
@@ -659,9 +705,12 @@ impl Palette {
                     // exactly "3d ago" was.
                     tip: {
                         let window = has_window.then(|| {
-                            "An editor window is open: ↵ switches to it instead of opening \
-                             another (alt-↵ opens it again, in any editor)"
-                                .to_string()
+                            if count > 1 {
+                                "Several editor windows are open: ↵ chooses a window or opens a new one".to_string()
+                            } else {
+                                "An editor window is open: ↵ switches to it instead of opening \
+                                 another (alt-↵ opens it again, in any editor)".to_string()
+                            }
                         });
                         let opened = (project.last_opened > 0)
                             .then(|| format!("Opened {}", store::date_of(project.last_opened)));
@@ -690,6 +739,7 @@ impl Palette {
                     },
                 }
             }
+            List::ProjectWindows => Meta::NONE,
             List::OpenWith => {
                 let EditorOption::Detected(editor) = &self.editors[ix] else {
                     return Meta::NONE;
@@ -736,9 +786,12 @@ impl Palette {
                 Meta {
                     top: project
                         .and_then(|p| self.branch_label(p))
-                        .map(|b| (b, self.theme.branch)),
+                        .map(|b| (b, self.theme.branch))
+                        .or_else(|| project.is_none().then(|| ("unmatched".into(), self.theme.muted))),
                     bottom: project.map(|_| self.windows[w].editor.clone()),
-                    tip: project.and_then(|p| self.branch_tip(p)),
+                    tip: project.and_then(|p| self.branch_tip(p)).or_else(|| {
+                        project.is_none().then(|| "Project identity cannot be confirmed from this window's title. You can still switch to it here; it won't be associated with a listed project.".into())
+                    }),
                 }
             }
             List::Templates => Meta {
@@ -774,7 +827,7 @@ impl Palette {
                 Meta {
                     top: Some((format!("{count} projects"), self.theme.accent)),
                     bottom: None,
-                    tip: None,
+                    tip: Some("↵ edits depth · mod-↵ edits excluded folder names · shift-del stops watching".into()),
                 }
             }
             List::Destinations if self.config.scan_dirs.get(ix) == self.destination.as_ref() => {
@@ -849,6 +902,7 @@ impl Palette {
             List::Projects => self.projects.len(),
             List::Browse => self.browse.as_ref().map_or(0, |b| b.entries.len()),
             List::Editors | List::OpenWith => self.editors.len(),
+            List::ProjectWindows => self.window_choices.len() + 1,
             List::Commands => self.commands.len(),
             List::Files => self.files.hits.len(),
             List::Switch => self.switch_rows.len(),

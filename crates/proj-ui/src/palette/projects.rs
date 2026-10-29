@@ -14,10 +14,11 @@ use crate::{
     launcher::{self, UpdateState},
     open, paths, platform,
     store::{self, Db, Project},
+    switcher,
 };
 
 use super::{
-    LastSearch, Palette,
+    JobResult, LastSearch, Palette, Retry,
     items::{CloneTarget, List, Mode, PaletteCommand, PastedPath, Target},
     keymap::{AddProjects, CopyPath, OpenRemote, UndoRemove},
 };
@@ -88,11 +89,22 @@ impl Palette {
         if self.say_if_missing(&project, cx) {
             return;
         }
-        let editor = project.default_editor(&self.config);
-        if let Some(ix) = self.open_window_of(&project, &editor) {
-            return self.switch_to(ix, window, cx);
+        let choices =
+            switcher::windows_for_project(&project, &self.projects, &self.window_projects);
+        match choices.as_slice() {
+            [] => self.launch(
+                &project,
+                Target::Editor(project.default_editor(&self.config)),
+                window,
+                cx,
+            ),
+            [ix] => self.switch_to(*ix, window, cx),
+            _ => {
+                self.choosing_window = Some(project.key());
+                self.window_choices = choices;
+                self.set_mode(Mode::ProjectWindows, cx);
+            }
         }
-        self.launch(&project, Target::Editor(editor), window, cx);
     }
 
     /// Whether `project`'s folder is gone, saying so if it is.
@@ -148,7 +160,7 @@ impl Palette {
             Target::FileManager => open::reveal(&project.path),
             Target::Terminal => open::open_terminal(&project.path),
         };
-        self.finish_launch(project, &target, result, window, cx);
+        self.finish_launch(project, &target, None, result, window, cx);
     }
 
     /// Records the open and closes the palette, or shows why launching failed.
@@ -156,6 +168,7 @@ impl Palette {
         &mut self,
         project: &Project,
         target: &Target,
+        file: Option<(PathBuf, bool)>,
         result: io::Result<()>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -180,7 +193,24 @@ impl Palette {
                     Target::FileManager => "the file manager".into(),
                     Target::Terminal => "a terminal".into(),
                 };
-                self.problem(format!("Failed to launch {program}: {err}"), cx);
+                let message = format!(
+                    "Failed to launch {program} for {}: {err}",
+                    paths::display_path(&project.path)
+                );
+                if let Target::Editor(editor) = target {
+                    super::record_job_result(JobResult {
+                        message,
+                        failed: true,
+                        retry: Some(Retry::Editor {
+                            project: Some(project.clone()),
+                            editor: editor.clone(),
+                            file,
+                        }),
+                    });
+                    self.sync_job_results(cx);
+                } else {
+                    self.problem(message, cx);
+                }
             }
         }
     }
@@ -276,6 +306,66 @@ impl Palette {
         }
     }
 
+    pub(super) fn retry_job(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(retry) = self
+            .job_history
+            .get(ix)
+            .and_then(|entry| entry.retry.clone())
+        else {
+            return;
+        };
+        match retry {
+            Retry::Clone { url, dest, scanned } => {
+                self.start_clone(url, dest, scanned, window, cx);
+            }
+            Retry::Template {
+                template,
+                dest,
+                scanned,
+            } => {
+                let retry = Retry::Template {
+                    template: template.clone(),
+                    dest: dest.clone(),
+                    scanned,
+                };
+                self.start_making(
+                    dest,
+                    scanned,
+                    retry,
+                    move |dest| template.create(dest),
+                    window,
+                    cx,
+                );
+            }
+            Retry::Editor {
+                project,
+                editor,
+                file,
+            } => {
+                if project.as_ref().is_some_and(|p| self.say_if_missing(p, cx)) {
+                    return;
+                }
+                let folders = project.as_ref().map(Project::paths).unwrap_or_default();
+                let result = match &file {
+                    Some((path, true)) => {
+                        open::open_with(&self.config, &editor, std::slice::from_ref(path))
+                    }
+                    Some((path, false)) => open::open_file(&self.config, &editor, &folders, path),
+                    None => open::open_with(&self.config, &editor, &folders),
+                };
+                if let Some(project) = project {
+                    self.finish_launch(&project, &Target::Editor(editor), file, result, window, cx);
+                } else if let Err(err) = result {
+                    if let Some((path, is_dir)) = file {
+                        self.unlisted_launch_failure(editor, path, is_dir, &err, cx);
+                    }
+                } else {
+                    window.remove_window();
+                }
+            }
+        }
+    }
+
     fn start_clone(
         &mut self,
         url: String,
@@ -284,8 +374,13 @@ impl Palette {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let retry = Retry::Clone {
+            url: url.clone(),
+            dest: dest.clone(),
+            scanned,
+        };
         let job = move |dest: &Path| git::clone(&url, dest);
-        self.start_making(dest, scanned, Making::Clone, job, window, cx);
+        self.start_making(dest, scanned, retry, job, window, cx);
     }
 
     /// Enter on the new project's name: make it in the displayed destination.
@@ -297,18 +392,17 @@ impl Palette {
         if let Err(problem) = check_folder_name(&name) {
             return self.problem(problem, cx);
         }
-        let job = move |dest: &Path| template.create(dest);
         match self.destination.clone() {
             Some(folder) => {
                 let scanned = self.config.scan_dirs.contains(&folder);
-                self.start_making(
-                    folder.join(&name),
+                let dest = folder.join(&name);
+                let retry = Retry::Template {
+                    template: template.clone(),
+                    dest: dest.clone(),
                     scanned,
-                    Making::Template,
-                    job,
-                    window,
-                    cx,
-                );
+                };
+                let job = move |dest: &Path| template.create(dest);
+                self.start_making(dest, scanned, retry, job, window, cx);
             }
             None => self.choose_destination_for(Mode::NewProject, window, cx),
         }
@@ -320,7 +414,7 @@ impl Palette {
         &mut self,
         dest: PathBuf,
         scanned: bool,
-        making: Making,
+        retry: Retry,
         job: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -328,8 +422,9 @@ impl Palette {
         if self.cloning {
             return;
         }
+        let making = Making::of(&retry);
         if dest.exists() {
-            return self.problem(format!("{} already exists", paths::display_path(&dest)), cx);
+            return self.problem(existing_destination(&dest), cx);
         }
         self.cloning = true;
         self.say(
@@ -338,14 +433,22 @@ impl Palette {
         );
         let work = cx.background_executor().spawn({
             let dest = dest.clone();
-            async move { job(&dest) }
+            async move {
+                if dest.exists() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        existing_destination(&dest),
+                    ));
+                }
+                job(&dest)
+            }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = work.await;
             let made = result.is_ok();
             let error = result.as_ref().err().map(ToString::to_string);
             let finished = this.update_in(cx, |this, window, cx| {
-                this.finish_making(dest.clone(), scanned, making, result, window, cx);
+                this.finish_making(dest.clone(), scanned, retry.clone(), result, window, cx);
             });
             // Closed with esc meanwhile: still list the new project, and keep
             // its result for the next time the palette opens.
@@ -354,28 +457,23 @@ impl Palette {
                     let mut db = store::load_db();
                     list_clone(&mut db, dest.clone(), scanned);
                     match store::save_db(&db) {
-                        Ok(()) => super::record_job_result(
-                            format!("{} {}", making.done(), paths::display_path(&dest)),
-                            false,
-                        ),
-                        Err(err) => super::record_job_result(
-                            format!(
+                        Ok(()) => super::record_job_result(JobResult {
+                            message: format!("{} {}", making.done(), paths::display_path(&dest)),
+                            failed: false,
+                            retry: None,
+                        }),
+                        Err(err) => super::record_job_result(JobResult {
+                            message: format!(
                                 "{} {}, but could not save it to the project list: {err}",
                                 making.done(),
                                 paths::display_path(&dest)
                             ),
-                            true,
-                        ),
+                            failed: true,
+                            retry: None,
+                        }),
                     }
                 } else if let Some(err) = error {
-                    super::record_job_result(
-                        format!(
-                            "{} in {}: {err}. Check the folder before retrying",
-                            making.failed(),
-                            paths::display_path(&dest)
-                        ),
-                        true,
-                    );
+                    super::record_job_result(creation_failure(making, &dest, &err, retry));
                 }
             }
         })
@@ -386,14 +484,19 @@ impl Palette {
         &mut self,
         dest: PathBuf,
         scanned: bool,
-        making: Making,
+        retry: Retry,
         result: io::Result<()>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let making = Making::of(&retry);
         self.cloning = false;
+        // The job's result replaces the in-progress footer, including on failure.
+        self.status = None;
         if let Err(err) = result {
-            return self.problem(format!("{}: {err}", making.failed()), cx);
+            super::record_job_result(creation_failure(making, &dest, &err.to_string(), retry));
+            self.sync_job_results(cx);
+            return;
         }
         list_clone(&mut self.db, dest.clone(), scanned);
         self.undo = None;
@@ -404,7 +507,12 @@ impl Palette {
                 paths::display_path(&dest)
             );
             self.problem(message.clone(), cx);
-            super::record_job_result(message, true);
+            super::record_job_result(JobResult {
+                message,
+                failed: true,
+                retry: None,
+            });
+            self.sync_job_results(cx);
         }
         self.reload_projects();
         let project = self
@@ -743,14 +851,44 @@ impl Palette {
         };
         match (project, result) {
             (Some(project), result) => {
-                self.finish_launch(&project, &Target::Editor(editor), result, window, cx);
+                self.finish_launch(
+                    &project,
+                    &Target::Editor(editor),
+                    Some((path.clone(), path.is_dir())),
+                    result,
+                    window,
+                    cx,
+                );
             }
             (None, Ok(())) => window.remove_window(),
             (None, Err(err)) => {
-                let program = self.name_of(&editor);
-                self.problem(format!("Failed to launch {program}: {err}"), cx);
+                self.unlisted_launch_failure(editor, path.clone(), path.is_dir(), &err, cx)
             }
         }
+    }
+
+    fn unlisted_launch_failure(
+        &mut self,
+        editor: String,
+        path: PathBuf,
+        is_dir: bool,
+        error: &io::Error,
+        cx: &mut Context<Self>,
+    ) {
+        super::record_job_result(JobResult {
+            message: format!(
+                "Failed to launch {} for {}: {error}",
+                self.name_of(&editor),
+                paths::display_path(&path)
+            ),
+            failed: true,
+            retry: Some(Retry::Editor {
+                project: None,
+                editor,
+                file: Some((path, is_dir)),
+            }),
+        });
+        self.sync_job_results(cx);
     }
 
     pub(super) fn add_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
@@ -785,6 +923,63 @@ impl Palette {
         self.notice(added, cx);
     }
 
+    pub(super) fn edit_scan_rule(&mut self, ix: usize, mode: Mode, cx: &mut Context<Self>) {
+        let Some(root) = self.config.scan_dirs.get(ix).cloned() else {
+            return;
+        };
+        self.editing_root = Some(root);
+        self.set_mode(mode, cx);
+    }
+
+    pub(super) fn finish_scan_rule(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.editing_root.clone() else {
+            return;
+        };
+        let mut rule = self.config.scan_rule(&root);
+        match self.mode {
+            Mode::ScanDepth => {
+                rule.depth = if self.query.trim().is_empty() {
+                    None
+                } else {
+                    match self.query.trim().parse::<u8>().ok().filter(|d| *d > 0) {
+                        Some(depth) => Some(depth),
+                        None => {
+                            return self
+                                .problem("Depth must be from 1 to 255, or empty to inherit", cx);
+                        }
+                    }
+                };
+            }
+            Mode::ScanExclusions => {
+                rule.exclude = self
+                    .query
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
+            _ => return,
+        }
+        if let Err(err) = config::set_scan_rule(&root, &rule) {
+            return self.problem(format!("Could not save scan rule: {err}"), cx);
+        }
+        let key = root.to_string_lossy().into_owned();
+        self.config.scan_rules.retain(|path, _| {
+            std::path::Path::new(path) != root && paths::normalize(path).as_deref() != Some(&root)
+        });
+        if rule.depth.is_some() || !rule.exclude.is_empty() {
+            self.config.scan_rules.insert(key, rule);
+        }
+        self.reload_projects();
+        self.set_mode(Mode::WatchedRoots, cx);
+        self.select_where(|this, ix| this.config.scan_dirs.get(ix) == Some(&root));
+        self.notice(
+            format!("Updated scanning for {}", paths::display_path(&root)),
+            cx,
+        );
+    }
+
     pub(super) fn remove_watched_root(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self
             .matches
@@ -797,6 +992,10 @@ impl Palette {
         match config::remove_scan_dir(&root) {
             Ok(true) => {
                 self.config.scan_dirs.retain(|dir| dir != &root);
+                self.config.scan_rules.retain(|path, _| {
+                    std::path::Path::new(path) != root
+                        && paths::normalize(path).as_deref() != Some(&root)
+                });
                 self.reload_projects();
                 self.refilter(cx);
                 self.notice(
@@ -1000,6 +1199,37 @@ impl Palette {
     }
 }
 
+fn existing_destination(dest: &Path) -> String {
+    format!(
+        "{} already exists. Choose a new destination, or manually inspect/remove the partial folder before retrying; proj will not delete it",
+        paths::display_path(dest)
+    )
+}
+
+fn creation_failure(making: Making, dest: &Path, error: &str, retry: Retry) -> JobResult {
+    let source = match &retry {
+        Retry::Clone { url, .. }
+        | Retry::Template {
+            template: crate::templates::Template::Git(url),
+            ..
+        } => Some(url.as_str()),
+        _ => None,
+    };
+    let error = source.map_or_else(
+        || error.to_string(),
+        |url| error.replace(url, "[repository URL]"),
+    );
+    JobResult {
+        message: format!(
+            "{} in {}: {error}. Retry below; if the folder exists, choose a new destination or manually inspect/remove the partial folder",
+            making.failed(),
+            paths::display_path(dest)
+        ),
+        failed: true,
+        retry: Some(retry),
+    }
+}
+
 /// What `start_making` makes a project with, for what the footer says.
 #[derive(Clone, Copy)]
 enum Making {
@@ -1008,6 +1238,14 @@ enum Making {
 }
 
 impl Making {
+    fn of(retry: &Retry) -> Self {
+        match retry {
+            Retry::Clone { .. } => Self::Clone,
+            Retry::Template { .. } => Self::Template,
+            Retry::Editor { .. } => unreachable!("editor launches are not creation jobs"),
+        }
+    }
+
     fn doing(self) -> &'static str {
         match self {
             Self::Clone => "Cloning into",
@@ -1046,12 +1284,92 @@ fn check_folder_name(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Lists a freshly cloned folder: the scan already finds it inside a scan
-/// folder (unless an old folder there was hidden); elsewhere it's added by hand.
+/// A folder under a watched root is not necessarily discovered: it may be
+/// excluded or deeper than that root's scan rule. List it manually in that case.
 fn list_clone(db: &mut Db, dest: PathBuf, scanned: bool) {
-    if scanned {
+    if scanned && store::is_scanned(&config::load_config(), &dest) {
         db.hidden.remove(&dest);
     } else {
         store::add_manual(db, dest);
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn clone_failure_keeps_retry_inputs_without_leaking_credentials() {
+        let dest = PathBuf::from("projects/new-app");
+        let url = "https://user:secret@example.com/org/new-app.git";
+        let result = creation_failure(
+            Making::Clone,
+            &dest,
+            &format!("fatal: repository '{url}' not found"),
+            Retry::Clone {
+                url: url.into(),
+                dest: dest.clone(),
+                scanned: true,
+            },
+        );
+        assert!(result.message.contains(&paths::display_path(&dest)));
+        assert!(
+            result
+                .message
+                .contains("repository '[repository URL]' not found")
+        );
+        assert!(!result.message.contains("secret"));
+        assert!(result.message.contains("Retry"));
+        match result.retry.unwrap() {
+            Retry::Clone {
+                url: saved,
+                dest: saved_dest,
+                scanned,
+            } => {
+                assert_eq!(saved, url);
+                assert_eq!(saved_dest, dest);
+                assert!(scanned);
+            }
+            _ => panic!("expected clone retry"),
+        }
+    }
+
+    #[test]
+    fn existing_folder_hint_never_suggests_overwriting() {
+        let message = existing_destination(Path::new("projects/partial"));
+        assert!(message.contains("projects/partial"));
+        assert!(message.contains("Choose a new destination"));
+        assert!(message.contains("manually inspect/remove"));
+        assert!(message.contains("will not delete"));
+    }
+
+    #[test]
+    fn template_failure_keeps_source_and_destination_for_retry() {
+        let dest = PathBuf::from("projects/new-app");
+        let template = crate::templates::Template::Folder(PathBuf::from("templates/starter"));
+        let result = creation_failure(
+            Making::Template,
+            &dest,
+            "permission denied",
+            Retry::Template {
+                template: template.clone(),
+                dest: dest.clone(),
+                scanned: false,
+            },
+        );
+        assert!(result.message.contains("permission denied"));
+        assert!(result.message.contains(&paths::display_path(&dest)));
+        match result.retry.unwrap() {
+            Retry::Template {
+                template: saved,
+                dest: saved_dest,
+                scanned,
+            } => {
+                assert_eq!(saved, template);
+                assert_eq!(saved_dest, dest);
+                assert!(!scanned);
+            }
+            _ => panic!("expected template retry"),
+        }
     }
 }

@@ -36,6 +36,20 @@ impl EditorWindow {
     }
 }
 
+/// Indices of windows confidently associated with this project, in switcher order.
+pub fn windows_for_project(
+    project: &Project,
+    projects: &[Project],
+    window_projects: &[Option<usize>],
+) -> Vec<usize> {
+    let key = project.key();
+    window_projects
+        .iter()
+        .enumerate()
+        .filter_map(|(w, &p)| (p.is_some_and(|p| projects[p].key() == key)).then_some(w))
+        .collect()
+}
+
 /// Each open editor window gets its own switcher row, including windows of
 /// the same project. Their order is the order of `windows`.
 pub fn rows(windows: &[EditorWindow]) -> Vec<Vec<usize>> {
@@ -171,10 +185,11 @@ fn project_for(title: &str, process: &str, editor: &str, projects: &[Project]) -
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    // Workspaces first, so "app, sample-sdk" isn't taken for "app" alone.
-    let workspace = projects.iter().position(|project| {
-        project.is_workspace()
-            && parts.iter().any(|part| {
+    // A shared folder/name can belong to several listed projects. Without a
+    // path in the title, associating the window with either one is unsafe.
+    let mut matches = projects.iter().enumerate().filter_map(|(ix, project)| {
+        let matched = if project.is_workspace() {
+            parts.iter().any(|part| {
                 let mut listed: Vec<String> = part.split(", ").map(str::to_lowercase).collect();
                 let mut folders: Vec<String> = project
                     .paths()
@@ -185,16 +200,16 @@ fn project_for(title: &str, process: &str, editor: &str, projects: &[Project]) -
                 folders.sort();
                 listed == folders
             })
+        } else {
+            has(&project.name)
+                || has(&folder(&project.path))
+                || (process == "devenv"
+                    && open::find_solution(&project.path).is_some_and(|sln| has(&stem(&sln))))
+        };
+        matched.then_some(ix)
     });
-    workspace.or_else(|| {
-        projects.iter().position(|project| {
-            !project.is_workspace()
-                && (has(&project.name)
-                    || has(&folder(&project.path))
-                    || (process == "devenv"
-                        && open::find_solution(&project.path).is_some_and(|sln| has(&stem(&sln)))))
-        })
-    })
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 /// "● main.rs - proj (Running) - Visual Studio Code" → ["main.rs", "proj", "Visual Studio Code"].
@@ -274,6 +289,31 @@ mod tests {
         let find = |title: &str| project_for(title, "zed", "Zed", &projects);
         assert_eq!(find("Zed — settings.json"), Some(0));
         assert_eq!(find("Zed"), None, "Zed's settings window");
+    }
+
+    #[test]
+    fn ambiguous_titles_remain_unmatched() {
+        let projects = [project("app", &["/a/app"]), project("app", &["/b/app"])];
+        assert_eq!(project_for("app — main.rs", "zed", "Zed", &projects), None);
+        let projects = [
+            project("app", &["/a/app"]),
+            project("app", &["/a/app", "/a/sdk"]),
+        ];
+        assert_eq!(
+            project_for("sdk, app — lib.rs", "zed", "Zed", &projects),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn window_choices_include_only_confident_matches() {
+        let projects = [project("app", &["/r/app"]), project("other", &["/r/other"])];
+        let matches = [Some(0), None, Some(1), Some(0)];
+        assert_eq!(
+            windows_for_project(&projects[0], &projects, &matches),
+            [0, 3]
+        );
+        assert!(windows_for_project(&projects[1], &projects, &[None]).is_empty());
     }
 
     #[test]

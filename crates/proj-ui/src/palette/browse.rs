@@ -233,7 +233,7 @@ impl Palette {
             Target::FileManager => open::reveal(folder),
             Target::Terminal => open::open_terminal(folder),
         };
-        self.finish_launch(&project, &target, result, window, cx);
+        self.finish_launch(&project, &target, Some((path, is_dir)), result, window, cx);
     }
 }
 

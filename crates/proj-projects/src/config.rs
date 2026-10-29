@@ -25,6 +25,8 @@ pub struct Config {
     /// 1 = every direct sub-folder is a project. Higher values descend into
     /// folders that are not git repositories, up to this depth.
     pub scan_depth: u8,
+    /// Optional overrides keyed by a watched folder's path. Other roots inherit scan_depth.
+    pub scan_rules: BTreeMap<String, ScanRule>,
     /// Look for a new release about once a day (installed copies only).
     pub check_for_updates: bool,
     /// Hold-and-tap shortcut for switching between open editor windows (with
@@ -44,6 +46,15 @@ pub struct Config {
     pub forges: BTreeMap<String, String>,
     /// Folders and git URLs to start new projects from.
     pub templates: Vec<String>,
+}
+
+/// Rules for one watched root. Exclusions match folder components at any level:
+/// `build` matches that name exactly, `vendor*` matches names starting with vendor.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ScanRule {
+    pub depth: Option<u8>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -113,6 +124,7 @@ impl Default for Config {
             editor_args: Vec::new(),
             scan_dirs: Vec::new(),
             scan_depth: 1,
+            scan_rules: BTreeMap::new(),
             check_for_updates: true,
             switch_hotkey: None,
             switch_number_modifiers: None,
@@ -125,6 +137,23 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Per-root overrides also work when the config uses a different spelling
+    /// of the same path (e.g. `~` or a relative path).
+    pub fn scan_rule(&self, root: &Path) -> ScanRule {
+        self.scan_rules
+            .iter()
+            .find(|(key, _)| {
+                Path::new(key.as_str()) == root
+                    || crate::paths::normalize(key).as_deref() == Some(root)
+            })
+            .map(|(_, rule)| rule.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn effective_scan_depth(&self, root: &Path) -> u8 {
+        self.scan_rule(root).depth.unwrap_or(self.scan_depth).max(1)
+    }
+
     /// The shortcuts for display, e.g. "ctrl+alt+space or alt+p".
     pub fn hotkey_label(&self) -> String {
         self.hotkey.join(" or ")
@@ -289,6 +318,14 @@ scan_dirs = []
 # 1 = every direct sub-folder of a scan_dir is a project. Higher values descend
 # into folders that are not git repositories, up to this depth.
 scan_depth = 1
+
+# Optional per-root overrides, keyed by a path from scan_dirs. A missing depth
+# inherits scan_depth. Exclusions match folder names at ANY depth: "build" is
+# exact, "vendor*" matches names starting with vendor. Hidden folders are always
+# skipped. Manually added projects are not affected. Edit via > Manage watched folders.
+# [scan_rules.'C:\Users\me\repos']
+# depth = 3
+# exclude = ["node_modules", "target", "tmp*"]
 
 # Folders and git URLs to start new projects from: type > and pick "New project
 # from a template". Copies leave out what git ignores, and start a new git history.
@@ -474,7 +511,114 @@ fn without_scan_dir(text: &str, dir: &Path) -> io::Result<(String, bool)> {
             removed = true;
         }
     }
+    if removed
+        && let Some(rules) = doc
+            .get_mut("scan_rules")
+            .and_then(toml_edit::Item::as_table_mut)
+    {
+        let keys: Vec<String> = rules
+            .iter()
+            .filter(|(key, _)| {
+                crate::paths::normalize(key).unwrap_or_else(|| PathBuf::from(key)) == target
+            })
+            .map(|(key, _)| key.to_string())
+            .collect();
+        for key in keys {
+            rules.remove(&key);
+        }
+    }
     Ok((doc.to_string(), removed))
+}
+
+/// Persist one root's overrides; an empty rule restores the global defaults.
+/// Folder exclusions are exact names or nonempty prefixes followed by `*`.
+pub fn set_scan_rule(root: &Path, rule: &ScanRule) -> io::Result<()> {
+    let path = config_path();
+    let text = fs::read_to_string(&path)?;
+    let updated = with_scan_rule(&text, root, rule)?;
+    write_atomic(&path, &updated)
+}
+
+fn with_scan_rule(text: &str, root: &Path, rule: &ScanRule) -> io::Result<String> {
+    if rule.depth == Some(0) {
+        return Err(io::Error::other("scan depth must be between 1 and 255"));
+    }
+    for pattern in &rule.exclude {
+        let prefix = pattern.strip_suffix('*').unwrap_or(pattern);
+        if prefix.is_empty() || prefix.contains(['/', '\\', '*']) || prefix.starts_with('.') {
+            return Err(io::Error::other(format!(
+                "Invalid excluded folder: {pattern}"
+            )));
+        }
+    }
+    let config: Config = toml::from_str(text).map_err(io::Error::other)?;
+    if !config.scan_dirs.iter().any(|dir| dir == root) {
+        return Err(io::Error::other("folder is not watched"));
+    }
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(io::Error::other)?;
+    if !doc.contains_key("scan_rules") {
+        doc["scan_rules"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    let rules = doc["scan_rules"]
+        .as_table_mut()
+        .ok_or_else(|| io::Error::other("scan_rules in config.toml isn't a table"))?;
+    let key = rules
+        .iter()
+        .find_map(|(key, _)| {
+            (Path::new(key) == root || crate::paths::normalize(key).as_deref() == Some(root))
+                .then(|| key.to_string())
+        })
+        .unwrap_or_else(|| root.to_string_lossy().into_owned());
+    if rule.depth.is_none() && rule.exclude.is_empty() {
+        rules.remove(&key);
+    } else if let Some(table) = rules.get_mut(&key).and_then(toml_edit::Item::as_table_mut) {
+        if let Some(depth) = rule.depth {
+            replace_preserving_decor(table, "depth", toml_edit::value(i64::from(depth)));
+        } else {
+            table.remove("depth");
+        }
+        if rule.exclude.is_empty() {
+            table.remove("exclude");
+        } else {
+            let mut array = toml_edit::Array::new();
+            for pattern in &rule.exclude {
+                array.push(pattern.as_str());
+            }
+            replace_preserving_decor(table, "exclude", toml_edit::value(array));
+        }
+    } else {
+        let mut inline = rules
+            .get(&key)
+            .and_then(toml_edit::Item::as_inline_table)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(depth) = rule.depth {
+            inline.insert("depth", i64::from(depth).into());
+        } else {
+            inline.remove("depth");
+        }
+        if rule.exclude.is_empty() {
+            inline.remove("exclude");
+        } else {
+            let mut array = toml_edit::Array::new();
+            for pattern in &rule.exclude {
+                array.push(pattern.as_str());
+            }
+            inline.insert("exclude", array.into());
+        }
+        replace_preserving_decor(rules, &key, toml_edit::value(inline));
+    }
+    Ok(doc.to_string())
+}
+
+fn replace_preserving_decor(table: &mut toml_edit::Table, key: &str, mut item: toml_edit::Item) {
+    if let (Some(old), Some(new)) = (
+        table.get(key).and_then(toml_edit::Item::as_value),
+        item.as_value_mut(),
+    ) {
+        *new.decor_mut() = old.decor().clone();
+    }
+    table.insert(key, item);
 }
 
 /// Saves a valid folder or git URL in `templates`, preserving the other settings.
@@ -566,6 +710,90 @@ fn with_editor(text: &str, command: &str) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_scan_dirs_inherit_global_depth() {
+        let config: Config = toml::from_str("scan_dirs = ['repos']\nscan_depth = 4\n").unwrap();
+        assert!(config.scan_rules.is_empty());
+        assert_eq!(config.effective_scan_depth(Path::new("repos")), 4);
+        assert!(config.scan_rule(Path::new("repos")).exclude.is_empty());
+    }
+
+    #[test]
+    fn scan_rules_round_trip_and_keep_unrelated_comments() {
+        let root = std::env::temp_dir().join(format!("proj-rule-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let template = CONFIG_TEMPLATE.replace("{hotkey}", "\"alt+space\"");
+        let (watched, _) = with_scan_dirs(&template, std::slice::from_ref(&root)).unwrap();
+        let rule = ScanRule {
+            depth: Some(4),
+            exclude: vec!["target".into(), "cache*".into()],
+        };
+        let edited = with_scan_rule(&watched, &root, &rule).unwrap();
+        assert!(edited.contains("# You can still add individual projects with ctrl-o."));
+        assert_eq!(
+            toml::from_str::<Config>(&edited).unwrap().scan_rule(&root),
+            rule
+        );
+        let with_editor = with_editor(&edited, "zed").unwrap();
+        let parsed: Config = toml::from_str(&with_editor).unwrap();
+        assert_eq!(parsed.editor.as_deref(), Some("zed"));
+        assert_eq!(parsed.scan_rule(&root), rule);
+        let (edited, removed) = without_scan_dir(&edited, &root).unwrap();
+        assert!(removed);
+        assert!(
+            toml::from_str::<Config>(&edited)
+                .unwrap()
+                .scan_rules
+                .is_empty()
+        );
+        let regular = format!(
+            "scan_dirs = ['{}']\n# keep me\n[scan_rules.'{}']\ndepth = 2 # depth note\nexclude = ['old']\n",
+            root.display(),
+            root.display()
+        );
+        let changed = with_scan_rule(&regular, &root, &rule).unwrap();
+        assert!(changed.contains("# keep me"));
+        assert!(changed.contains("# depth note"));
+        assert_eq!(
+            toml::from_str::<Config>(&changed).unwrap().scan_rule(&root),
+            rule
+        );
+        let inline = format!(
+            "scan_dirs = ['{}']\n[scan_rules]\n'{}' = {{ depth = 2 }} # note\n",
+            root.display(),
+            root.display()
+        );
+        let changed = with_scan_rule(&inline, &root, &rule).unwrap();
+        assert!(changed.contains("# note"));
+        assert_eq!(
+            toml::from_str::<Config>(&changed).unwrap().scan_rule(&root),
+            rule
+        );
+        assert!(
+            with_scan_rule(
+                &watched,
+                &root,
+                &ScanRule {
+                    depth: Some(0),
+                    ..rule.clone()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            with_scan_rule(
+                &watched,
+                &root,
+                &ScanRule {
+                    exclude: vec!["a/b".into()],
+                    ..rule
+                }
+            )
+            .is_err()
+        );
+        fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn problems_fit_on_one_line() {

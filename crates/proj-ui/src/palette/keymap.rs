@@ -74,7 +74,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-k", ShowActions, ctx),
         KeyBinding::new("shift-f10", ShowActions, ctx),
         KeyBinding::new("menu", ShowActions, ctx),
-        // Its commands to run (package.json scripts and added ones).
+        // Tasks from project files and commands saved for this project.
         KeyBinding::new("secondary-r", ShowCommands, ctx),
         // The search box copies its selected text instead, when there is some.
         KeyBinding::new("secondary-c", CopyPath, ctx),

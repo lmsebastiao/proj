@@ -75,57 +75,62 @@ impl Global for LastSearch {}
 /// How long a closed palette's search is kept.
 const KEEP_SEARCH: Duration = Duration::from_secs(30);
 
-/// Results of jobs that outlived their palette window. Kept until a later
-/// opening, rather than disappearing with the window that started them.
-static JOB_RESULTS: OnceLock<Mutex<Vec<(String, bool)>>> = OnceLock::new();
-
-fn job_results() -> &'static Mutex<Vec<(String, bool)>> {
-    JOB_RESULTS.get_or_init(|| Mutex::new(Vec::new()))
+/// Results survive closing and reopening the palette, without rerunning jobs.
+/// Retry inputs stay in memory, never in the displayed message.
+#[derive(Clone)]
+pub(super) enum Retry {
+    Clone {
+        url: String,
+        dest: PathBuf,
+        scanned: bool,
+    },
+    Template {
+        template: Template,
+        dest: PathBuf,
+        scanned: bool,
+    },
+    Editor {
+        project: Option<Project>,
+        editor: String,
+        file: Option<(PathBuf, bool)>,
+    },
 }
 
-pub(super) fn record_job_result(message: String, failed: bool) {
-    let mut results = job_results()
+#[derive(Clone)]
+pub(super) struct JobResult {
+    pub(super) message: String,
+    pub(super) failed: bool,
+    pub(super) retry: Option<Retry>,
+}
+
+#[derive(Default)]
+struct JobLog {
+    version: u64,
+    entries: Vec<JobResult>,
+}
+
+static JOB_RESULTS: OnceLock<Mutex<JobLog>> = OnceLock::new();
+
+fn job_results() -> &'static Mutex<JobLog> {
+    JOB_RESULTS.get_or_init(|| Mutex::new(JobLog::default()))
+}
+
+pub(super) fn record_job_result(result: JobResult) {
+    let mut log = job_results()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    results.push((message, failed));
-    if results.len() > 5 {
-        results.remove(0);
+    log.entries.push(result);
+    if log.entries.len() > 5 {
+        log.entries.remove(0);
     }
+    log.version += 1;
 }
 
-fn take_job_results() -> Option<Status> {
-    let mut results = job_results()
+fn job_snapshot() -> (u64, Vec<JobResult>) {
+    let log = job_results()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if results.is_empty() {
-        return None;
-    }
-    let failed = results.iter().any(|(_, failed)| *failed);
-    let text = results
-        .drain(..)
-        .map(|(text, _)| text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(Status {
-        text: text.into(),
-        problem: failed,
-        undo: false,
-    })
-}
-
-fn append_job_results(status: &mut Option<Status>) -> bool {
-    let Some(result) = take_job_results() else {
-        return false;
-    };
-    *status = Some(match status.take() {
-        Some(existing) => Status {
-            text: format!("{}\n{}", existing.text, result.text).into(),
-            problem: existing.problem || result.problem,
-            undo: existing.undo,
-        },
-        None => result,
-    });
-    true
+    (log.version, log.entries.clone())
 }
 
 /// The footer's message.
@@ -154,11 +159,16 @@ pub struct Palette {
     apps: HashMap<String, Option<PathBuf>>,
     /// Key of the entry being opened in `Mode::OpenWith`.
     open_with: Option<String>,
+    /// Project key and window indices on the explicit window choice page.
+    choosing_window: Option<String>,
+    window_choices: Vec<usize>,
     /// The project being browsed in `Mode::Browse`.
     browse: Option<browse::Browse>,
     /// Key of the entry being renamed or given a command
     /// (`Mode::Rename`, `Mode::AddCommand`).
     editing: Option<String>,
+    /// Watched root whose scan depth or exclusions are being edited.
+    editing_root: Option<PathBuf>,
     /// Key of the entry whose actions (ctrl-k) or commands (ctrl-r) menu is
     /// open over the list, and which of the two.
     actions_for: Option<String>,
@@ -234,6 +244,8 @@ pub struct Palette {
     /// The footer's message: problems stay until the next key; `notice`s go
     /// by themselves.
     status: Option<Status>,
+    job_version: u64,
+    job_history: Vec<JobResult>,
     /// The database before the last remove, and what was removed, for ctrl-z.
     /// Any other change to the database drops it.
     undo: Option<(Db, String)>,
@@ -297,8 +309,11 @@ impl Palette {
             names: HashMap::new(),
             apps: HashMap::new(),
             open_with: None,
+            choosing_window: None,
+            window_choices: Vec::new(),
             browse: None,
             editing: None,
+            editing_root: None,
             actions_for: None,
             menu_kind: actions::MenuKind::Actions,
             actions: Vec::new(),
@@ -341,6 +356,8 @@ impl Palette {
             open_keys: HashSet::new(),
             hold: None,
             status: None,
+            job_version: 0,
+            job_history: Vec::new(),
             undo: None,
             ctrl_down: false,
             numbers_shown: false,
@@ -386,11 +403,9 @@ impl Palette {
             problem: true,
             undo: false,
         });
-        // Results are delivered after the window's restored search is applied,
-        // which otherwise clears its status on construction.
-        // A job begun in an earlier window may finish while this one is open.
-        // Keep checking until the palette closes; completed results are drained
-        // only after the current window has received them.
+        // Results remain available after reopening; a job started by a closed
+        // window may also finish while this one is open.
+        this.sync_job_results(cx);
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -398,9 +413,7 @@ impl Palette {
                     .await;
                 if this
                     .update(cx, |this, cx| {
-                        if append_job_results(&mut this.status) {
-                            cx.notify();
-                        }
+                        this.sync_job_results(cx);
                     })
                     .is_err()
                 {
@@ -575,8 +588,11 @@ impl Palette {
         match mode {
             Mode::Projects => {
                 self.open_with = None;
+                self.choosing_window = None;
+                self.window_choices.clear();
                 self.browse = None;
                 self.editing = None;
+                self.editing_root = None;
                 self.new_from = None;
                 self.destination = None;
                 self.forge_pick = None;
@@ -590,11 +606,14 @@ impl Palette {
                 self.arrange_rows();
             }
             Mode::Browse
+            | Mode::ProjectWindows
             | Mode::Rename
             | Mode::AddCommand
             | Mode::NewProject
             | Mode::TemplateUrl
             | Mode::WatchedRoots
+            | Mode::ScanDepth
+            | Mode::ScanExclusions
             | Mode::Destinations
             | Mode::Reset
             | Mode::Switch
@@ -652,6 +671,7 @@ impl Palette {
             }
             Mode::Editors => "Default editor for all projects…".into(),
             Mode::OpenWith => "Open with…".into(),
+            Mode::ProjectWindows => "Choose a window or open a new one…".into(),
             Mode::Browse => match &self.browse {
                 Some(browse) => format!("Search in {}…", browse.breadcrumb()),
                 None => String::new(),
@@ -661,6 +681,8 @@ impl Palette {
             Mode::Templates => "New project from… or add a template".into(),
             Mode::TemplateUrl => "Git repository URL for the template".into(),
             Mode::WatchedRoots => "Watched folders…".into(),
+            Mode::ScanDepth => "Depth (1–255; empty inherits global)".into(),
+            Mode::ScanExclusions => "Folder names or prefixes*, separated by commas".into(),
             Mode::Destinations => "Choose a parent folder…".into(),
             Mode::Group => "Search projects to tick…".into(),
             Mode::Forges => match &self.forge_pick {
@@ -676,6 +698,16 @@ impl Palette {
         // Start from the current name, selected so typing replaces it.
         let start = match mode {
             Mode::Rename => self.edited_project().map(|p| p.name.clone()),
+            Mode::ScanDepth => self.editing_root.as_ref().and_then(|root| {
+                self.config
+                    .scan_rule(root)
+                    .depth
+                    .map(|depth| depth.to_string())
+            }),
+            Mode::ScanExclusions => self
+                .editing_root
+                .as_ref()
+                .map(|root| self.config.scan_rule(root).exclude.join(", ")),
             _ => None,
         };
         match start {
@@ -698,8 +730,11 @@ impl Palette {
         match self.mode {
             Mode::Editors => List::Editors,
             Mode::OpenWith => List::OpenWith,
+            Mode::ProjectWindows => List::ProjectWindows,
             Mode::Browse => List::Browse,
             Mode::Rename
+            | Mode::ScanDepth
+            | Mode::ScanExclusions
             | Mode::AddCommand
             | Mode::NewProject
             | Mode::TemplateUrl
@@ -918,6 +953,7 @@ impl Palette {
                 Mode::AddCommand => self.finish_add_command(cx),
                 Mode::NewProject => self.finish_new_project(window, cx),
                 Mode::TemplateUrl => self.finish_template_url(cx),
+                Mode::ScanDepth | Mode::ScanExclusions => self.finish_scan_rule(cx),
                 Mode::Reset => self.finish_reset(window, cx),
                 _ => self.finish_rename(cx),
             };
@@ -931,12 +967,15 @@ impl Palette {
         match self.list() {
             List::Editors => self.choose_editor(ix, window, cx),
             List::OpenWith => self.choose_open_with(ix, window, cx),
+            List::ProjectWindows => self.choose_project_window(ix, window, cx),
             List::Commands => self.run_command(self.commands[ix], window, cx),
             List::Switch => self.switch_to(self.switch_rows[ix][0], window, cx),
             List::Templates => self.choose_template(ix, window, cx),
             List::WatchedRoots => {
                 if ix == self.config.scan_dirs.len() {
                     self.discover_projects(window, cx);
+                } else {
+                    self.edit_scan_rule(ix, Mode::ScanDepth, cx);
                 }
             }
             List::Destinations => self.choose_destination(ix, window, cx),
@@ -977,7 +1016,11 @@ impl Palette {
             List::Browse => self.exit_browse(cx),
             List::Destinations => self.return_from_destination(cx),
             List::Text if self.mode == Mode::TemplateUrl => self.set_mode(Mode::Templates, cx),
+            List::Text if matches!(self.mode, Mode::ScanDepth | Mode::ScanExclusions) => {
+                self.set_mode(Mode::WatchedRoots, cx);
+            }
             List::OpenWith
+            | List::ProjectWindows
             | List::Text
             | List::Templates
             | List::WatchedRoots
@@ -1003,11 +1046,20 @@ impl Palette {
         Some(match self.mode {
             Mode::Browse => self.browse.as_ref()?.breadcrumb(),
             Mode::OpenWith => format!("Open {} with", self.open_with_project()?.name),
+            Mode::ProjectWindows => format!("Windows of {}", self.window_choice_project()?.name),
             Mode::Rename => format!("Rename {}", self.edited_project()?.name),
             Mode::AddCommand => format!("Command for {}", self.edited_project()?.name),
             Mode::Templates => "New project".into(),
             Mode::TemplateUrl => "Add git template".into(),
             Mode::WatchedRoots => "Watched folders".into(),
+            Mode::ScanDepth => format!(
+                "Depth for {}",
+                paths::display_path(self.editing_root.as_ref()?)
+            ),
+            Mode::ScanExclusions => format!(
+                "Exclusions for {}",
+                paths::display_path(self.editing_root.as_ref()?)
+            ),
             Mode::Destinations => "Destination".into(),
             Mode::Forges => format!("What runs {}", self.forge_pick.as_ref()?.host),
             Mode::Group => match &self.group_page.as_ref()?.editing {
@@ -1041,6 +1093,10 @@ impl Palette {
                 self.set_mode(Mode::Templates, cx);
                 true
             }
+            List::Text if matches!(self.mode, Mode::ScanDepth | Mode::ScanExclusions) => {
+                self.set_mode(Mode::WatchedRoots, cx);
+                true
+            }
             _ => {
                 self.back_to_projects(cx);
                 true
@@ -1053,6 +1109,7 @@ impl Palette {
         let key = self
             .open_with
             .clone()
+            .or_else(|| self.choosing_window.clone())
             .or_else(|| self.editing.clone())
             .or_else(|| self.actions_for.clone())
             .or_else(|| self.forge_pick.as_ref().map(|p| p.key.clone()))
@@ -1090,6 +1147,15 @@ impl Palette {
             self.select_where(|this, ix| Some(this.commands[ix]) == selected);
         }
         cx.notify();
+    }
+
+    fn sync_job_results(&mut self, cx: &mut Context<Self>) {
+        let (version, entries) = job_snapshot();
+        if self.job_version != version {
+            self.job_version = version;
+            self.job_history = entries;
+            cx.notify();
+        }
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {

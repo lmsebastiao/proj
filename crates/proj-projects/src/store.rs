@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    config::{Config, toml_problem},
+    config::{Config, ScanRule, toml_problem},
     git,
     paths::{app_dir, display_path, write_atomic},
 };
@@ -276,7 +276,8 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     let mut folders: Vec<(PathBuf, bool)> = db.manual.iter().map(|p| (p.clone(), true)).collect();
     let mut scanned = Vec::new();
     for dir in &config.scan_dirs {
-        scan(dir, config.scan_depth.max(1), &mut scanned);
+        let rule = config.scan_rule(dir);
+        scan(dir, config.effective_scan_depth(dir), &rule, &mut scanned);
     }
     folders.extend(scanned.into_iter().map(|p| (p, false)));
     for (path, manual) in folders {
@@ -306,7 +307,23 @@ pub fn collect(config: &Config, db: &Db) -> Vec<Project> {
     projects
 }
 
-fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
+/// Whether a newly created folder will appear through discovery under the
+/// current watched roots and their effective rules. Creation falls back to a
+/// manual entry if it will not.
+pub fn is_scanned(config: &Config, path: &Path) -> bool {
+    config
+        .scan_dirs
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .any(|root| {
+            let mut found = Vec::new();
+            let rule = config.scan_rule(root);
+            scan(root, config.effective_scan_depth(root), &rule, &mut found);
+            found.iter().any(|candidate| candidate == path)
+        })
+}
+
+fn scan(dir: &Path, depth: u8, rule: &ScanRule, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -317,13 +334,23 @@ fn scan(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
             Ok(ft) => ft.is_dir(),
             Err(_) => false,
         };
-        if !is_dir || entry.file_name().to_string_lossy().starts_with('.') {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !is_dir
+            || name.starts_with('.')
+            || rule.exclude.iter().any(|pattern| {
+                pattern.strip_suffix('*').map_or_else(
+                    || name == pattern.as_str(),
+                    |prefix| !prefix.is_empty() && name.starts_with(prefix),
+                )
+            })
+        {
             continue;
         }
         if depth <= 1 || path.join(".git").exists() {
             out.push(path);
         } else {
-            scan(&path, depth - 1, out);
+            scan(&path, depth - 1, rule, out);
         }
     }
 }
@@ -593,6 +620,92 @@ pub fn ago(then: u64, now: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicitly_created_folders_can_bypass_discovery_rules() {
+        let root =
+            std::env::temp_dir().join(format!("proj-scanned-created-{}", std::process::id()));
+        let excluded = root.join("vendor-app");
+        let normal = root.join("normal");
+        fs::create_dir_all(&excluded).unwrap();
+        fs::create_dir_all(&normal).unwrap();
+        let mut config = Config {
+            scan_dirs: vec![root.clone()],
+            ..Config::default()
+        };
+        config.scan_rules.insert(
+            root.to_string_lossy().into_owned(),
+            ScanRule {
+                depth: None,
+                exclude: vec!["vendor*".into()],
+            },
+        );
+        assert!(!is_scanned(&config, &excluded));
+        assert!(is_scanned(&config, &normal));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn per_root_depth_and_exclusions_skip_nested_folders_before_scanning() {
+        let root = std::env::temp_dir().join(format!("proj-scan-rules-{}", std::process::id()));
+        let a = root.join("a");
+        let b = root.join("b");
+        for path in [
+            a.join("group/git/.git"),
+            a.join("group/git/inner/.git"),
+            a.join("group/target/git/.git"),
+            a.join("group/tmp-cache/git/.git"),
+            a.join("group/other/git/.git"),
+            b.join("shallow/git/.git"),
+        ] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let mut config = Config {
+            scan_dirs: vec![a.clone(), b.clone()],
+            scan_depth: 1,
+            ..Config::default()
+        };
+        config.scan_rules.insert(
+            a.to_string_lossy().into_owned(),
+            ScanRule {
+                depth: Some(3),
+                exclude: vec!["target".into(), "tmp*".into()],
+            },
+        );
+        let paths = |config: &Config, db: &Db| {
+            collect(config, db)
+                .into_iter()
+                .map(|project| project.path)
+                .collect::<HashSet<_>>()
+        };
+        let found = paths(&config, &Db::default());
+        assert!(found.contains(&a.join("group/git")));
+        assert!(found.contains(&a.join("group/other/git")));
+        assert!(
+            !found.contains(&a.join("group/git/inner")),
+            "stop at git root"
+        );
+        assert!(!found.iter().any(|p| p.starts_with(a.join("group/target"))));
+        assert!(
+            !found
+                .iter()
+                .any(|p| p.starts_with(a.join("group/tmp-cache")))
+        );
+        assert!(
+            found.contains(&b.join("shallow")),
+            "other root inherits depth 1"
+        );
+        assert!(!found.contains(&b.join("shallow/git")));
+        let db = Db {
+            manual: vec![a.join("group/target/git")],
+            ..Db::default()
+        };
+        assert!(
+            paths(&config, &db).contains(&a.join("group/target/git")),
+            "manual projects are unaffected"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn dates() {

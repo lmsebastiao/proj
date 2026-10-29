@@ -230,6 +230,10 @@ impl Palette {
                 EditorOption::Browse => glyph(icons::PROGRAM, t.muted).into_any_element(),
                 EditorOption::FileManager => glyph(icons::FOLDER, t.muted).into_any_element(),
             },
+            List::ProjectWindows => match self.window_choices.get(ix) {
+                Some(&w) => program_icon(Some(self.windows[w].exe.clone()), icons::PROGRAM, t),
+                None => glyph(icons::ADD, t.muted).into_any_element(),
+            },
             List::Switch => program_icon(
                 Some(self.windows[self.switch_rows[ix][0]].exe.clone()),
                 icons::PROGRAM,
@@ -544,7 +548,7 @@ impl Palette {
                                                 .rounded_full()
                                                 .bg(rgb(t.open))
                                                 .tooltip(tooltip(
-                                                    "An editor window is open · ↵ switches to it",
+                                                    "An editor window is open · ↵ switches or chooses between windows",
                                                     t,
                                                 )),
                                         )
@@ -902,6 +906,9 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates | Mode::WatchedRoots | Mode::Destinations => return None,
+            Mode::ProjectWindows => (None, vec!["Choose an open editor window by title, or launch the project again. Unmatched windows remain in the window switcher (@). The editor may reuse a window when launched again.".into()]),
+            Mode::ScanDepth => (None, vec![format!("Empty inherits global depth ({}). Depth 1 lists immediate folders; deeper scans stop at git repositories. ↵ saves; esc cancels.", self.config.scan_depth.max(1))]),
+            Mode::ScanExclusions => (None, vec!["Comma-separated folder names at any level: build matches exactly; vendor* matches a name prefix. Excluded folders are not scanned. Empty clears exclusions. ↵ saves; esc cancels.".into()]),
             Mode::TemplateUrl => (None, vec!["Enter a git repository URL; esc cancels. No download happens until you make a project from it.".into()]),
             Mode::Reset => (
                 Some("Reset proj?".into()),
@@ -1133,6 +1140,57 @@ impl Palette {
             List::Switch => format!("{} windows", self.windows.len()),
             _ => return None,
         })
+    }
+
+    /// Completed jobs remain visible (and retryable) after closing the palette.
+    fn render_job_history(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        if self.job_history.is_empty() {
+            return None;
+        }
+        let t = self.theme;
+        Some(
+            div()
+                .id("job-history")
+                .flex_none()
+                .max_h(px(180.))
+                .overflow_y_scroll()
+                .border_t_1()
+                .border_color(rgb(t.border))
+                .children(
+                    self.job_history
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .map(|(ix, result)| {
+                            div()
+                                .px_4()
+                                .py_2()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .text_size(px(SMALL_FONT_SIZE))
+                                .text_color(rgb(if result.failed { t.danger } else { t.accent }))
+                                .child(div().flex_1().min_w_0().child(result.message.clone()))
+                                .children(result.retry.as_ref().map(|_| {
+                                    div()
+                                        .id(("retry-job", ix))
+                                        .flex_none()
+                                        .px_2()
+                                        .h(px(28.))
+                                        .rounded_md()
+                                        .flex()
+                                        .items_center()
+                                        .text_color(rgb(t.text))
+                                        .hover(|d| d.bg(rgb(t.hover)))
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.retry_job(ix, window, cx);
+                                        }))
+                                        .child("Retry")
+                                }))
+                        }),
+                ),
+        )
     }
 
     /// Something went wrong: in full, wrapped, in the warning colour, above
@@ -1612,6 +1670,11 @@ impl Render for Palette {
                 cx.listener(|this, _: &ConfirmSecondary, window, cx| match this.list() {
                     List::OpenWith => this.toggle_project_default(window, cx),
                     List::Group => this.save_ticked(cx),
+                    List::WatchedRoots => {
+                        if let Some(ix) = this.matches.get(this.selected).map(|m| m.ix) {
+                            this.edit_scan_rule(ix, Mode::ScanExclusions, cx);
+                        }
+                    }
                     List::Text if this.mode == Mode::NewProject => {
                         this.choose_destination_for(Mode::NewProject, window, cx)
                     }
@@ -1696,6 +1759,7 @@ impl Render for Palette {
             }))
             .children(add_row)
             .child(rows)
+            .children(self.render_job_history(cx))
             .children(self.render_problem())
             .child(footer)
             .children(backdrop)

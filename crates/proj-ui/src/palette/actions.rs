@@ -40,7 +40,7 @@ pub(super) enum Section {
     Danger,
     /// The commands menu: the ones added by hand…
     Added,
-    /// …then the package.json scripts…
+    /// …then tasks discovered from project manifests…
     Scripts,
     /// …then "Add a command…", under a line.
     AddNew,
@@ -288,7 +288,7 @@ impl Palette {
             return;
         };
         if !task.added {
-            return self.problem("That one is from package.json", cx);
+            return self.problem(format!("That one is from {}", task.origin), cx);
         }
         store::remove_command(&mut self.db, &key, &task.command);
         self.save(cx);
