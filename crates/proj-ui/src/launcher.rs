@@ -533,10 +533,9 @@ fn switch_windows(delta: isize, mods: Modifiers, cx: &mut App) {
         .first()
         .is_some_and(|w| Some(w.window) == platform::foreground_window());
     let selected = first_switch_selection(windows.len(), front, delta);
-    let rows = windows.len().div_ceil(3).clamp(1, 3);
     show_palette(
         cx,
-        Some(size(px(760.), px(32. + rows as f32 * 126.))),
+        Some(palette::switcher_size(windows.len())),
         move |window, cx| Palette::switcher(window, cx, windows, selected, mods),
     );
 }

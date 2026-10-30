@@ -186,8 +186,8 @@ Every editor window has its own card, even when two windows show the same projec
 While holding **alt**, press **ctrl+w** (or **ctrl+alt+w**) to close the selected
 window, as its close button would, so the editor can still ask about unsaved changes.
 
-Each card shows the window title, editor icon and project name (or editor name if
-unmatched). proj works out the project from the window title: the folder name (Zed,
+Each card shows its window title and editor icon. proj works out the project from
+the window title: the folder name (Zed,
 VS Code, Cursor…), a Zed workspace's folder list, or the solution name (Visual Studio).
 Windows it can't match confidently still appear by title; you can switch to them there.
 Projects with a window open get a green dot after their name in the normal list. **Enter**

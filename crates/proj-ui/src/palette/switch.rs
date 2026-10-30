@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use global_hotkey::hotkey::Modifiers;
-use gpui::{AnyElement, Context, Focusable, Window, div, prelude::*, px, rgb};
+use gpui::{AnyElement, Context, Focusable, Pixels, Size, Window, div, prelude::*, px, rgb, size};
 
 use crate::{
     platform,
@@ -18,8 +18,25 @@ use super::{
     app_icon::app_icon,
     items::Mode,
     keymap::{CloseWindow, Confirm, Dismiss},
-    theme::{FONT_SIZE, SMALL_FONT_SIZE, icons},
+    theme::{FONT_SIZE, icons},
 };
+
+pub(super) const CARD_WIDTH: f32 = 232.;
+pub(super) const CARD_HEIGHT: f32 = 150.;
+
+pub(crate) fn switcher_size(count: usize) -> Size<Pixels> {
+    let columns = count.clamp(1, 3);
+    let rows = count.div_ceil(3).clamp(1, 3);
+    let width = if count == 0 {
+        420.
+    } else {
+        28. + columns as f32 * CARD_WIDTH + (columns - 1) as f32 * 12.
+    };
+    size(
+        px(width),
+        px(28. + rows as f32 * CARD_HEIGHT + (rows - 1) as f32 * 12.),
+    )
+}
 
 impl Palette {
     /// The switcher, with the row of `windows[selected]` highlighted, until
@@ -157,9 +174,7 @@ impl Palette {
                     .gap_3()
                     .children(windows.iter().enumerate().map(|(column, entry)| {
                         let ix = line * 3 + column;
-                        let detail = self.window_projects[ix]
-                            .map(|project| self.projects[project].name.clone())
-                            .unwrap_or_else(|| entry.editor.clone());
+
                         let icon = if platform::HAS_APP_ICONS {
                             app_icon(Some(entry.exe.clone()), 40.).into_any_element()
                         } else {
@@ -167,8 +182,8 @@ impl Palette {
                         };
                         div()
                             .id(("window-card", ix))
-                            .w(px(232.))
-                            .h(px(114.))
+                            .w(px(CARD_WIDTH))
+                            .h(px(CARD_HEIGHT))
                             .p_3()
                             .flex_none()
                             .flex()
@@ -194,6 +209,8 @@ impl Palette {
                             }))
                             .child(
                                 div()
+                                    .flex_none()
+                                    .h(px(24.))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
@@ -207,15 +224,6 @@ impl Palette {
                                     .items_center()
                                     .justify_center()
                                     .child(icon),
-                            )
-                            .child(
-                                div()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .text_size(px(SMALL_FONT_SIZE))
-                                    .text_color(rgb(t.muted))
-                                    .child(detail),
                             )
                     }))
                     .into_any_element()

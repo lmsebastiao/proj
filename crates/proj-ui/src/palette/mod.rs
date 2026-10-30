@@ -58,6 +58,7 @@ use keymap::{Confirm, Dismiss};
 use theme::{ROW_GAP, ROW_HEIGHT, Theme};
 
 pub use keymap::bind_keys;
+pub(crate) use switch::switcher_size;
 
 /// Shortcuts that couldn't be registered, shown in the footer each time the
 /// palette opens until `hotkey` in config.toml is fixed.
