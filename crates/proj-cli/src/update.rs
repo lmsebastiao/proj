@@ -166,6 +166,14 @@ mod tests {
     }
 
     #[test]
+    fn release_source_is_configured() {
+        assert_eq!(
+            releases_url(),
+            "https://github.com/lmsebastiao/proj/releases"
+        );
+    }
+
+    #[test]
     fn parses_versions() {
         assert_eq!(parse_version("0.12.3"), Some([0, 12, 3]));
         assert_eq!(parse_version("1.2"), None);

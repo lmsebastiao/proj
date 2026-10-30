@@ -3,6 +3,7 @@ name = "proj-cli"
 version.workspace = true
 edition = "2024"
 description = "Command-line commands, updates and platform services for proj"
+repository = "https://github.com/lmsebastiao/proj"
 
 [dependencies]
 proj-core = { path = "../proj-core" }
