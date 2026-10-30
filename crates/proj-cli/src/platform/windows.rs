@@ -11,8 +11,8 @@ use windows_sys::Win32::{
     UI::{
         HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI},
         WindowsAndMessaging::{
-            GetCursorPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-            SetForegroundWindow, SetWindowPos, USER_DEFAULT_SCREEN_DPI,
+            GetClientRect, GetCursorPos, GetWindowRect, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, USER_DEFAULT_SCREEN_DPI,
         },
     },
 };
@@ -71,16 +71,26 @@ pub fn place(window: &Window, display: DisplayId, bounds: Bounds<Pixels>) {
     }
     let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
     let device = |pixels: Pixels| (f32::from(pixels) * scale).round() as i32;
-    let set_position = || unsafe {
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            device(bounds.origin.x),
-            device(bounds.origin.y),
-            device(bounds.size.width),
-            device(bounds.size.height),
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        )
+    let set_position = || {
+        // SetWindowPos takes the *outer* rectangle. GPUI's bounds describe the
+        // client area; without the invisible Win32 frame the last card is cut off.
+        let (border_x, border_y) = window_border(hwnd).unwrap_or((0, 0));
+        let (x, y, width, height) = outer_bounds(
+            (device(bounds.origin.x), device(bounds.origin.y)),
+            (device(bounds.size.width), device(bounds.size.height)),
+            (border_x, border_y),
+        );
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                width,
+                height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
     };
     // Arriving on a monitor with another scale, Windows resizes the window
     // for it; placing it again undoes that.
@@ -89,6 +99,29 @@ pub fn place(window: &Window, display: DisplayId, bounds: Bounds<Pixels>) {
     if changes_scale {
         set_position();
     }
+}
+
+fn window_border(hwnd: HWND) -> Option<(i32, i32)> {
+    let mut outer = RECT::default();
+    let mut client = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut outer) } == 0
+        || unsafe { GetClientRect(hwnd, &mut client) } == 0
+    {
+        return None;
+    }
+    Some((
+        outer.right - outer.left - (client.right - client.left),
+        outer.bottom - outer.top - (client.bottom - client.top),
+    ))
+}
+
+fn outer_bounds(origin: (i32, i32), size: (i32, i32), border: (i32, i32)) -> (i32, i32, i32, i32) {
+    (
+        origin.0 - border.0 / 2,
+        origin.1 - border.1 / 2,
+        size.0 + border.0,
+        size.1 + border.1,
+    )
 }
 
 /// The monitors in `EnumDisplayMonitors` order, which gpui's `DisplayId` indexes.
@@ -500,4 +533,21 @@ fn bitmap_pixels(
         lines
     };
     (u32::try_from(lines).ok() == Some(height)).then_some((width, height, pixels))
+}
+
+#[cfg(test)]
+mod window_bounds_tests {
+    use super::outer_bounds;
+
+    #[test]
+    fn preserves_requested_client_size_despite_invisible_frame() {
+        assert_eq!(
+            outer_bounds((100, 200), (504, 178), (16, 8)),
+            (92, 196, 520, 186)
+        );
+        assert_eq!(
+            outer_bounds((100, 200), (504, 178), (0, 0)),
+            (100, 200, 504, 178)
+        );
+    }
 }
