@@ -187,6 +187,7 @@ numbers beyond the first nine windows do nothing.
 Every editor window has its own card, even when two windows show the same project.
 While holding **alt**, press **ctrl+w** (or **ctrl+alt+w**) to close the selected
 window, as its close button would, so the editor can still ask about unsaved changes.
+Each card also has an X button to close its window without switching to it.
 
 Each card shows its window title and, when available, the project's image. For public
 repositories on gitlab.com, gitea.com or codeberg.org, proj fetches the repository

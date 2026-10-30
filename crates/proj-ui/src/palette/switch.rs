@@ -21,7 +21,8 @@ use super::{
     items::Mode,
     keymap::{CloseWindow, Confirm, Dismiss},
     project_image::project_image,
-    theme::FONT_SIZE,
+    theme::{FONT_SIZE, icons},
+    tooltip::tooltip,
 };
 
 pub(super) const CARD_WIDTH: f32 = 232.;
@@ -238,7 +239,7 @@ impl Palette {
                             .children((ix < 9).then(|| {
                                 div()
                                     .absolute()
-                                    .top(px(8.))
+                                    .bottom(px(8.))
                                     .right(px(9.))
                                     .text_size(px(12.))
                                     .text_color(rgb(t.muted))
@@ -246,9 +247,32 @@ impl Palette {
                             }))
                             .child(
                                 div()
+                                    .id(("close-window", ix))
+                                    .absolute()
+                                    .top(px(5.))
+                                    .right(px(5.))
+                                    .size(px(24.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_md()
+                                    .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
+                                    .text_size(px(12.))
+                                    .text_color(rgb(t.muted))
+                                    .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.danger)))
+                                    .cursor_pointer()
+                                    .tooltip(tooltip("Close window · ctrl-w", t))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.close_row(ix, cx);
+                                    }))
+                                    .child(icons::CLOSE),
+                            )
+                            .child(
+                                div()
                                     .flex_none()
                                     .h(px(24.))
-                                    .pr(px(20.))
+                                    .pr(px(28.))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
