@@ -329,6 +329,7 @@ impl Palette {
             .border_1()
             .border_color(rgb(t.border))
             .rounded_lg()
+            .text_color(rgb(t.text))
             .child(if self.windows.is_empty() {
                 div()
                     .flex_1()
