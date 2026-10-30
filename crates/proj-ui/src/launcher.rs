@@ -550,20 +550,6 @@ fn first_switch_selection(len: usize, front_is_editor: bool, delta: isize) -> us
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::first_switch_selection;
-
-    #[test]
-    fn switch_starts_on_previous_editor_and_reverse_wraps() {
-        assert_eq!(first_switch_selection(3, true, 1), 1);
-        assert_eq!(first_switch_selection(3, true, -1), 2);
-        assert_eq!(first_switch_selection(3, false, 1), 0);
-        assert_eq!(first_switch_selection(1, true, 1), 0);
-        assert_eq!(first_switch_selection(0, false, -1), 0);
-    }
-}
-
 fn close_palette(handle: WindowHandle<Palette>, cx: &mut App) {
     handle
         .update(cx, |_, window, _| window.remove_window())
@@ -663,4 +649,18 @@ fn fatal(cx: &mut App, message: &str) {
     platform::attach_console();
     eprintln!("proj: {message}");
     cx.quit();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_switch_selection;
+
+    #[test]
+    fn switch_starts_on_previous_editor_and_reverse_wraps() {
+        assert_eq!(first_switch_selection(3, true, 1), 1);
+        assert_eq!(first_switch_selection(3, true, -1), 2);
+        assert_eq!(first_switch_selection(3, false, 1), 0);
+        assert_eq!(first_switch_selection(1, true, 1), 0);
+        assert_eq!(first_switch_selection(0, false, -1), 0);
+    }
 }
