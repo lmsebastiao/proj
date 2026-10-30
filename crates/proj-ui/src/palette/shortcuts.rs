@@ -354,6 +354,7 @@ impl Palette {
             }
             List::Switch => vec![
                 s(&["alt-\\", "alt-shift-\\"], "Cycle editor windows"),
+                s(&["alt-1…9"], "Switch directly to a numbered card"),
                 s(&["mod-w", "alt-mod-w"], "Close the selected window").run(CloseWindow),
                 s(&["alt-esc"], "Cancel").run(Dismiss),
             ],

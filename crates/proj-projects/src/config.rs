@@ -287,7 +287,8 @@ hotkey = {hotkey}
 # Switch between open editor windows like Alt+Tab: hold alt and tap \ to open
 # cards in recent-window order (front to back). Tap again to cycle, hold shift
 # to cycle backwards, release alt to switch, or press esc to cancel. While
-# holding alt, ctrl+w (or ctrl+alt+w) closes the selected window.
+# holding alt, 1…9 switches directly to a numbered card, and ctrl+w
+# (or ctrl+alt+w) closes the selected window.
 # Set another shortcut here, e.g. "alt+q", or "" to turn it off.
 # switch_hotkey = "alt+q"
 

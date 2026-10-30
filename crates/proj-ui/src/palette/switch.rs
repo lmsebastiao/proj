@@ -5,7 +5,10 @@
 use std::time::Duration;
 
 use global_hotkey::hotkey::Modifiers;
-use gpui::{AnyElement, Context, Focusable, Pixels, Size, Window, div, prelude::*, px, rgb, size};
+use gpui::{
+    AnyElement, Context, Focusable, KeyDownEvent, Keystroke, Pixels, Size, Window, div, prelude::*,
+    px, rgb, size,
+};
 
 use crate::{
     platform,
@@ -23,6 +26,11 @@ use super::{
 
 pub(super) const CARD_WIDTH: f32 = 232.;
 pub(super) const CARD_HEIGHT: f32 = 150.;
+
+fn number_index(key: &str, count: usize) -> Option<usize> {
+    let index = key.parse::<usize>().ok()?.checked_sub(1)?;
+    (index < 9 && index < count).then_some(index)
+}
 
 pub(crate) fn switcher_size(count: usize) -> Size<Pixels> {
     let columns = count.clamp(1, 3);
@@ -108,6 +116,25 @@ impl Palette {
         true
     }
 
+    /// Alt+1…9 switches directly to that card, only while holding the switcher open.
+    fn switch_to_number(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mods = keystroke.modifiers;
+        if self.hold.is_none() || !mods.alt || mods.control || mods.platform || mods.shift {
+            return false;
+        }
+        let Some(ix) = number_index(&keystroke.key, self.windows.len()) else {
+            return false;
+        };
+        self.hold = None;
+        self.switch_to(ix, window, cx);
+        true
+    }
+
     /// Works out which project each open window shows, and the rows.
     pub(super) fn match_windows(&mut self) {
         self.window_projects = self
@@ -185,6 +212,7 @@ impl Palette {
                             .w(px(CARD_WIDTH))
                             .h(px(CARD_HEIGHT))
                             .p_3()
+                            .relative()
                             .flex_none()
                             .flex()
                             .flex_col()
@@ -207,10 +235,20 @@ impl Palette {
                                 this.selected = ix;
                                 this.switch_to(ix, window, cx);
                             }))
+                            .children((ix < 9).then(|| {
+                                div()
+                                    .absolute()
+                                    .top(px(8.))
+                                    .right(px(9.))
+                                    .text_size(px(12.))
+                                    .text_color(rgb(t.muted))
+                                    .child((ix + 1).to_string())
+                            }))
                             .child(
                                 div()
                                     .flex_none()
                                     .h(px(24.))
+                                    .pr(px(20.))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
@@ -232,6 +270,11 @@ impl Palette {
         div()
             .key_context("Palette")
             .track_focus(&focus)
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.switch_to_number(&event.keystroke, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(Self::close_window))
             .on_action(cx.listener(|this, _: &Confirm, window, cx| {
                 if !this.windows.is_empty() {
@@ -318,5 +361,21 @@ impl Palette {
             self.save(cx);
         }
         window.remove_window();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::number_index;
+
+    #[test]
+    fn number_picks_only_an_existing_card_among_the_first_nine() {
+        assert_eq!(number_index("1", 3), Some(0));
+        assert_eq!(number_index("3", 3), Some(2));
+        assert_eq!(number_index("0", 3), None);
+        assert_eq!(number_index("4", 3), None);
+        assert_eq!(number_index("9", 10), Some(8));
+        assert_eq!(number_index("10", 10), None);
+        assert_eq!(number_index("x", 3), None);
     }
 }

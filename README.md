@@ -181,6 +181,8 @@ above enter on US ones. Cards appear in recent-window order, front to back, with
 previously used editor selected first. Keep tapping **\\** to cycle forward; hold
 **shift** while tapping to cycle backward. Release **alt** to bring the selected window
 to the front, or press **esc** to cancel. A quick tap returns to the previous editor.
+While holding **alt**, press **1** through **9** to switch straight to a numbered card;
+numbers beyond the first nine windows do nothing.
 
 Every editor window has its own card, even when two windows show the same project.
 While holding **alt**, press **ctrl+w** (or **ctrl+alt+w**) to close the selected
