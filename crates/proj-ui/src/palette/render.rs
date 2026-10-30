@@ -1,6 +1,6 @@
 //! Drawing the palette.
 
-use std::{cmp::Ordering, ops::Range, path::PathBuf};
+use std::{ops::Range, path::PathBuf};
 
 use gpui::{
     AnyElement, Context, Div, Focusable, FontWeight, HighlightStyle, KeyDownEvent,
@@ -19,7 +19,6 @@ use super::{
     scrollbar::{LIST_PADDING, SCROLLBAR_WIDTH, Scrolled},
     secondary,
     shortcuts::Shortcut,
-    switch::DraggedWindow,
     theme::*,
     tooltip::tooltip,
 };
@@ -285,59 +284,12 @@ impl Palette {
         let is_projects = self.list() == List::Projects;
         // Projects with an editor window open (the switcher lists those).
         let open = is_projects && self.open_keys.contains(&self.projects[m.ix].key());
-        // A switcher row's number, for the number keys while holding the
-        // switcher and the switch-by-number shortcuts (alt+shift+1…9). The ones
-        // past 9 keep the space so the titles line up. (The project list's
-        // ctrl+1…9 numbers take the icon's place instead, so nothing moves.)
-        let number = (self.list() == List::Switch
-            && (self.hold.is_some() || self.config.switch_number_modifiers().is_some()))
-        .then(|| {
-            div()
-                .flex_none()
-                .w(px(12.))
-                .text_size(px(SMALL_FONT_SIZE))
-                .text_color(rgb(t.muted))
-                .when(m.ix < 9, |d| d.child((m.ix + 1).to_string()))
-        });
-        // Switcher rows can be dragged to another place in the list (it shows
-        // every row in order then, so `row` is also the row's index).
-        let dragged = self.can_reorder().then(|| DraggedWindow {
-            ix: m.ix,
-            title: title.clone().into(),
-            width: px(0.),
-            theme: t,
-        });
+
         let icon = self.row_icon(row, m.ix);
         // A project whose folder is gone is dimmed.
         let project = is_projects.then(|| &self.projects[m.ix]);
         let missing = project.is_some_and(|p| p.missing);
-        // A switcher row's close button, like ctrl-w: shown on the highlighted
-        // row, and on any row the mouse is over.
-        let close = (self.list() == List::Switch).then(|| {
-            div()
-                .id(("close", row))
-                .flex_none()
-                .size(px(28.))
-                .rounded_md()
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(!icons::FONT.is_empty(), |d| d.font_family(icons::FONT))
-                .text_size(px(12.))
-                .text_color(rgb(t.muted))
-                .hover(|d| d.bg(rgb(t.border)).text_color(rgb(t.danger)))
-                .tooltip(tooltip(format!("Close the window · {}-w", secondary()), t))
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    // Not also a click on the row, which switches to it.
-                    cx.stop_propagation();
-                    this.close_row(row, cx);
-                }))
-                .when(!selected, |d| {
-                    d.invisible().group_hover(ROW_GROUP, |s| s.visible())
-                })
-                .child(icons::CLOSE)
-        });
+
         let removable = match self.list() {
             List::Templates => m.ix < self.templates.len(),
             List::WatchedRoots => m.ix < self.config.scan_dirs.len(),
@@ -499,30 +451,7 @@ impl Palette {
                             }),
                         )
                     })
-                    .when_some(dragged, |d, dragged| {
-                        d.on_drag(dragged, |dragged, _, window, cx| {
-                            let width = window.viewport_size().width - px(18.);
-                            cx.new(|_| DraggedWindow {
-                                width,
-                                ..dragged.clone()
-                            })
-                        })
-                        // A line where it would land: above this row when coming
-                        // from below, under it when coming from above.
-                        .drag_over::<DraggedWindow>(move |style, dragged, _, _| {
-                            match dragged.ix.cmp(&row) {
-                                Ordering::Greater => style.border_t_2().border_color(rgb(t.accent)),
-                                Ordering::Less => style.border_b_2().border_color(rgb(t.accent)),
-                                Ordering::Equal => style,
-                            }
-                        })
-                        .on_drop(cx.listener(
-                            move |this, dragged: &DraggedWindow, _, cx| {
-                                this.move_window(dragged.ix, row, cx);
-                            },
-                        ))
-                    })
-                    .children(number)
+
                     .child(icon)
                     .child(
                         div()
@@ -590,7 +519,6 @@ impl Palette {
                         )
                     })
                     .children(more)
-                    .children(close)
                     .children(remove),
             )
     }
@@ -906,7 +834,7 @@ impl Palette {
         let m = secondary();
         let (title, lines): (Option<String>, Vec<String>) = match self.mode {
             Mode::Projects | Mode::Switch | Mode::Browse | Mode::Templates | Mode::WatchedRoots | Mode::Destinations => return None,
-            Mode::ProjectWindows => (None, vec!["Choose an open editor window by title, or launch the project again. Unmatched windows remain in the window switcher (@). The editor may reuse a window when launched again.".into()]),
+            Mode::ProjectWindows => (None, vec!["Choose an open editor window by title, or launch the project again. Unmatched windows remain in the window switcher. The editor may reuse a window when launched again.".into()]),
             Mode::ScanDepth => (None, vec![format!("Empty inherits global depth ({}). Depth 1 lists immediate folders; deeper scans stop at git repositories. ↵ saves; esc cancels.", self.config.scan_depth.max(1))]),
             Mode::ScanExclusions => (None, vec!["Comma-separated folder names at any level: build matches exactly; vendor* matches a name prefix. Excluded folders are not scanned. Empty clears exclusions. ↵ saves; esc cancels.".into()]),
             Mode::TemplateUrl => (None, vec!["Enter a git repository URL; esc cancels. No download happens until you make a project from it.".into()]),
@@ -1035,7 +963,7 @@ impl Palette {
         let scope = match self.list() {
             List::Commands => Some("Commands"),
             List::Files => Some("Files"),
-            List::Switch if self.mode == Mode::Projects => Some("Windows"),
+
             _ => None,
         };
         div()
@@ -1369,6 +1297,9 @@ fn ranges<'a>(text: &'a str, offsets: &'a [usize]) -> impl Iterator<Item = Range
 
 impl Render for Palette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.mode == Mode::Switch {
+            return self.render_switcher(window, cx);
+        }
         let t = self.theme;
         // Keys go to the menu's search box while it's open, else the main one.
         let focus = if self.menu_open() {
@@ -1531,8 +1462,6 @@ impl Render for Palette {
 
         div()
             .key_context("Palette")
-            // While the switcher is held open, a number switches to that window
-            // and other keys start a search.
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.menu_open() {
                     return;
@@ -1546,10 +1475,7 @@ impl Render for Palette {
                     cx.stop_propagation();
                     return;
                 }
-                if this.switch_to_number(&event.keystroke.key, window, cx)
-                    || this.open_number(&event.keystroke, window, cx)
-                    || this.type_in_switcher(&event.keystroke, window, cx)
-                {
+                if this.open_number(&event.keystroke, window, cx) {
                     cx.stop_propagation();
                 }
             }))
@@ -1616,10 +1542,7 @@ impl Render for Palette {
                 if this.menu_open() {
                     return;
                 }
-                // Out of a project's windows also from just after the `@` that
-                // lists them in the project search.
-                let at_start = this.input.read(cx).cursor_at_start()
-                    || (this.list() == List::Switch && this.filter_query().is_empty());
+                let at_start = this.input.read(cx).cursor_at_start();
                 if at_start && this.leave(cx) {
                     cx.stop_propagation();
                 }
@@ -1765,6 +1688,7 @@ impl Render for Palette {
             .children(backdrop)
             .children(menu)
             .children(dropdown)
+            .into_any_element()
     }
 }
 

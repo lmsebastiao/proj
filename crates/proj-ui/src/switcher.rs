@@ -56,29 +56,6 @@ pub fn rows(windows: &[EditorWindow]) -> Vec<Vec<usize>> {
     (0..windows.len()).map(|w| vec![w]).collect()
 }
 
-/// A shortcut from the config for display, like the palette's keys:
-/// "ctrl+alt+Backslash" → "ctrl-alt-\".
-pub fn shortcut_label(shortcut: &str) -> String {
-    let (mods, key) = shortcut.rsplit_once('+').unwrap_or(("", shortcut));
-    let key = match key.to_lowercase().as_str() {
-        "backquote" => "`".to_string(),
-        "backslash" => "\\".to_string(),
-        "quote" => "'".to_string(),
-        "semicolon" => ";".to_string(),
-        "slash" => "/".to_string(),
-        "bracketleft" => "[".to_string(),
-        "bracketright" => "]".to_string(),
-        "minus" => "-".to_string(),
-        "equal" => "=".to_string(),
-        other => other.to_string(),
-    };
-    if mods.is_empty() {
-        key
-    } else {
-        format!("{}-{key}", mods.replace('+', "-").to_lowercase())
-    }
-}
-
 /// Windows of the detected and configured editors, front to back.
 pub fn editor_windows(config: &Config, db: &Db) -> Vec<EditorWindow> {
     let detected = editors::detected_editors(false);
@@ -247,13 +224,6 @@ mod tests {
             manual: true,
             ..Project::default()
         }
-    }
-
-    #[test]
-    fn labels_shortcuts() {
-        assert_eq!(shortcut_label("ctrl+alt+Backslash"), "ctrl-alt-\\");
-        assert_eq!(shortcut_label("Alt+Q"), "alt-q");
-        assert_eq!(shortcut_label("F8"), "f8");
     }
 
     #[test]

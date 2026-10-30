@@ -32,9 +32,6 @@ pub struct Config {
     /// Hold-and-tap shortcut for switching between open editor windows (with
     /// shift: backwards). Unset = alt+\; "" = off.
     pub switch_hotkey: Option<String>,
-    /// Modifiers that, with 1 to 9, switch straight to that window in the
-    /// switcher's order. Unset = alt+shift; "" = off.
-    pub switch_number_modifiers: Option<String>,
     /// Light or dark colours, or follow the system setting.
     #[serde(deserialize_with = "theme_or_system")]
     pub theme: ThemeSetting,
@@ -127,7 +124,6 @@ impl Default for Config {
             scan_rules: BTreeMap::new(),
             check_for_updates: true,
             switch_hotkey: None,
-            switch_number_modifiers: None,
             theme: ThemeSetting::System,
             monitor: MonitorSetting::Cursor,
             forges: BTreeMap::new(),
@@ -162,15 +158,6 @@ impl Config {
     /// The window switcher's shortcut, or `None` when it's turned off.
     pub fn switch_hotkey(&self) -> Option<String> {
         shortcut_or(self.switch_hotkey.as_deref(), || "alt+Backslash".into())
-    }
-
-    /// The modifiers for switching to a window by its number, or `None` when
-    /// that's turned off. Not ctrl+alt: Windows reads AltGr as ctrl+alt, and
-    /// AltGr with a number types @, { or [ on many layouts.
-    pub fn switch_number_modifiers(&self) -> Option<String> {
-        shortcut_or(self.switch_number_modifiers.as_deref(), || {
-            "alt+shift".into()
-        })
     }
 }
 
@@ -297,18 +284,12 @@ const CONFIG_TEMPLATE: &str = r#"# proj configuration
 # A change applies the next time the launcher opens (with the old shortcut or the tray icon).
 hotkey = {hotkey}
 
-# Switch between your open editor windows like Alt+Tab: hold alt, tap \ to move
-# through them (alt+shift+\ goes back) or a number to pick one, let go to switch.
-# Type while holding it to search the list instead: it stays open, enter
-# switches, esc closes. Set another shortcut here, e.g. "alt+q", or "" to turn
-# it off.
+# Switch between open editor windows like Alt+Tab: hold alt and tap \ to open
+# cards in recent-window order (front to back). Tap again to cycle, hold shift
+# to cycle backwards, release alt to switch, or press esc to cancel. While
+# holding alt, ctrl+w (or ctrl+alt+w) closes the selected window.
+# Set another shortcut here, e.g. "alt+q", or "" to turn it off.
 # switch_hotkey = "alt+q"
-
-# Switch straight to a window by its number in that list: alt+shift+1 for the
-# first, up to 9. Set other modifiers here, e.g. "ctrl+shift", or "" to turn it
-# off. Avoid ctrl+alt on Windows: AltGr counts as ctrl+alt, so AltGr+2 (@),
-# AltGr+7 ({) and so on would stop typing in every app.
-# switch_number_modifiers = "ctrl+shift"
 
 # Folders whose sub-folders are listed as projects. Choose folders to watch
 # from the launcher with > Discover projects in folders, or edit this list.

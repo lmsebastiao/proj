@@ -237,6 +237,7 @@ pub struct Palette {
     window_projects: Vec<Option<usize>>,
     /// The switcher's rows, as indexes into `windows`: one per window.
     switch_rows: Vec<Vec<usize>>,
+    switch_scroll: ScrollHandle,
     /// Keys of the projects that have a window open.
     open_keys: HashSet<String>,
     /// The switcher's modifiers while they're held; letting go switches.
@@ -353,6 +354,7 @@ impl Palette {
             windows: Vec::new(),
             window_projects: Vec::new(),
             switch_rows: Vec::new(),
+            switch_scroll: ScrollHandle::new(),
             open_keys: HashSet::new(),
             hold: None,
             status: None,
@@ -662,9 +664,7 @@ impl Palette {
         let placeholder = match mode {
             // The rest (pasting a path or git URL…) is under F1.
             Mode::Projects => {
-                format!(
-                    "Search projects…   > commands · {SWITCH_PREFIX} windows · {FILES_PREFIX} files"
-                )
+                format!("Search projects…   > commands · {FILES_PREFIX} files")
             }
             Mode::Editors if self.config.editor.is_none() => {
                 "Choose the editor to open projects with…".into()
@@ -746,8 +746,7 @@ impl Palette {
             Mode::Group => List::Group,
             Mode::Switch => List::Switch,
             Mode::Projects if self.query.starts_with('>') => List::Commands,
-            // The switcher's list, searchable, without opening it by its shortcut.
-            Mode::Projects if self.query.starts_with(SWITCH_PREFIX) => List::Switch,
+
             Mode::Projects if self.query.starts_with(FILES_PREFIX) => List::Files,
             Mode::Projects => List::Projects,
         }
@@ -764,14 +763,12 @@ impl Palette {
         self.projects.iter().find(|p| &p.key() == key)
     }
 
-    /// What the list is filtered by: the query without a `>`, `@` or `$` in front.
+    /// What the list is filtered by: the query without a `>` or `$` in front.
     fn filter_query(&self) -> &str {
         match self.list() {
             List::Commands => self.query[1..].trim(),
             List::Files => self.query[FILES_PREFIX.len_utf8()..].trim(),
-            List::Switch if self.mode == Mode::Projects => {
-                self.query[SWITCH_PREFIX.len_utf8()..].trim()
-            }
+
             _ => &self.query,
         }
     }
@@ -903,7 +900,11 @@ impl Palette {
             return;
         }
         self.selected = row.min(len - 1);
-        self.scroll_to_row(self.selected);
+        if self.mode == Mode::Switch {
+            self.switch_scroll.scroll_to_item(self.selected / 3);
+        } else {
+            self.scroll_to_row(self.selected);
+        }
         cx.notify();
     }
 
@@ -1012,7 +1013,6 @@ impl Palette {
         match self.list() {
             List::Commands | List::Files => self.set_query("", cx),
 
-            List::Switch if self.mode == Mode::Projects => self.set_query("", cx),
             List::Browse => self.exit_browse(cx),
             List::Destinations => self.return_from_destination(cx),
             List::Text if self.mode == Mode::TemplateUrl => self.set_mode(Mode::Templates, cx),
@@ -1242,10 +1242,6 @@ impl Palette {
         .detach();
     }
 }
-
-/// Typed first in the project search, lists the open editor windows instead
-/// (`>` lists the commands).
-const SWITCH_PREFIX: char = '@';
 
 fn secondary() -> &'static str {
     if cfg!(target_os = "macos") {

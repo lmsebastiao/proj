@@ -1,63 +1,25 @@
 //! The window switcher: open editor windows, like Alt+Tab for your projects.
-//! It stays up while the shortcut's modifiers are held and letting go switches;
-//! typing while holding them keeps it up to search in instead. Each open
-//! editor window has its own row, even when several show the same project.
+//! It stays up while the shortcut's modifiers are held and letting go switches.
+//! Every open editor window has its own card, even for the same project.
 
 use std::time::Duration;
 
 use global_hotkey::hotkey::Modifiers;
-use gpui::{Context, Keystroke, Pixels, SharedString, Window, div, prelude::*, px, rgb};
+use gpui::{AnyElement, Context, Focusable, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    launcher, platform,
+    platform,
     store::{self, Project},
     switcher::{self, EditorWindow},
 };
 
 use super::{
     Palette,
-    items::{List, Mode},
-    keymap::{CloseWindow, Confirm},
-    theme::{FONT_SIZE, ROW_HEIGHT, Theme},
+    app_icon::app_icon,
+    items::Mode,
+    keymap::{CloseWindow, Confirm, Dismiss},
+    theme::{FONT_SIZE, SMALL_FONT_SIZE, icons},
 };
-
-/// A switcher row being dragged to another place in the list, drawn under the
-/// mouse as a copy of the row.
-#[derive(Clone)]
-pub(super) struct DraggedWindow {
-    /// Its index in `Palette::switch_rows`.
-    pub(super) ix: usize,
-    pub(super) title: SharedString,
-    pub(super) width: Pixels,
-    pub(super) theme: Theme,
-}
-
-impl Render for DraggedWindow {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let t = self.theme;
-        div()
-            .w(self.width)
-            .h(px(ROW_HEIGHT))
-            .px_3()
-            .rounded_md()
-            .flex()
-            .items_center()
-            .bg(rgb(t.selected))
-            .border_1()
-            .border_color(rgb(t.border))
-            .shadow_lg()
-            .text_size(px(FONT_SIZE))
-            .text_color(rgb(t.text))
-            .child(
-                div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(self.title.clone()),
-            )
-    }
-}
 
 impl Palette {
     /// The switcher, with the row of `windows[selected]` highlighted, until
@@ -72,72 +34,10 @@ impl Palette {
         let mut this = Self::new(window, cx, windows);
         this.hold = Some(hold);
         this.set_mode(Mode::Switch, cx);
-        this.selected = this
-            .switch_rows
-            .iter()
-            .position(|row| row.contains(&selected))
-            .unwrap_or(0)
-            .min(this.matches.len().saturating_sub(1));
-        this.set_switch_placeholder(cx);
-        if this.windows.is_empty() {
-            let hint = platform::window_access_hint().unwrap_or("No editor windows are open");
-            this.say(hint, cx);
-        }
+        this.selected = selected.min(this.matches.len().saturating_sub(1));
+
         this.wait_for_release(window, cx);
         this
-    }
-
-    /// Stops waiting for the modifiers to be let go: the switcher stays open
-    /// to search in until enter or esc.
-    fn keep_open(&mut self, cx: &mut Context<Self>) {
-        self.hold = None;
-        self.set_switch_placeholder(cx);
-        cx.notify();
-    }
-
-    fn set_switch_placeholder(&mut self, cx: &mut Context<Self>) {
-        let placeholder = if self.hold.is_some() {
-            "Let go to switch · type to search"
-        } else {
-            "Search open windows…"
-        };
-        self.input
-            .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
-    }
-
-    /// A key typed in the switcher. Typed with alt, as it is while holding the
-    /// switcher open, it wouldn't reach the search box by itself, so it's typed
-    /// here; the first one keeps the switcher open to search in. Returns
-    /// whether the key was typed.
-    pub(super) fn type_in_switcher(
-        &mut self,
-        keystroke: &Keystroke,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.mode != Mode::Switch || (self.hold.is_none() && !keystroke.modifiers.alt) {
-            return false;
-        }
-        // Not keys like "up" or "f1", nor space or tab, nor shortcuts with ctrl
-        // (an AltGr character comes as one, but with its `key_char`).
-        let mods = keystroke.modifiers;
-        let text = keystroke
-            .key_char
-            .clone()
-            .or_else(|| {
-                (!mods.control && !mods.platform && keystroke.key.chars().count() == 1)
-                    .then(|| keystroke.key.clone())
-            })
-            .filter(|text| text.chars().all(|c| !c.is_whitespace() && !c.is_control()));
-        let Some(text) = text else {
-            return false;
-        };
-        if self.hold.is_some() {
-            self.keep_open(cx);
-        }
-        self.input
-            .update(cx, |input, cx| input.insert(&text, window, cx));
-        true
     }
 
     fn wait_for_release(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -158,13 +58,9 @@ impl Palette {
                     if platform::modifiers_held(mods) {
                         return false;
                     }
-                    // Let go while dragging a row: keep the list open to drop it.
-                    if cx.has_active_drag() {
-                        this.keep_open(cx);
-                        return true;
-                    }
+
                     this.hold = None;
-                    if this.matches.is_empty() {
+                    if this.windows.is_empty() {
                         window.remove_window();
                     } else {
                         this.confirm(&Confirm, window, cx);
@@ -179,64 +75,20 @@ impl Palette {
         .detach();
     }
 
-    /// Another press of the switcher's shortcut while it's showing: move down
-    /// (`delta` 1), or up with shift (-1). Returns false when the palette isn't
+    /// Another press of the switcher's shortcut while it's showing: move forward
+    /// (`delta` 1), or backward with shift (-1). Returns false when the palette isn't
     /// the switcher.
     pub fn cycle(&mut self, delta: isize, cx: &mut Context<Self>) -> bool {
         if self.mode != Mode::Switch {
             return false;
         }
-        self.select(delta, cx);
-        true
-    }
-
-    /// A key pressed while the switcher is held open: 1 to 9 switch straight to
-    /// the row with that number. Returns whether the key was one of those.
-    pub(super) fn switch_to_number(
-        &mut self,
-        key: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.hold.is_none() || self.mode != Mode::Switch {
-            return false;
-        }
-        let Some(n) = key.parse::<usize>().ok().filter(|n| (1..=9).contains(n)) else {
-            return false;
-        };
-        // A number past the last row does nothing, rather than typing it.
-        if let Some(&w) = self.switch_rows.get(n - 1).and_then(|row| row.first()) {
-            self.hold = None;
-            self.switch_to(w, window, cx);
+        let len = self.windows.len();
+        if len > 0 {
+            self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
+            self.switch_scroll.scroll_to_item(self.selected / 3);
+            cx.notify();
         }
         true
-    }
-
-    /// Whether rows can be dragged to reorder the list: only while it shows
-    /// every window in order, not search results.
-    pub(super) fn can_reorder(&self) -> bool {
-        self.list() == List::Switch && self.filter_query().is_empty()
-    }
-
-    /// A row dropped on another takes its place and stays highlighted. The
-    /// switcher keeps the new order.
-    pub(super) fn move_window(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
-        let len = self.switch_rows.len();
-        if from == to || from >= len || to >= len || !self.can_reorder() {
-            return;
-        }
-        let mut rows = self.switch_rows.clone();
-        let moved = rows.remove(from);
-        rows.insert(to, moved);
-        self.windows = rows
-            .iter()
-            .flatten()
-            .map(|&w| self.windows[w].clone())
-            .collect();
-        self.match_windows();
-        launcher::set_switch_order(self.windows.iter().map(|w| w.window).collect(), cx);
-        self.selected = to;
-        cx.notify();
     }
 
     /// Works out which project each open window shows, and the rows.
@@ -262,30 +114,170 @@ impl Palette {
 
     /// Ctrl-W in the switcher: closes the highlighted row's window.
     pub(super) fn close_window(&mut self, _: &CloseWindow, _: &mut Window, cx: &mut Context<Self>) {
-        self.close_row(self.selected, cx);
+        if self.mode == Mode::Switch {
+            self.close_row(self.selected, cx);
+        }
     }
 
     /// Asks the window of the switcher's `row` to close and takes it off the list.
     pub(super) fn close_row(&mut self, row: usize, cx: &mut Context<Self>) {
-        if self.list() != List::Switch {
+        if self.mode != Mode::Switch {
             return;
         }
-        let Some(&w) = self
-            .matches
-            .get(row)
-            .and_then(|m| self.switch_rows.get(m.ix))
-            .and_then(|row| row.first())
-        else {
+        let Some(&w) = self.switch_rows.get(row).and_then(|row| row.first()) else {
             return;
         };
         self.selected = row;
         let closed = self.windows.remove(w);
         platform::close_window(closed.window);
         self.match_windows();
-        let selected = self.selected;
         self.refilter(cx);
-        self.selected = selected.min(self.matches.len().saturating_sub(1));
+        self.selected = row.min(self.windows.len().saturating_sub(1));
+        self.switch_scroll.scroll_to_item(self.selected / 3);
         self.notice(format!("Closing {}", closed.title), cx);
+    }
+
+    pub(super) fn render_switcher(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = self.theme;
+        let focus = self.input.focus_handle(cx);
+        if !focus.is_focused(window) && window.is_window_active() {
+            window.focus(&focus);
+        }
+        let cards: Vec<AnyElement> = self
+            .windows
+            .chunks(3)
+            .enumerate()
+            .map(|(line, windows)| {
+                div()
+                    .flex()
+                    .gap_3()
+                    .children(windows.iter().enumerate().map(|(column, entry)| {
+                        let ix = line * 3 + column;
+                        let detail = self.window_projects[ix]
+                            .map(|project| self.projects[project].name.clone())
+                            .unwrap_or_else(|| entry.editor.clone());
+                        let icon = if platform::HAS_APP_ICONS {
+                            app_icon(Some(entry.exe.clone()), 40.).into_any_element()
+                        } else {
+                            div().child(icons::PROGRAM).into_any_element()
+                        };
+                        div()
+                            .id(("window-card", ix))
+                            .w(px(232.))
+                            .h(px(114.))
+                            .p_3()
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .rounded_md()
+                            .border_2()
+                            .border_color(rgb(if ix == self.selected {
+                                t.accent
+                            } else {
+                                t.border
+                            }))
+                            .bg(rgb(if ix == self.selected {
+                                t.selected
+                            } else {
+                                t.hover
+                            }))
+                            .hover(|d| d.bg(rgb(t.selected)))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.selected = ix;
+                                this.switch_to(ix, window, cx);
+                            }))
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(FONT_SIZE))
+                                    .child(entry.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon),
+                            )
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(SMALL_FONT_SIZE))
+                                    .text_color(rgb(t.muted))
+                                    .child(detail),
+                            )
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        div()
+            .key_context("Palette")
+            .track_focus(&focus)
+            .on_action(cx.listener(Self::close_window))
+            .on_action(cx.listener(|this, _: &Confirm, window, cx| {
+                if !this.windows.is_empty() {
+                    this.switch_to(this.selected, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Dismiss, window, _| {
+                this.hold = None;
+                window.remove_window();
+            }))
+            .on_action(cx.listener(|this, _: &super::keymap::SelectNext, _, cx| {
+                this.cycle(1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &super::keymap::SelectPrev, _, cx| {
+                this.cycle(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &super::keymap::MoveDown, _, cx| {
+                this.cycle(1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &super::keymap::MoveUp, _, cx| {
+                this.cycle(-1, cx);
+            }))
+            .size_full()
+            .flex()
+            .flex_col()
+            .p_3()
+            .bg(rgb(t.bg))
+            .border_1()
+            .border_color(rgb(t.border))
+            .rounded_lg()
+            .child(if self.windows.is_empty() {
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(FONT_SIZE))
+                    .text_color(rgb(t.muted))
+                    .child(platform::window_access_hint().unwrap_or("No editor windows are open"))
+                    .into_any_element()
+            } else {
+                div()
+                    .id("switch-cards")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.switch_scroll)
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .children(cards)
+                    .into_any_element()
+            })
+            .into_any_element()
     }
 
     pub(super) fn window_choice_project(&self) -> Option<&Project> {

@@ -168,7 +168,6 @@ impl Palette {
                     )
                     .or_alt(),
                     s(&[">"], "Commands: default editor, updates, start on login…"),
-                    s(&["@"], "Open editor windows, to search and switch to"),
                     s(
                         &["paste"],
                         "A folder path to add it, or a git URL to clone it",
@@ -353,44 +352,11 @@ impl Palette {
                     s(&["esc"], esc).footer(esc_short).run(Dismiss),
                 ]
             }
-            // While the modifier is held these keys come with alt.
-            List::Switch if self.hold.is_some() => vec![
-                s(&["alt-↓", "alt-↑"], "Move the selection"),
-                s(&["alt-1…9"], "Switch to the row with that number"),
-                s(&["alt-mod-w"], "Close the window")
-                    .footer("Close window")
-                    .run(CloseWindow),
-                s(&["type"], "Search the windows; the list stays open"),
-                s(&["alt-esc"], "Cancel").footer("Cancel").run(Dismiss),
+            List::Switch => vec![
+                s(&["alt-\\", "alt-shift-\\"], "Cycle editor windows"),
+                s(&["mod-w", "alt-mod-w"], "Close the selected window").run(CloseWindow),
+                s(&["alt-esc"], "Cancel").run(Dismiss),
             ],
-            List::Switch => {
-                // Typed `@` in the project search: esc goes back to it.
-                let esc = if self.mode == Mode::Projects {
-                    "Back to the projects"
-                } else {
-                    "Close"
-                };
-                let numbers = self
-                    .config
-                    .switch_number_modifiers()
-                    .map(|mods| crate::switcher::shortcut_label(&format!("{mods}+1…9")));
-                let mut keys = vec![
-                    s(&["↵"], "Switch to it").footer("Switch").run(Confirm),
-                    s(&["mod-w"], "Close the window")
-                        .footer("Close window")
-                        .run(CloseWindow),
-                    s(&["↑ ↓"], "Move the selection"),
-                    s(&["drag"], "Move a row to another place in the list"),
-                ];
-                if let Some(numbers) = numbers {
-                    keys.push(s(
-                        &[numbers.as_str()],
-                        "Switch straight to the row with that number, from anywhere",
-                    ));
-                }
-                keys.push(s(&["esc"], esc).run(Dismiss));
-                keys
-            }
             List::Text => {
                 let save = match self.mode {
                     Mode::AddCommand => "Add the command",

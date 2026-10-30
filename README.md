@@ -121,7 +121,7 @@ then offers **Undo** (or ctrl-z) for a few seconds. A row says **watched**, **ad
 watched folder it came from. Removing a watched project hides it on later scans.
 
 Every row starts with an icon: the editor the project opens in, a folder or file while
-browsing, the program in the editor and window lists. On the pages you reach from the project
+browsing, and the program in editor lists and window cards. On the pages you reach from the project
 list (Open with, browsing, rename…), the search bar starts with a back button and the
 page's name; backspace with nothing typed goes back too. Copying a path says **Copied** for
 a moment before the dialog closes.
@@ -136,8 +136,6 @@ check for updates / install update (installed copies), reset, quit. **Reset proj
 requires typing `RESET` and pressing enter. It clears proj's config, watched and added
 projects, hidden entries, custom names/editors/commands, pins, and usage history, and turns
 off start on login. It never deletes project folders or Git data.
-Type `@` to list your open editor windows instead, the same list as the switcher (below):
-keep typing to filter it, enter switches, esc goes back to the projects.
 Type `$` and part of a file's name to find it in any of your projects, as ctrl-p does in an
 editor (see Finding files).
 
@@ -175,41 +173,23 @@ The best 200 matches show.
 →/← only browse when the text cursor is at the end/start of the search box, so they still
 move the cursor while you edit a search.
 
-### Switching between open projects
+### Switching between editor windows
 
-Hold **alt** and tap **\\** to switch between your open editor windows, like Alt+Tab but only
-for editors. It's the \\ key wherever your layout has it: left of 1 on Portuguese keyboards,
-above enter on US ones. Keep tapping to move down the list; **alt+shift+\\** or **alt+↑** goes
-back up, and a number (**alt+1** to **9**) switches straight to that row. Let go of alt and
-the highlighted window comes to the front. The list shows as soon as you press the key, like
-Alt+Tab; a quick tap switches to the editor window you used before. **alt-esc** cancels.
+Hold **alt** and tap **\\** to open an Alt+Tab-style overlay of your open editor window
+cards. It's the \\ key wherever your layout has it: left of 1 on Portuguese keyboards,
+above enter on US ones. Cards appear in recent-window order, front to back, with the
+previously used editor selected first. Keep tapping **\\** to cycle forward; hold
+**shift** while tapping to cycle backward. Release **alt** to bring the selected window
+to the front, or press **esc** to cancel. A quick tap returns to the previous editor.
 
-Every editor window has its own row, even when two windows show the same project.
-**ctrl-w** (**ctrl+alt+w** while holding) closes the highlighted window, as its close
-button would, so the editor can still ask about unsaved changes. So does the **✕**
-at the end of the highlighted row, or of any row under the mouse.
+Every editor window has its own card, even when two windows show the same project.
+While holding **alt**, press **ctrl+w** (or **ctrl+alt+w**) to close the selected
+window, as its close button would, so the editor can still ask about unsaved changes.
 
-The list keeps its order: rows stay where they first appeared, new ones are added at the
-end, and switching doesn't move anything. The highlight starts on the window you used before
-the current one. To put a row somewhere else, drag it with the mouse and drop it on
-another; a line shows where it will go. It keeps that place (and number) until it closes.
-Dragging works while the list shows every row, not while you're searching it. If you let
-go of alt mid-drag, the list stays open so you can drop the row.
-
-To search instead, start typing while you still hold alt: the list stays open when you let
-go, typing filters it, **enter** switches and **esc** closes. From the project search, typing
-`@` gets you the same list.
-
-**alt+shift+1** to **9** switch straight to that row of the list, without showing it,
-like Win+1 on the taskbar. The list numbers its first nine rows, and since it keeps its
-order, each row keeps its number until it closes. Set other modifiers with
-`switch_number_modifiers` in config.toml, but not ctrl+alt on Windows: Windows reads AltGr as
-ctrl+alt, so AltGr+2 (@), AltGr+7 ({) and so on would stop typing in every app.
-
-Each window shows its project name, title, branch and editor. proj works out the
-project from the window title: the folder name (Zed, VS Code, Cursor…), a Zed workspace's
-folder list, or the solution name (Visual Studio). Windows it can't match confidently are
-listed as **unmatched** by title in the switcher; you can still switch to them there.
+Each card shows the window title, editor icon and project name (or editor name if
+unmatched). proj works out the project from the window title: the folder name (Zed,
+VS Code, Cursor…), a Zed workspace's folder list, or the solution name (Visual Studio).
+Windows it can't match confidently still appear by title; you can switch to them there.
 Projects with a window open get a green dot after their name in the normal list. **Enter**
 switches to its window when there's one match; when there are several, it shows their titles
 and editors so you can choose one or explicitly launch the project again. **alt-↵** still
@@ -352,7 +332,6 @@ proj version        # show the installed version
 ```toml
 hotkey = "alt+space"
 # switch_hotkey = "alt+q"  # window switcher; default alt+\, "" = off
-# switch_number_modifiers = "ctrl+shift"  # + 1…9: straight to that row; default alt+shift
 scan_dirs = []          # folders to watch; manage with > Manage watched folders
 # templates = ['C:\templates\rust-cli', "https://github.com/me/web-starter"]  # or > Manage templates
 # forges = { "git.example.com" = "gitlab" }  # for pull request and CI links
@@ -468,4 +447,4 @@ Only tested on Windows so far. Global hotkeys don't work on Linux Wayland (a lim
 `global-hotkey`); X11 is fine. On macOS the app shows a Dock icon, because gpui 0.2 doesn't
 expose the accessory activation policy. The macOS editor and window icons and the window
 switcher (through the Accessibility API) are written but haven't been run on a Mac yet. On
-Linux the switcher lists no windows and rows have no icons.
+on Linux the switcher lists no windows and list rows have no icons.
