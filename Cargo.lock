@@ -4618,6 +4618,7 @@ dependencies = [
  "proj-git",
  "proj-projects",
  "raw-window-handle",
+ "resvg",
  "serde_json",
  "tray-icon",
  "ureq",

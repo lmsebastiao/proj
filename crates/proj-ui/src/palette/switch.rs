@@ -206,7 +206,7 @@ impl Palette {
                             .and_then(|project| self.projects.get(project))
                             .filter(|project| !project.is_workspace())
                             .map(|project| project.path.clone());
-                        let icon = project_image(project, entry.exe.clone(), 40.);
+                        let icon = project_image(project, entry.exe.clone(), 40., window, cx);
                         div()
                             .id(("window-card", ix))
                             .w(px(CARD_WIDTH))

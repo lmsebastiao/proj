@@ -15,6 +15,7 @@ gpui = "0.2.2"
 # The pixel buffer type gpui images are made of.
 image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png", "webp"] }
 percent-encoding = "2"
+resvg = { version = "0.45.1", default-features = false }
 serde_json = "1"
 ureq = { version = "3.4.2", features = ["json"] }
 

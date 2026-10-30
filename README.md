@@ -192,7 +192,7 @@ Each card shows its window title and, when available, the project's image. For p
 repositories on gitlab.com, gitea.com or codeberg.org, proj fetches the repository
 avatar in the background and prefers it over local images. It also checks `.github/`
 and `.gitlab/`, then the project root, `assets/`, and `public/` for `logo` or `icon`
-files (`.png`, `.webp`, `.jpg`, `.jpeg`), then `public/favicon.png`,
+files (`.png`, `.webp`, `.jpg`, `.jpeg`, `.svg`), then `public/favicon.png`,
 `public/favicon.ico`, and `favicon.ico`. If none is available, it keeps the editor
 icon. GitHub does not expose a distinct repository avatar, so proj uses the local
 image paths there. proj works out the project from the window title: the folder

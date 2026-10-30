@@ -8,9 +8,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{
-    App, Asset, ImageCacheError, ImageSource, RenderImage, Window, div, img, prelude::*, px,
-};
+use gpui::{App, Asset, ImageSource, RenderImage, Window, div, img, prelude::*, px};
 
 use crate::{git, platform};
 
@@ -64,7 +62,7 @@ fn local_candidates(root: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for dir in [".github", ".gitlab", "", "assets", "public"] {
         for name in ["logo", "icon"] {
-            for ext in ["png", "webp", "jpg", "jpeg"] {
+            for ext in ["png", "webp", "jpg", "jpeg", "svg"] {
                 paths.push(root.join(dir).join(format!("{name}.{ext}")));
             }
         }
@@ -121,9 +119,10 @@ fn decode(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     if bytes.len() as u64 > MAX_BYTES {
         return None;
     }
-    let reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()?;
+    let Ok(format) = image::guess_format(bytes) else {
+        return decode_svg(bytes);
+    };
+    let reader = image::ImageReader::with_format(Cursor::new(bytes), format);
     let (width, height) = reader.into_dimensions().ok()?;
     if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
         return None;
@@ -141,35 +140,55 @@ fn decode(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(bitmap)])))
 }
 
-/// An editor icon is visible immediately; the project's image replaces it once loaded.
-/// Workspaces and unmatched windows retain the editor icon.
-pub(super) fn project_image(root: Option<PathBuf>, exe: PathBuf, size: f32) -> impl IntoElement {
-    div()
-        .relative()
-        .size(px(size))
-        .child(if platform::HAS_APP_ICONS {
-            app_icon(Some(exe), size).into_any_element()
-        } else {
-            div().child(icons::PROGRAM).into_any_element()
-        })
-        .children(root.clone().map(image_layer::<LocalImage>))
-        .children(root.map(image_layer::<RemoteImage>))
+fn decode_svg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
+    let shape = tree.size();
+    let scale = SIZE as f32 / shape.width().max(shape.height());
+    let width = (shape.width() * scale).round() as u32;
+    let height = (shape.height() * scale).round() as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let mut pixels = pixmap.take();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        // tiny-skia gives premultiplied RGBA; GPUI expects straight BGRA.
+        let alpha = f32::from(pixel[3]) / 255.;
+        if alpha > 0. {
+            for channel in &mut pixel[..3] {
+                *channel = (f32::from(*channel) / alpha).round().min(255.) as u8;
+            }
+        }
+        pixel.swap(0, 2);
+    }
+    let bitmap = image::RgbaImage::from_raw(width, height, pixels)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(bitmap)])))
 }
 
-fn image_layer<A>(root: PathBuf) -> impl IntoElement
-where
-    A: Asset<Source = PathBuf, Output = Option<Arc<RenderImage>>>,
-{
-    img(ImageSource::Custom(Arc::new(
-        move |window: &mut Window, cx| {
-            window
-                .use_asset::<A>(&root, cx)
-                .map(|icon| icon.ok_or_else(|| ImageCacheError::Asset("no project image".into())))
-        },
-    )))
-    .absolute()
-    .size_full()
-    .object_fit(gpui::ObjectFit::Contain)
+/// The editor icon stays visible until an image is ready. Only successfully
+/// decoded images are painted; workspaces and unmatched windows keep the editor icon.
+pub(super) fn project_image(
+    root: Option<PathBuf>,
+    exe: PathBuf,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement + use<> {
+    let image = root.and_then(|root| {
+        let remote = window.use_asset::<RemoteImage>(&root, cx).flatten();
+        let local = window.use_asset::<LocalImage>(&root, cx).flatten();
+        remote.or(local)
+    });
+    div().size(px(size)).child(match image {
+        Some(image) => img(ImageSource::Render(image))
+            .size_full()
+            .object_fit(gpui::ObjectFit::Contain)
+            .into_any_element(),
+        None if platform::HAS_APP_ICONS => app_icon(Some(exe), size).into_any_element(),
+        None => div().child(icons::PROGRAM).into_any_element(),
+    })
 }
 
 #[cfg(test)]
@@ -224,6 +243,12 @@ mod tests {
     }
 
     #[test]
+    fn finds_this_repositories_svg_icon() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        assert!(local_image(&root).is_some());
+    }
+
+    #[test]
     fn images_are_decoded_and_invalid_images_are_skipped() {
         let source = image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]));
         let mut bytes = Cursor::new(Vec::new());
@@ -231,6 +256,7 @@ mod tests {
             .write_to(&mut bytes, image::ImageFormat::Png)
             .unwrap();
         assert!(decode(&bytes.into_inner()).is_some());
+        assert!(decode(include_bytes!("../../../../assets/icon.svg")).is_some());
         assert!(decode(b"not an image").is_none());
     }
 }
