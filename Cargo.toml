@@ -5,7 +5,7 @@ default-members = ["crates/proj"]
 
 # The binary and its CLI/update code must report the same release version.
 [workspace.package]
-version = "1.0.30"
+version = "1.0.31"
 
 [workspace.lints.clippy]
 all = "deny"
