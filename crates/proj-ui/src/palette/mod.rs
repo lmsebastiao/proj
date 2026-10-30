@@ -11,6 +11,7 @@ mod forges;
 mod groups;
 mod items;
 mod keymap;
+mod project_image;
 mod projects;
 mod render;
 mod scrollbar;

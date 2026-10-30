@@ -18,10 +18,10 @@ use crate::{
 
 use super::{
     Palette,
-    app_icon::app_icon,
     items::Mode,
     keymap::{CloseWindow, Confirm, Dismiss},
-    theme::{FONT_SIZE, icons},
+    project_image::project_image,
+    theme::FONT_SIZE,
 };
 
 pub(super) const CARD_WIDTH: f32 = 232.;
@@ -202,11 +202,11 @@ impl Palette {
                     .children(windows.iter().enumerate().map(|(column, entry)| {
                         let ix = line * 3 + column;
 
-                        let icon = if platform::HAS_APP_ICONS {
-                            app_icon(Some(entry.exe.clone()), 40.).into_any_element()
-                        } else {
-                            div().child(icons::PROGRAM).into_any_element()
-                        };
+                        let project = self.window_projects[ix]
+                            .and_then(|project| self.projects.get(project))
+                            .filter(|project| !project.is_workspace())
+                            .map(|project| project.path.clone());
+                        let icon = project_image(project, entry.exe.clone(), 40.);
                         div()
                             .id(("window-card", ix))
                             .w(px(CARD_WIDTH))

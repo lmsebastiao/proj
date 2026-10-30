@@ -4612,12 +4612,15 @@ dependencies = [
  "global-hotkey",
  "gpui",
  "image",
+ "percent-encoding",
  "proj-cli",
  "proj-core",
  "proj-git",
  "proj-projects",
  "raw-window-handle",
+ "serde_json",
  "tray-icon",
+ "ureq",
  "windows-sys 0.61.2",
 ]
 

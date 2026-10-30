@@ -188,9 +188,16 @@ Every editor window has its own card, even when two windows show the same projec
 While holding **alt**, press **ctrl+w** (or **ctrl+alt+w**) to close the selected
 window, as its close button would, so the editor can still ask about unsaved changes.
 
-Each card shows its window title and editor icon. proj works out the project from
-the window title: the folder name (Zed,
-VS Code, Cursor…), a Zed workspace's folder list, or the solution name (Visual Studio).
+Each card shows its window title and, when available, the project's image. For public
+repositories on gitlab.com, gitea.com or codeberg.org, proj fetches the repository
+avatar in the background and prefers it over local images. It also checks `.github/`
+and `.gitlab/`, then the project root, `assets/`, and `public/` for `logo` or `icon`
+files (`.png`, `.webp`, `.jpg`, `.jpeg`), then `public/favicon.png`,
+`public/favicon.ico`, and `favicon.ico`. If none is available, it keeps the editor
+icon. GitHub does not expose a distinct repository avatar, so proj uses the local
+image paths there. proj works out the project from the window title: the folder
+name (Zed, VS Code, Cursor…), a Zed workspace's folder list, or the solution
+name (Visual Studio).
 Windows it can't match confidently still appear by title; you can switch to them there.
 Projects with a window open get a green dot after their name in the normal list. **Enter**
 switches to its window when there's one match; when there are several, it shows their titles
